@@ -1,0 +1,6 @@
+jobs/
+__pycache__/
+.env
+.venv/
+fonts/
+*.zip

@@ -1,0 +1,392 @@
+"""
+โหมดข้อความ → คลิป: เรียบเรียงข้อความเป็นบทคลิปสั้น แบ่งฉาก วาดภาพประกอบ
+แล้วทำแอนิเมชัน (ซูม/แพน, หัวข้อเลื่อนเข้า, ซับ, ทรานซิชัน) พร้อมเสียงพากย์
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import imagegen
+import pipeline as P
+
+STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิปสั้น TikTok ชาวไทยมืออาชีพ เปลี่ยนข้อมูลด้านล่างให้เป็นบทคลิปสั้นแนวตั้งที่น่าดูจนจบ
+
+ข้อกำหนด:
+- ความยาวรวมประมาณ {target} วินาที แบ่งเป็น {n} ฉาก (ฉากละ 4-9 วินาที)
+- ฉากแรกต้องเปิดแรง ดึงความสนใจทันที (ตั้งคำถาม/ประโยคน่าตกใจ/สัญญาว่าจะได้อะไร)
+- เล่าต่อเนื่อง ภาษาพูดเป็นกันเอง กระชับ ฉากสุดท้ายสรุปและชวนกดติดตาม/คอมเมนต์
+- ยึดตามข้อมูลที่ให้มา ห้ามแต่งข้อเท็จจริง ตัวเลข หรือชื่อที่ไม่มีในข้อมูล
+- เก็บใจความสำคัญจากข้อมูลให้ครบ ไม่ตัดประเด็นทิ้ง
+- บทพากย์แต่ละฉาก (narration) 1-2 ประโยค ยาว 50-110 ตัวอักษร ห้ามมีอีโมจิ
+- headline: ข้อความสั้นบนจอ 2-6 คำ สรุปฉากนั้น (ไม่ต้องซ้ำบทพากย์) เว้นว่างได้
+- image: คำบรรยายภาพประกอบเป็นภาษาอังกฤษ 10-25 คำ บรรยายสิ่งที่เห็นชัดๆ (คน สถานที่ สิ่งของ แสง มุมกล้อง)
+  ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ — ให้บรรยายแบบทั่วไปแทน และห้ามให้มีตัวหนังสือในภาพ
+- search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ (เช่น "black coffee cup", "woman jogging park")
+
+ตอบเป็น JSON อย่างเดียว:
+{{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
+ "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "..."}}]}}
+
+ข้อมูล:
+{text}"""
+
+VISUAL_PROMPT = """ด้านล่างคือบทพากย์คลิปสั้นภาษาไทยที่แบ่งเป็นฉากแล้ว (ห้ามแก้บทพากย์)
+งานของคุณ: คิดภาพประกอบและข้อความบนจอให้แต่ละฉาก
+
+สำหรับแต่ละฉาก:
+- headline: ข้อความสั้นบนจอ 2-6 คำ ภาษาไทย จับใจความฉากนั้น (เว้นว่างได้ถ้าไม่จำเป็น)
+- image: คำบรรยายภาพประกอบภาษาอังกฤษ 12-30 คำ ที่สื่อเนื้อหาฉากนั้นตรงๆ
+  บอกให้ชัดว่า "ใคร/อะไร ทำอะไร ที่ไหน" + บรรยากาศ แสง มุมกล้อง (เช่น close-up, wide shot)
+  ภาพเดียวต้องเห็นเรื่องชัด ไม่ซับซ้อน ห้ามมีตัวหนังสือในภาพ
+  ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ ให้บรรยายแบบทั่วไปแทน
+  ตัวละครหลักที่โผล่หลายฉาก ให้บรรยายรูปลักษณ์เหมือนเดิมทุกฉาก (เช่น "a young Thai man with short black hair in a blue shirt")
+  เริ่มด้วยสิ่งสำคัญที่สุดของภาพก่อน (โมเดลวาดภาพอ่านได้แค่ช่วงต้นของคำบรรยาย)
+- search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ ที่หาเจอง่าย (เช่น "black coffee cup", "dark hotel corridor")
+
+ตอบเป็น JSON อย่างเดียว:
+{{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
+ "scenes": [{{"headline": "...", "image": "...", "search": "..."}}]}}
+ต้องมี scenes {n} รายการพอดี เรียงตามฉาก
+
+บทพากย์:
+{scenes}"""
+
+GENERIC_IMAGES = [
+    "soft glowing abstract background, bokeh lights, calm atmosphere",
+    "a person thinking at a desk by the window, warm morning light",
+    "wide landscape at golden hour, dramatic sky",
+    "close-up of hands writing in a notebook, cozy light",
+    "city street at night with neon reflections",
+    "a cup of coffee on a wooden table, sunlight",
+]
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?。])\s+|\n+|\s{2,}", text.strip())
+    out = []
+    for p in parts:
+        p = p.strip()
+        while len(p) > 140:  # ประโยคยาวมาก → ตัดที่ช่องว่าง หรือรอยต่อคำไทยใกล้ 110 ตัวอักษร
+            cut = p.rfind(" ", 50, 120)
+            if cut <= 0:
+                cut = _thai_boundary(p, 110)
+            out.append(p[:cut].strip())
+            p = p[cut:].strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def _thai_boundary(p: str, n: int) -> int:
+    try:
+        from pythainlp.tokenize import word_tokenize
+        pos, best = 0, 0
+        for w in word_tokenize(p, engine="newmm"):
+            if pos + len(w) > n:
+                break
+            pos += len(w)
+            best = pos
+        if best > 40:
+            return best
+    except Exception:
+        pass
+    return P._thai_cut(p, n)
+
+
+def split_script(text: str, max_len: int = 110) -> list[str]:
+    """แบ่งบทเป็นฉาก โดยเก็บทุกคำไว้ครบ (ฉากละ ~1-2 ประโยค / ไม่เกิน ~110 ตัวอักษร)"""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    scenes = []
+    for para in paras:
+        cur = ""
+        for s in _split_sentences(para):
+            if cur and len(cur) + 1 + len(s) > max_len:
+                scenes.append(cur)
+                cur = s
+            else:
+                cur = f"{cur} {s}".strip()
+        if cur:
+            scenes.append(cur)
+    # ฉากสั้นมาก (เช่น "สวัสดีครับ") รวมกับฉากถัดไป
+    merged = []
+    for sc in scenes:
+        if merged and len(merged[-1]) < 25 and len(merged[-1]) + 1 + len(sc) <= max_len + 30:
+            merged[-1] = f"{merged[-1]} {sc}"
+        else:
+            merged.append(sc)
+    return merged[:40]
+
+
+def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim") -> dict:
+    """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่"""
+    text = text.strip()
+    if len(text) < 10:
+        raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
+    if mode == "rewrite":
+        plan = _rewrite_plan(text, provider, target)
+        if plan:
+            return plan
+    narrs = split_script(text)
+    scenes = [{"narration": n_, "headline": "", "img": "", "image": GENERIC_IMAGES[i % len(GENERIC_IMAGES)]}
+              for i, n_ in enumerate(narrs)]
+    plan = {"title": narrs[0][:40] if narrs else "", "summary": "", "scenes": scenes}
+    if provider != "none":
+        try:
+            prompt = VISUAL_PROMPT.format(n=len(scenes), scenes="\n".join(
+                f"ฉาก {i + 1}: {s['narration']}" for i, s in enumerate(scenes)))
+            raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+            data = P._parse_json(raw)
+            for s, v in zip(scenes, data.get("scenes", [])):
+                if isinstance(v, dict):
+                    s["headline"] = P.clean_text(str(v.get("headline", "")))[:40]
+                    s["image"] = str(v.get("image", "")).strip()[:300] or s["image"]
+                    s["search"] = str(v.get("search", "")).strip()[:60]
+            plan["title"] = str(data.get("title") or plan["title"])
+            plan["summary"] = str(data.get("summary") or "")
+        except Exception as e:
+            print("AI คิดภาพประกอบไม่สำเร็จ ใช้ภาพทั่วไปแทน:", e)
+    return plan
+
+
+def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
+    if provider == "none":
+        return None
+    n = max(3, min(15, round(target / 7)))
+    try:
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000])
+        raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+        data = P._parse_json(raw)
+        scenes = []
+        for s in data.get("scenes", []):
+            narr = P.clean_text(str(s.get("narration", "")))
+            if narr:
+                scenes.append({"narration": narr, "headline": P.clean_text(str(s.get("headline", "")))[:40],
+                               "image": str(s.get("image", "")).strip()[:300] or GENERIC_IMAGES[0], "img": "",
+                               "search": str(s.get("search", "")).strip()[:60]})
+        if scenes:
+            return {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
+    except Exception as e:
+        print("AI เรียบเรียงบทไม่สำเร็จ ใช้บทเดิมแทน:", e)
+    return None
+
+
+def size_for(layout: str) -> tuple[int, int]:
+    return (1920, 1080) if layout == "original" else (1080, 1920)
+
+
+STOP = set("a an the of in on at with and or to for by from into over under very is are this that his her their its".split())
+
+
+def search_terms(s: dict) -> str:
+    if s.get("search"):
+        return s["search"]
+    words = [w.strip(",.") for w in (s.get("image") or "").split()]
+    return " ".join([w for w in words if w.lower() not in STOP][:4]) or "abstract background"
+
+
+def next_names(scene_dir: Path, i: int, n: int) -> list[Path]:
+    """ชื่อไฟล์ภาพใหม่ของฉากที่ i (scene_03_v2.png, _v3 …) ไม่ทับของเดิม"""
+    out, v = [], 2
+    while len(out) < n:
+        p = scene_dir / f"scene_{i + 1:02}_v{v}.png"
+        if not p.exists() and p not in out:
+            out.append(p)
+        v += 1
+    return out
+
+
+def ai_variants(s: dict, i: int, scene_dir: Path, style: str, n: int, progress=None) -> tuple[list[str], bool]:
+    """AI วาด n ภาพ (คนละแบบ) คืน (ชื่อไฟล์, วาดด้วย AI ได้ไหม)"""
+    import random
+    names, ai = [], True
+    for k, p in enumerate(next_names(scene_dir, i, n)):
+        if progress:
+            progress(f"วาดภาพที่ {k + 1}/{n}")
+        ai = imagegen.generate(s.get("image") or GENERIC_IMAGES[0], p, 1024, 1024, style,
+                               seed=random.randint(1, 2**31 - 1), progress=progress) and ai
+        names.append(p.name)
+    return names, ai
+
+
+def photo_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "") -> list[str]:
+    got = imagegen.search_photos(query or search_terms(s), next_names(scene_dir, i, n))
+    return [p.name for p in got]
+
+
+def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
+                only_missing: bool = True, source: str = "ai") -> int:
+    """หาภาพทุกฉาก (AI วาด หรือภาพถ่าย Pexels) คืนจำนวนฉากที่ได้ภาพจริง (ไม่ใช่ภาพไล่สี)"""
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    n, ok = len(plan["scenes"]), 0
+    photo_err = None
+    for i, s in enumerate(plan["scenes"]):
+        if only_missing and s.get("img") and (scene_dir / s["img"]).exists():
+            continue
+        if source == "photo" and not photo_err:
+            progress(i / n * 100, f"หาภาพถ่ายฉากที่ {i + 1}/{n}")
+            try:
+                names = photo_options(s, i, scene_dir)
+                if names:
+                    s["options"], s["img"] = names, names[0]
+                    ok += 1
+                    continue
+            except Exception as e:  # คีย์ผิด/เน็ตมีปัญหา → ใช้ AI วาดแทนทั้งหมด
+                photo_err = P.error_text(e)
+                plan["note"] = f"หาภาพถ่ายไม่ได้ ({photo_err}) จึงให้ AI วาดแทน"
+        progress(i / n * 100, f"วาดภาพฉากที่ {i + 1}/{n}")
+        names, ai = ai_variants(s, i, scene_dir, style, 1, lambda m: progress(i / n * 100, f"ฉากที่ {i + 1}/{n}: {m}"))
+        s["options"], s["img"] = names, names[0]
+        ok += 1 if ai else 0
+    return ok
+
+
+# ───────────────────────── ตัดต่อ ─────────────────────────
+
+LEAD, TAIL = 0.25, 0.45   # เว้นก่อน/หลังเสียงพากย์ในแต่ละฉาก
+XF = 0.35                 # ความยาวทรานซิชัน
+MOTIONS = ["zoom_in", "pan_right", "zoom_out", "pan_up"]
+TRANSITIONS = ["fade", "slideleft", "slideup", "circleopen", "smoothleft"]
+
+
+def _motion(kind: str, W: int, H: int, D: float) -> str:
+    """ภาพหลัก (สี่เหลี่ยมจัตุรัส) ค่อยๆ ซูม/เลื่อน วางบนพื้นหลังเบลอของภาพเดียวกัน → filter [0:v] → [mv]"""
+    S = min(W, H)                        # ขนาดภาพหลัก: เต็มความกว้าง (แนวตั้ง) / เต็มความสูง (แนวนอน)
+    y = (H - S) // 2 - (60 if H > W else 0)
+    bg = (f"[b0]scale=270:270,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+          f"boxblur=10:2,eq=brightness=-0.18:saturation=1.2,setsar=1[bg]")
+    fit = f"scale={S}:{S}:force_original_aspect_ratio=increase,crop={S}:{S},setsar=1"
+    if kind == "zoom_in":
+        fg = f"{fit},scale=w='{S}*(1+0.10*t/{D:.3f})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
+    elif kind == "zoom_out":
+        fg = f"{fit},scale=w='{S}*(1.10-0.10*t/{D:.3f})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
+    elif kind == "pan_right":
+        big = int(S * 1.12) // 2 * 2
+        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x='(iw-{S})*t/{D:.3f}':y=(ih-{S})/2"
+    else:
+        big = int(S * 1.12) // 2 * 2
+        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x=(iw-{S})/2:y='(ih-{S})*(1-t/{D:.3f})'"
+    return f"[0:v]split[b0][f0];{bg};[f0]{fg}[fg];[bg][fg]overlay=(W-w)/2:{y}[mv]"
+
+
+def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, workdir: Path,
+                 layout: str, subtitles: bool, extras: bool, brand: dict | None) -> float:
+    W, H = size_for(layout)
+    vertical = H > W
+    nd = P.probe(narr)["duration"] if narr else 0.0
+    D = max(2.5, nd + LEAD + TAIL)
+    motion = _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
+    vf = ["fps=30"]
+
+    # ข้อความไทยทั้งหมด (หัวข้อ, ชื่อช่อง, ซับ) วาดด้วย libass ให้สระ/วรรณยุกต์ถูกตำแหน่ง
+    ass = P.Ass(W, H)
+    head = (scene.get("headline") or "").strip() if extras else ""
+    if head:
+        ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
+    brand = brand or {}
+    text = (brand.get("text") or "").strip() if extras else ""
+    logo = brand.get("logo") if extras else None
+    if text:
+        ass.brand(text, D, x=(40 + 96 + 18) if logo else 40)
+    if extras and subtitles and narr and scene.get("narration"):
+        ass.subs(scene["narration"], LEAD, nd, 22 if vertical else 40)
+    if ass.write(workdir / f"text_{i}.ass"):
+        vf.append(P.ass_filter(f"text_{i}.ass"))
+
+    inputs = ["-loop", "1", "-framerate", "30", "-t", f"{D:.3f}", "-i", str(img)]
+    parts, n_in = [], 1
+    if narr:
+        inputs += ["-i", str(narr)]; ia = n_in; n_in += 1
+    else:
+        inputs += ["-f", "lavfi", "-t", f"{D:.3f}", "-i", "anullsrc=r=44100:cl=stereo"]; ia = n_in; n_in += 1
+    if logo:
+        inputs += ["-loop", "1", "-i", str(logo)]; il = n_in; n_in += 1
+        parts.append(motion)
+        parts.append(f"[mv]{','.join(vf)}[pre]")
+        parts.append(f"[{il}:v]scale=-2:{96 if vertical else 80},format=rgba[lg]")
+        parts.append(f"[pre][lg]overlay=40:{'H*0.075-20' if vertical else '40'}:shortest=1,format=yuv420p[v]")
+    else:
+        parts.append(motion)
+        parts.append(f"[mv]{','.join(vf)},format=yuv420p[v]")
+    norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
+    d = int(LEAD * 1000)
+    delay = f",adelay={d}|{d}" if narr else ""
+    parts.append(f"[{ia}:a]{norm}{delay},apad,atrim=0:{D:.3f}[a]")
+    P.run(["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(parts),
+           "-map", "[v]", "-map", "[a]", "-t", f"{D:.3f}", "-c:v", "libx264", "-preset", "veryfast",
+           "-crf", "21", "-r", "30", "-video_track_timescale", "90000",
+           "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2", out.name], cwd=workdir)
+    return D
+
+
+def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -> None:
+    """ต่อฉากด้วยทรานซิชัน (ถ้าไม่ได้ ใช้ต่อธรรมดา)"""
+    if len(files) == 1:
+        P.concat(files, out, workdir)
+        return
+    inputs, parts = [], []
+    for f in files:
+        inputs += ["-i", f.name]
+    vlast, alast, off = "[0:v]", "[0:a]", 0.0
+    for k in range(1, len(files)):
+        off += durs[k - 1] - XF
+        tr = TRANSITIONS[(k - 1) % len(TRANSITIONS)]
+        parts.append(f"{vlast}[{k}:v]xfade=transition={tr}:duration={XF}:offset={off:.3f}[v{k}]")
+        parts.append(f"{alast}[{k}:a]acrossfade=d={XF}[a{k}]")
+        vlast, alast = f"[v{k}]", f"[a{k}]"
+    try:
+        P.run(["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(parts),
+               "-map", vlast, "-map", alast, "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+               "-r", "30", "-video_track_timescale", "90000", "-c:a", "aac", "-b:a", "160k",
+               "-ar", "44100", "-ac", "2", "-movflags", "+faststart", str(out.resolve())], cwd=workdir)
+    except RuntimeError as e:
+        print("ทรานซิชันไม่สำเร็จ ต่อแบบธรรมดาแทน:", str(e)[-200:])
+        P.concat(files, out, workdir)
+
+
+def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
+                 layout: str, subtitles: bool, progress, brand: dict | None = None,
+                 cover: Path | None = None, clean: bool = False, style: str = "cinematic") -> list[Path]:
+    scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    scenes = plan["scenes"]
+    if not scenes:
+        raise RuntimeError("ไม่มีฉากให้ตัดต่อ")
+    missing = [s for s in scenes if not s.get("img") or not (scene_dir / s["img"]).exists()]
+    if missing:  # ฉากที่เพิ่มใหม่/ภาพหาย → วาดก่อน
+        draw_images(plan, scene_dir, layout, style, lambda p, m: progress(0, m))
+    n, files, durs = len(scenes), [], []
+    for i, s in enumerate(scenes):
+        text = P.clean_text(s.get("narration", ""))
+        narr = None
+        if text:
+            progress(i / n * 95, f"สร้างเสียงพากย์ฉากที่ {i + 1}/{n}")
+            narr = workdir / f"narr_{i:03}.mp3"
+            P.tts(text, narr, voice, rate)
+        progress((i + 0.5) / n * 95, f"ทำแอนิเมชันฉากที่ {i + 1}/{n}")
+        f = workdir / f"scene_{i:03}.mp4"
+        sc = {**s, "narration": text}
+        try:
+            d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, subtitles,
+                             not clean, None if clean else brand)
+        except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
+            print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
+            d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, False, False, None)
+        files.append(f)
+        durs.append(d)
+    progress(97, "ต่อฉากพร้อมทรานซิชัน")
+    joined = workdir / "joined.mp4"
+    join_xfade(files, durs, joined, workdir)
+    seq = [joined]
+    if cover and not clean and Path(cover).exists():
+        cv = workdir / "cover.mp4"
+        try:
+            P.make_cover_clip(Path(cover), joined, cv)
+            seq.insert(0, cv)
+        except RuntimeError as e:
+            print("ใส่ภาพปกต้นคลิปไม่ได้:", e)
+    if len(seq) == 1:
+        joined.replace(out)
+    else:
+        P.concat(seq, out, workdir)
+    return files

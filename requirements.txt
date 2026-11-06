@@ -1,0 +1,10 @@
+starlette>=0.40
+uvicorn>=0.30
+python-multipart>=0.0.9
+faster-whisper>=1.1.1
+numpy
+edge-tts>=6.1
+anthropic>=0.40
+yt-dlp[default]
+pythainlp
+# โหมดข้อความ → คลิป (วาดภาพด้วย AI) ต้องมีการ์ดจอ NVIDIA: pip install torch diffusers transformers accelerate

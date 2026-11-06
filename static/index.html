@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สรุปคลิป</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f1ea; --card:#fffdf8; --ink:#1d1b17; --muted:#6d675c; --line:#e3ddd0;
+  --accent:#d9480f; --accent-ink:#fff; --accent-soft:#fde8dc; --ok:#2b8a3e; --warn:#b35c00; --err:#c92a2a;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#161512;--card:#1f1d19;--ink:#efe9dd;--muted:#a39b8b;--line:#34312a;
+        --accent:#ff7a3d;--accent-ink:#1b0f08;--accent-soft:#3a2216;--ok:#69db7c;--warn:#ffa94d;--err:#ff6b6b}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "IBM Plex Sans Thai",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 16px 80px}
+header{display:flex;align-items:baseline;gap:14px;margin-bottom:26px;flex-wrap:wrap}
+header h1{font-size:30px;margin:0;letter-spacing:-.01em}
+header h1 span{color:var(--accent)}
+header p{margin:0;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px}
+h2{font-size:19px;margin:0 0 14px}
+label.f{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}
+.hint{color:var(--muted);font-size:13px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop b{display:block;font-size:17px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 22px}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.seg label{border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:14px;display:flex;gap:8px;align-items:center}
+.seg input{accent-color:var(--accent)}
+.seg label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.seg label.dis{opacity:.5}
+.tag{font-size:11px;padding:1px 7px;border-radius:99px;background:var(--line);color:var(--muted)}
+.tag.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+select,input[type=text],input[type=number],textarea{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
+textarea{resize:vertical;min-height:72px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 16px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);padding:12px 22px;font-size:16px}
+button.primary:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{border-color:transparent;background:none;color:var(--muted);padding:6px 10px}
+button.ghost:hover{color:var(--err)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.steps{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.steps div{flex:1;min-width:90px;font-size:13px;color:var(--muted);border-top:3px solid var(--line);padding-top:6px}
+.steps div.on{color:var(--ink);border-color:var(--accent);font-weight:600}
+.steps div.done{border-color:var(--ok)}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .4s}
+.msg{margin-top:10px;color:var(--muted)}
+.err{color:var(--err);white-space:pre-wrap;font-size:14px}
+.review{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:18px;align-items:start}
+@media(max-width:820px){.review{grid-template-columns:1fr}}
+.sticky{position:sticky;top:14px}
+video{width:100%;border-radius:10px;background:#000;display:block}
+.clip{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--bg)}
+.clip.playing{border-color:var(--accent)}
+.clip .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.num{font-family:var(--mono);font-size:13px;background:var(--ink);color:var(--bg);border-radius:6px;padding:2px 8px}
+.clip input.t{width:84px;font-family:var(--mono);font-size:14px;padding:5px 8px;text-align:center}
+.clip .len{font-size:13px;color:var(--muted);font-family:var(--mono)}
+.clip .warn{font-size:12px;color:var(--warn)}
+.stat{font-family:var(--mono)}
+.summary{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding:12px 14px}
+.hidden{display:none!important}
+.jobs a{color:inherit;display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);text-decoration:none;font-size:14px}
+.jobs a:hover{color:var(--accent)}
+.jobs .st{color:var(--muted);font-size:12px;margin-left:auto}
+.jobs a{align-items:center}
+.jobs .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs .del{padding:2px 6px;font-size:15px}
+.urlrow{display:flex;gap:8px}
+.seg.mode label{flex:1;justify-content:center;font-size:15px;padding:12px 10px;font-weight:600}
+#url{resize:none;overflow:hidden;line-height:1.5;min-height:48px}
+.batchbox{margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--accent-soft)}
+.decor{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.decor summary{cursor:pointer;font-weight:600;padding:4px 0}
+.decor .urlrow select{flex:1;min-width:0}
+.thumbbox{display:flex;gap:14px;align-items:flex-start;margin:4px 0 18px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.thumbbox img{width:120px;border-radius:8px;display:block}
+.thumbbox p{margin:4px 0 10px}
+.brow{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);text-decoration:none;color:inherit}
+.brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow .st{font-size:12px;color:var(--muted);text-align:right;max-width:55%}
+.brow .mini{height:4px;background:var(--line);border-radius:9px;overflow:hidden;margin-top:4px}
+.brow .mini i{display:block;height:100%;background:var(--accent)}
+.brow.cmp{background:var(--accent-soft);border-radius:10px;padding:10px;border:0}
+#storyText{font-size:16px;line-height:1.6;min-height:150px}
+.seg.mode{flex-wrap:wrap}
+@media(max-width:600px){.seg.mode{flex-direction:column}.seg.mode label{justify-content:flex-start}}
+.scene{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--bg);display:grid;grid-template-columns:96px 1fr;gap:12px}
+.scene .pic{position:relative}
+.scene .pic img{width:96px;border-radius:8px;display:block;background:var(--line);min-height:60px}
+.scene .opts-row{grid-column:1/-1}
+.scene .thumbs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px}
+.scene .thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:pointer;opacity:.6;border:3px solid transparent;flex:none}
+.scene .thumbs img.on{opacity:1;border-color:var(--accent)}
+.scene .imgbtns{gap:6px;margin-bottom:6px}
+.scene .imgbtns button{padding:7px 10px;font-size:13px}
+.scene .pic img{width:96px;height:96px;object-fit:cover}
+.scene .busy{opacity:.45}
+.scene .head{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.scene input,.scene textarea{margin-bottom:6px}
+.scene details summary{font-size:12px;color:var(--muted);cursor:pointer}
+.capcut{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.capcut .bar{margin-top:8px}
+.cctips{padding-left:20px;margin:12px 0 0}
+.cctips li{margin-bottom:4px}
+.evt{font-family:var(--mono);font-size:12px;font-weight:700;background:#ffd43b;color:#1d1b17;border-radius:6px;padding:2px 8px}
+.urlrow input{flex:1;min-width:0;font-size:16px;padding:12px}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:18px 0 12px}
+.or::before,.or::after{content:"";flex:1;border-top:1px solid var(--line)}
+.drop.slim{padding:16px 12px}
+.clip .tset{font-size:12px;padding:4px 8px;color:var(--muted)}
+@media(max-width:820px){
+  .wrap{padding:18px 12px 60px}
+  header{margin-bottom:16px} header h1{font-size:25px} header p{font-size:14px}
+  .card{padding:16px;border-radius:12px}
+  .sticky{position:static}
+  input,select,textarea{font-size:16px}           /* กัน iPhone ซูมตอนแตะช่องกรอก */
+  .clip input.t{font-size:16px;width:96px}
+  button{padding:11px 16px}
+  .clip .head button{padding:8px 12px}
+  button.primary{width:100%}
+  .row .spacer{display:none}
+  #s-done .row a{flex:1 1 100%}
+  .drop{padding:28px 12px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>สรุป<span>คลิป</span></h1>
+    <p>ถอดเสียง → AI เลือกไฮไลต์ → พากย์เสียงไทย → ได้คลิปสั้นพร้อมใช้</p>
+  </header>
+
+  <!-- 1. อัปโหลด -->
+  <section id="s-upload" class="card">
+    <div class="seg mode" id="modeSeg">
+      <label><input type="radio" name="mode" value="talk" checked> 🗣️ คลิปพูด / ทั่วไป</label>
+      <label><input type="radio" name="mode" value="game"> 🎮 ไฮไลต์เกม MLBB</label>
+      <label><input type="radio" name="mode" value="story"> 📝 ข้อความ → คลิป</label>
+    </div>
+    <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
+    <div class="storyOnly hidden">
+      <h2>1. ใส่ข้อความ / ข้อมูล</h2>
+      <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ หรือโน้ตสั้นๆ — AI จะเรียบเรียงเป็นบทคลิป แบ่งฉาก วาดภาพ และพากย์ให้"></textarea>
+      <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
+      <label class="f">ใช้ข้อความยังไง</label>
+      <div class="seg" id="scriptSeg">
+        <label><input type="radio" name="script_mode" value="verbatim" checked> 📜 พากย์ตามบทที่ใส่ทุกคำ</label>
+        <label><input type="radio" name="script_mode" value="rewrite"> ✨ ให้ AI เรียบเรียง/สรุปให้</label>
+      </div>
+      <div class="hint" id="scriptHint" style="margin:6px 2px 0">ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ</div>
+      <label class="f">ภาพประกอบ</label>
+      <div class="seg" id="srcSeg">
+        <label><input type="radio" name="image_source" value="ai" checked> 🎨 AI วาดภาพ</label>
+        <label id="srcPhoto"><input type="radio" name="image_source" value="photo"> 📷 ภาพถ่ายจริง (Pexels) <span class="tag" id="pexTag"></span></label>
+      </div>
+      <div id="styleBox"><label class="f">สไตล์ภาพ</label>
+      <div class="seg" id="styleSeg"></div></div>
+      <div class="hint" style="margin-top:6px">💡 ใช้ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
+    </div>
+    <div class="mediaOnly">
+    <h2>1. ใส่ลิงก์คลิป</h2>
+    <div class="urlrow">
+      <textarea id="url" rows="1" inputmode="url" autocomplete="off" spellcheck="false" placeholder="วางลิงก์ YouTube, TikTok, Facebook, IG ฯลฯ (หลายลิงก์ได้ บรรทัดละลิงก์)"></textarea>
+      <button id="paste">วาง</button>
+    </div>
+    <div class="hint" id="urlHint" style="margin:6px 2px 0">รองรับคลิปสาธารณะจาก YouTube, TikTok, Facebook, Instagram, X และเว็บอื่นอีกกว่าพันเว็บ</div>
+    <div class="or"><span>หรือ อัปโหลดไฟล์จากเครื่อง</span></div>
+    <div class="drop" id="drop">
+      <b id="dropTitle">ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</b>
+      <span class="hint">MP4, MOV, MKV ฯลฯ — เลือกหลายไฟล์พร้อมกันได้</span>
+      <input type="file" id="file" accept="video/*" multiple hidden>
+    </div>
+    </div>
+    <div class="opts">
+      <div>
+        <label class="f">ใช้อะไรสรุปเนื้อหา</label>
+        <div class="seg" id="providers"></div>
+      </div>
+      <div>
+        <label class="f">ความยาวคลิปสรุป: <span id="tgtV" class="stat">60</span> วินาที</label>
+        <input type="range" id="target" min="20" max="300" step="10" value="60">
+      </div>
+      <div>
+        <label class="f">เสียงพากย์</label>
+        <select id="voice0"></select>
+      </div>
+      <div>
+        <label class="f">สัดส่วนวิดีโอ</label>
+        <select id="layout0"></select>
+      </div>
+      <div class="gameOnly hidden">
+        <label class="f">ฮีโร่ที่ใช้ / รายละเอียดเพิ่ม (ไม่บังคับ)</label>
+        <input type="text" id="note" maxlength="200" placeholder="เช่น เล่น Ling ป่า, แรงค์ Mythic">
+      </div>
+      <div>
+        <label class="f talkOnly">ความแม่นยำการถอดเสียง <span class="tag" id="gpuTag">ไม่มีการ์ดจอ</span></label>
+        <select id="whisper" class="talkOnly">
+          <option value="small">เร็ว (small)</option>
+          <option value="medium" selected>สมดุล (medium) — แนะนำ</option>
+          <option value="large-v3-turbo">แม่นสุด (large-v3-turbo) — ควรมีการ์ดจอ</option>
+        </select>
+      </div>
+    </div>
+    <div id="batchBox" class="batchbox hidden">
+      <b id="batchCount"></b>
+      <div class="seg" style="margin-top:8px">
+        <label><input type="radio" name="bmode" value="separate" checked> แยกคลิปทุกเกม</label>
+        <label class="gameOnly"><input type="radio" name="bmode" value="compile"> รวมช็อตเด็ดเป็นคลิปเดียว</label>
+      </div>
+      <div class="hint" style="margin-top:6px">ทำทีละคลิปตามคิว — คลิปละหลายนาที เปิดหน้านี้ค้างไว้ได้เลย</div>
+    </div>
+
+    <details class="decor" id="decor">
+      <summary>🎨 ตกแต่งคลิป <span class="hint" id="decorSum"></span></summary>
+      <div class="opts">
+        <div class="gameOnly">
+          <label class="f">เอฟเฟกต์</label>
+          <div class="seg"><label><input type="checkbox" id="fx0" checked> สโลว์โมชัน + ซูม + จอสั่น ตอนเก็บคิล</label></div>
+        </div>
+        <div>
+          <label class="f">เพลงประกอบ</label>
+          <div class="urlrow"><select id="music0"></select><button data-up="music">+ เพิ่มเพลง</button></div>
+          <label class="f">ความดังเพลง: <span id="mvolV" class="stat">25%</span></label>
+          <input type="range" id="mvol0" min="5" max="70" step="5" value="25">
+        </div>
+        <div>
+          <label class="f">ชื่อช่อง (มุมซ้ายบน)</label>
+          <input type="text" id="channel0" maxlength="40" placeholder="เช่น @ช่องของบอส">
+        </div>
+        <div>
+          <label class="f">โลโก้</label>
+          <div class="urlrow"><select id="logo0"></select><button data-up="logo">+ เพิ่มโลโก้</button></div>
+        </div>
+        <div>
+          <label class="f">ภาพปก</label>
+          <div class="seg"><label><input type="checkbox" id="cover0" checked> ใส่ภาพปกไว้ต้นคลิป (กดเลือกเป็นปก TikTok ได้ง่าย)</label></div>
+        </div>
+      </div>
+      <p class="hint" style="margin:10px 0 0">เพลงที่มีลิขสิทธิ์อาจถูก TikTok ปิดเสียง — ใช้เพลงไม่ติดลิขสิทธิ์ หรือเพิ่มเพลงในแอป TikTok/CapCut แทน</p>
+      <input type="file" id="assetFile" hidden>
+    </details>
+
+    <div class="seg" style="margin-top:18px">
+      <label style="flex:1"><input type="checkbox" id="auto" checked>
+        <span><b>ทำให้เสร็จอัตโนมัติ</b><br><span class="hint">ข้ามขั้นตรวจบท ได้วิดีโอเลย (แก้บทแล้วสร้างใหม่ภายหลังได้)</span></span></label>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <span class="hint" id="provHint"></span><span class="spacer"></span>
+      <button class="primary" id="go" disabled>เริ่มสรุปคลิป</button>
+    </div>
+  </section>
+
+  <!-- หลายเกม -->
+  <section id="s-batch" class="card hidden">
+    <h2 id="batchTitle">กำลังทำหลายคลิป</h2>
+    <div class="jobs" id="batchList"></div>
+    <div id="batchCompile" class="hidden" style="margin-top:16px"></div>
+    <div class="row" style="margin-top:16px"><span class="spacer"></span><button id="batchNew">เริ่มชุดใหม่</button></div>
+  </section>
+
+  <!-- 2. ความคืบหน้า -->
+  <section id="s-progress" class="card hidden">
+    <div class="steps" id="steps"></div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="msg" id="msg">กำลังอัปโหลด…</div>
+    <div class="row hidden" id="cancelRow" style="margin-top:12px"><span class="spacer"></span><button id="cancelBtn" class="ghost">✕ ยกเลิกงานนี้</button></div>
+    <div class="row hidden" id="errRow" style="margin-top:12px">
+      <button id="retryBack">← กลับไปแก้ไข</button><button id="restart">เริ่มคลิปใหม่</button>
+    </div>
+  </section>
+
+  <!-- 3. ตรวจบท -->
+  <section id="s-review" class="hidden">
+    <div class="review">
+      <div class="card sticky">
+        <h2>คลิปต้นฉบับ</h2>
+        <video id="srcVid" controls preload="metadata"></video>
+        <div class="hint hidden" id="prevNote" style="margin-top:6px"></div>
+        <p class="hint">กด "▶ ดู" เพื่อเล่นเฉพาะช่วงนั้น · เลื่อนวิดีโอไปจุดที่ต้องการแล้วกด "⏱" เพื่อตั้งเวลาเริ่ม/จบ หรือ "เพิ่มช่วงตรงนี้"</p>
+        <div class="row"><button id="addClip">+ เพิ่มช่วงตรงนี้</button><span class="spacer"></span>
+          <span class="hint">รวม ≈ <b class="stat" id="totalLen">0</b> วิ</span></div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>สรุปเนื้อหา</h2>
+          <label class="f">ชื่อเรื่อง</label><input type="text" id="title">
+          <label class="f">สรุป</label><textarea id="summary" rows="4"></textarea>
+        </div>
+        <div class="card">
+          <h2 id="clipsTitle">ช่วงไฮไลต์และบทพากย์</h2>
+          <div id="clips"></div>
+          <button id="addScene" class="hidden" style="width:100%">+ เพิ่มฉาก</button>
+        </div>
+        <div class="card">
+          <h2>เสียงพากย์</h2>
+          <div class="opts">
+            <div><label class="f">ผู้พากย์</label><select id="voice"></select></div>
+            <div><label class="f">ความเร็วการพูด: <span id="rateV" class="stat">0%</span></label>
+              <input type="range" id="rate" min="-30" max="40" step="5" value="10"></div>
+            <div class="noStory"><label class="f">เสียงต้นฉบับเบื้องหลัง: <span id="volV" class="stat">15%</span></label>
+              <input type="range" id="vol" min="0" max="100" step="5" value="15"></div>
+            <div><label class="f">สัดส่วนวิดีโอ</label><select id="layout"></select></div>
+            <div><label class="f">เพลงประกอบ</label><select id="music"></select></div>
+            <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
+            <div><label class="f">ตกแต่ง</label>
+              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label></div></div>
+            <div><label class="f">ซับไตเติล</label>
+              <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div></div>
+          </div>
+          <div class="row" style="margin-top:20px">
+            <span class="spacer"></span><button class="primary" id="renderBtn">สร้างวิดีโอสรุป →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. ผลลัพธ์ -->
+  <section id="s-done" class="card hidden">
+    <h2 id="doneTitle">วิดีโอสรุปพร้อมแล้ว</h2>
+    <video id="outVid" controls></video>
+    <div class="row" style="margin:14px 0">
+      <a id="dl"><button class="primary">ดาวน์โหลดวิดีโอ</button></a>
+      <button id="shareBtn" class="hidden">บันทึกลงคลังภาพ / แชร์</button>
+      <button id="editAgain">แก้บทแล้วสร้างใหม่</button>
+      <span class="spacer"></span><button id="newClip">เริ่มคลิปใหม่</button>
+    </div>
+    <div id="thumbBox" class="thumbbox hidden">
+      <img id="thumbImg" alt="ภาพปก">
+      <div>
+        <b>🖼️ ภาพปก</b>
+        <p class="hint">ใช้เป็นปก TikTok/Reels หรือรูปตัวอย่าง YouTube</p>
+        <a id="thumbDl"><button>ดาวน์โหลดภาพปก</button></a>
+        <button id="thumbShare" class="hidden" style="margin-top:8px">บันทึก / แชร์ภาพปก</button>
+      </div>
+    </div>
+    <label class="f">สรุปเนื้อหา <button class="ghost" id="copySum">คัดลอก</button></label>
+    <div class="summary" id="doneSum"></div>
+
+    <div class="capcut">
+      <div class="row"><b>✂️ แต่งต่อใน CapCut</b><span class="spacer"></span>
+        <button id="ccBtn">ส่งออกสำหรับ CapCut</button></div>
+      <p class="hint" id="ccHint">ได้วิดีโอไม่มีซับ + ไฟล์แยกทีละช็อต (ไม่มีป้าย ไม่เฟด) ไปใส่ซับสวยๆ เพลง และทรานซิชันใน CapCut เอง</p>
+      <div id="ccProg" class="hidden"><div class="bar"><i id="ccBar"></i></div><div class="msg" id="ccMsg"></div></div>
+      <div id="ccDone" class="hidden">
+        <button class="primary" id="ccShare">แชร์ไปที่ CapCut</button>
+        <div class="row" style="margin-top:10px"><a id="ccZip"><button>ดาวน์โหลดทั้งหมด (.zip)</button></a></div>
+        <div class="jobs" id="ccFiles" style="margin-top:8px"></div>
+        <ol class="hint cctips">
+          <li>แตะ <b>แชร์ไปที่ CapCut</b> แล้วเลือกแอป CapCut (หรือบันทึกลงคลังภาพ แล้วเปิด CapCut → โปรเจกต์ใหม่)</li>
+          <li>ใน CapCut แตะ <b>ข้อความ → คำบรรยายอัตโนมัติ</b> เพื่อทำซับจากเสียงพากย์ แล้วเลือกสไตล์ซับ</li>
+          <li>ใส่เพลง เอฟเฟกต์ ทรานซิชันระหว่างช็อต แล้วส่งออก</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="s-jobs">
+    <h2>งานล่าสุด</h2><div class="jobs" id="jobs"><span class="hint">ยังไม่มี</span></div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const show = id => ["s-upload","s-progress","s-review","s-done","s-batch"].forEach(x => $("#"+x).classList.toggle("hidden", x !== id));
+let cfg = null, job = null, file = null, poll = null, clips = [], stopAt = null;
+
+const fmt = t => { t = Math.max(0, +t || 0); const m = Math.floor(t/60), s = t - m*60; return `${m}:${s.toFixed(1).padStart(4,"0")}`; };
+const parseT = v => { v = String(v).trim(); if (!v.includes(":")) return parseFloat(v) || 0; const [m, s] = v.split(":"); return (parseInt(m)||0)*60 + (parseFloat(s)||0); };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function api(path, opt) { const r = await fetch(path, opt); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; }
+
+// ── ตั้งค่า ──
+async function init() {
+  cfg = await api("/api/config");
+  const names = {claude: ["Claude AI", "สรุปดีที่สุด (ต้องมี API key)"], ollama: ["Ollama", "ฟรี รันในเครื่อง"], none: ["ไม่ใช้ AI", "เลือกช่วงอัตโนมัติ แล้วเขียนบทเอง"]};
+  let first = null;
+  $("#providers").innerHTML = Object.entries(names).map(([k, [n]]) => {
+    const ok = cfg.providers[k]; if (ok && !first) first = k;
+    return `<label class="${ok ? "" : "dis"}"><input type="radio" name="prov" value="${k}" ${ok ? "" : "disabled"}> ${n} <span class="tag ${ok ? "ok" : ""}">${ok ? "พร้อม" : "ยังไม่ตั้งค่า"}</span></label>`;
+  }).join("");
+  document.querySelector(`input[name=prov][value=${first}]`).checked = true;
+  const hint = () => { const k = document.querySelector("input[name=prov]:checked").value; $("#provHint").textContent = names[k][1]; };
+  $("#providers").onchange = hint; hint();
+  if (cfg.gpu) { $("#whisper").value = "large-v3-turbo"; $("#gpuTag").textContent = "มีการ์ดจอ ✓"; $("#gpuTag").classList.add("ok"); }
+  $("#layout").innerHTML = $("#layout0").innerHTML = Object.entries(cfg.layouts).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  modeChanged();
+  $("#styleSeg").innerHTML = Object.entries(cfg.styles || {}).map(([k, v], i) => `<label><input type="radio" name="style" value="${k}" ${i ? "" : "checked"}> ${esc(v)}</label>`).join("");
+  const pin = $("#srcPhoto input");
+  pin.disabled = !cfg.pexels; $("#pexTag").textContent = cfg.pexels ? "พร้อม" : "ใส่คีย์ใน Colab ก่อน";
+  $("#pexTag").classList.toggle("ok", !!cfg.pexels); $("#srcPhoto").classList.toggle("dis", !cfg.pexels);
+  $("#srcSeg").onchange = () => $("#styleBox").classList.toggle("hidden", document.querySelector("input[name=image_source]:checked").value !== "ai");
+  if (!cfg.imagegen) $("#storyHint").textContent = "⚠️ เครื่องนี้ยังวาดภาพด้วย AI ไม่ได้ (ต้องใช้ Colab การ์ดจอ) — จะใช้ภาพพื้นหลังไล่สีแทน";
+  $("#voice").innerHTML = $("#voice0").innerHTML = cfg.voices.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
+  loadJobs();
+  loadAssets();
+  const id = location.hash.slice(1); if (id.startsWith("b=")) openBatch(id.slice(2)); else if (id) openJob(id);
+}
+
+if (matchMedia("(pointer:coarse)").matches) $("#dropTitle").textContent = "แตะเพื่อเลือกคลิปจากเครื่อง";
+const MODE_HINT = {
+  story: "พิมพ์หรือวางข้อความ → AI เขียนบทคลิปสั้น แบ่งฉาก วาดภาพประกอบ ทำแอนิเมชัน และพากย์เสียงไทยให้",
+  talk: "ถอดคำพูดในคลิป ให้ AI สรุปเนื้อหา เลือกช่วงสำคัญ แล้วพากย์เสียงไทยทับ",
+  game: "หาช็อตเด็ดจากเสียงประกาศในเกม (Double Kill, Maniac, Savage, Lord…) ใส่ป้ายตัวใหญ่ + พากย์แบบแคสเตอร์ · ตอนอัดหน้าจอต้องเปิดเสียงเกมด้วย",
+};
+function mode() { return document.querySelector("input[name=mode]:checked").value; }
+function modeChanged() {
+  const g = mode() === "game";
+  document.querySelectorAll(".gameOnly").forEach(e => e.classList.toggle("hidden", !g));
+  const st = mode() === "story";
+  document.querySelectorAll(".talkOnly").forEach(e => e.classList.toggle("hidden", g || st));
+  document.querySelectorAll(".storyOnly").forEach(e => e.classList.toggle("hidden", !st));
+  document.querySelectorAll(".mediaOnly").forEach(e => e.classList.toggle("hidden", st));
+  if (typeof refreshItems === "function") refreshItems();
+  if (typeof scriptModeChanged === "function" && $("#scriptSeg")) scriptModeChanged();
+  $("#modeHint").textContent = MODE_HINT[mode()];
+  if (!g) { const sep = document.querySelector("input[name=bmode][value=separate]"); if (sep) sep.checked = true; }
+  if (typeof decorSummary === "function" && $("#decorSum")) decorSummary();
+  if (cfg) $("#layout0").value = g ? "vertical_blur" : st ? "vertical_crop" : "original";
+  $("#target").value = g ? 45 : st ? 40 : 60; $("#tgtV").textContent = $("#target").value;
+}
+$("#modeSeg").onchange = modeChanged;
+$("#target").oninput = e => $("#tgtV").textContent = e.target.value;
+$("#rate").oninput = e => $("#rateV").textContent = (e.target.value > 0 ? "+" : "") + e.target.value + "%";
+$("#vol").oninput = e => $("#volV").textContent = e.target.value + "%";
+$("#rate").oninput({target: $("#rate")});
+
+const drop = $("#drop");
+drop.onclick = () => $("#file").click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); pick(e.dataTransfer.files); };
+$("#file").onchange = e => pick(e.target.files);
+let files = [];
+$("#drop").classList.add("slim");
+const URL_RE = /https?:\/\/\S+/;
+const URLS_RE = /https?:\/\/\S+/g;
+const DROP_TXT = () => matchMedia("(pointer:coarse)").matches ? "แตะเพื่อเลือกคลิปจากเครื่อง" : "ลากไฟล์มาวาง หรือคลิกเพื่อเลือก";
+const links = () => [...new Set($("#url").value.match(URLS_RE) || [])];
+function refreshItems() {
+  if (mode() === "story") {
+    const len = $("#storyText").value.trim().length;
+    $("#go").disabled = len < 10; $("#go").textContent = "สร้างคลิปจากข้อความ";
+    $("#batchBox").classList.add("hidden"); $("#storyCount").textContent = `${len}/8000`;
+    return;
+  }
+  const n = links().length + files.length;
+  $("#go").disabled = n === 0;
+  $("#batchBox").classList.toggle("hidden", n < 2);
+  $("#batchCount").textContent = `${n} คลิป`;
+  $("#go").textContent = n > 1 ? `เริ่มทำ ${n} คลิป` : "เริ่มสรุปคลิป";
+  const u = $("#url"); u.style.height = "auto"; u.style.height = u.scrollHeight + 2 + "px";
+}
+function urlChanged() {
+  const v = $("#url").value, m = v.match(URL_RE);
+  $("#urlHint").textContent = v.trim() && !m ? "ลิงก์ต้องขึ้นต้นด้วย https://" : "รองรับคลิปสาธารณะจาก YouTube, TikTok, Facebook, Instagram, X และเว็บอื่นอีกกว่าพันเว็บ";
+  refreshItems();
+}
+$("#url").oninput = urlChanged;
+$("#storyText").oninput = () => refreshItems();
+function scriptModeChanged() {
+  const rw = document.querySelector("input[name=script_mode]:checked").value === "rewrite";
+  $("#scriptHint").textContent = rw ? "AI จะเรียบเรียงใหม่ให้กระชับ ตามความยาวคลิปที่ตั้งไว้ด้านล่าง" : "ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ";
+  $("#target").closest("div").classList.toggle("hidden", mode() === "story" && !rw);
+}
+$("#scriptSeg").onchange = scriptModeChanged;
+$("#paste").onclick = async () => {
+  try {
+    const t = (await navigator.clipboard.readText()).trim(), u = $("#url");
+    u.value = u.value.trim() ? u.value.trim() + "\n" + t : t; urlChanged();
+  } catch { $("#url").focus(); $("#urlHint").textContent = "กดค้างในช่องแล้วเลือก \"วาง\""; }
+};
+function pick(list) {
+  files = [...(list || [])].filter(f => f.size > 0);
+  const mb = files.reduce((s, f) => s + f.size, 0) / 1048576;
+  $("#dropTitle").textContent = !files.length ? DROP_TXT() : files.length === 1 ? `📹 ${files[0].name} (${mb.toFixed(1)} MB)` : `📹 ${files.length} ไฟล์ (${mb.toFixed(0)} MB)`;
+  if (mb > 300) $("#provHint").textContent = "ไฟล์ใหญ่ — อัปโหลดผ่านเน็ตมือถืออาจนาน แนะนำใช้ Wi‑Fi";
+  refreshItems();
+}
+
+// ── ตกแต่ง ──
+const store = {get(k, d) { try { const v = localStorage.getItem("sc_" + k); return v == null ? d : v; } catch { return d; } },
+               set(k, v) { try { localStorage.setItem("sc_" + k, v); } catch {} }};
+let assets = {music: [], logo: []};
+function fillAssets() {
+  const opt = (list, none) => `<option value="">${none}</option>` + list.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  for (const id of ["music0", "music"]) { const el = $("#" + id), v = el.value; el.innerHTML = opt(assets.music, "ไม่ใส่เพลง"); el.value = assets.music.includes(v) ? v : ""; }
+  const l = $("#logo0"), lv = l.value; l.innerHTML = opt(assets.logo, "ไม่ใส่โลโก้"); l.value = assets.logo.includes(lv) ? lv : "";
+}
+async function loadAssets() {
+  assets = await api("/api/assets").catch(() => assets); fillAssets();
+  $("#music0").value = assets.music.includes(store.get("music", "")) ? store.get("music", "") : "";
+  $("#logo0").value = assets.logo.includes(store.get("logo", "")) ? store.get("logo", "") : "";
+  decorSummary();
+}
+function decorSummary() {
+  const bits = [];
+  if (mode() === "game" && $("#fx0").checked) bits.push("เอฟเฟกต์");
+  if ($("#music0").value) bits.push("เพลง");
+  if ($("#channel0").value.trim()) bits.push("ชื่อช่อง");
+  if ($("#logo0").value) bits.push("โลโก้");
+  if ($("#cover0").checked) bits.push("ภาพปก");
+  $("#decorSum").textContent = bits.length ? "· " + bits.join(", ") : "";
+}
+$("#channel0").value = store.get("channel", "");
+$("#fx0").checked = store.get("fx", "1") === "1";
+$("#cover0").checked = store.get("cover", "1") === "1";
+$("#mvol0").value = store.get("mvol", "25");
+$("#mvol0").oninput = () => { $("#mvolV").textContent = $("#mvol0").value + "%"; store.set("mvol", $("#mvol0").value); };
+$("#mvol0").oninput();
+$("#decor").addEventListener("change", () => {
+  store.set("channel", $("#channel0").value.trim()); store.set("fx", $("#fx0").checked ? "1" : "0");
+  store.set("cover", $("#cover0").checked ? "1" : "0"); store.set("music", $("#music0").value); store.set("logo", $("#logo0").value);
+  decorSummary();
+});
+let upKind = "";
+document.querySelectorAll("[data-up]").forEach(b => b.onclick = e => {
+  e.preventDefault(); upKind = b.dataset.up;
+  $("#assetFile").accept = upKind === "music" ? "audio/*" : "image/*"; $("#assetFile").click();
+});
+$("#assetFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  const btn = document.querySelector(`[data-up=${upKind}]`), label = btn.textContent;
+  btn.textContent = "กำลังอัปโหลด…"; btn.disabled = true;
+  try {
+    const fd = new FormData(); fd.append("kind", upKind); fd.append("file", f);
+    const r = await api("/api/assets", {method: "POST", body: fd});
+    await loadAssets(); $("#" + upKind + "0").value = r.name; $("#decor").dispatchEvent(new Event("change"));
+  } catch (err) { alert(err.message); }
+  finally { btn.textContent = label; btn.disabled = false; }
+};
+
+// ── อัปโหลด ──
+async function uploadFile(f, onProgress) {
+  const CHUNK = 8 * 1024 * 1024;
+  const {upload_id} = await api("/api/uploads", {method: "POST"});
+  let off = 0, tries = 0;
+  while (off < f.size) {
+    onProgress(off / f.size * 100, off, tries);
+    try {
+      const r = await fetch(`/api/uploads/${upload_id}?offset=${off}`, {method: "PUT", body: f.slice(off, off + CHUNK)});
+      const j = await r.json();
+      if (r.ok || r.status === 409) { off = j.size; tries = 0; continue; }
+      throw new Error(j.error || r.statusText);
+    } catch (e) {
+      if (++tries > 6) throw new Error("อัปโหลดไม่สำเร็จ — เน็ตหลุดหรือโปรแกรมใน Colab หยุดทำงาน");
+      await new Promise(r => setTimeout(r, 2000 * tries));
+    }
+  }
+  return upload_id;
+}
+function commonFields(fd) {
+  fd.append("provider", document.querySelector("input[name=prov]:checked").value);
+  fd.append("target_seconds", $("#target").value);
+  fd.append("whisper_model", $("#whisper").value);
+  fd.append("voice", $("#voice0").value);
+  fd.append("auto", $("#auto").checked ? "1" : "");
+  fd.append("mode", mode());
+  fd.append("layout", $("#layout0").value);
+  fd.append("note", $("#note").value);
+  fd.append("fx", mode() === "game" && $("#fx0").checked ? "1" : "");
+  fd.append("music", $("#music0").value);
+  fd.append("music_volume", $("#mvol0").value / 100);
+  fd.append("channel", $("#channel0").value.trim());
+  fd.append("logo", $("#logo0").value);
+  fd.append("cover", $("#cover0").checked ? "1" : "");
+  return fd;
+}
+$("#go").onclick = async () => {
+  job = null;
+  const urls = links(), n = urls.length + files.length;
+  show("s-progress"); $("#errRow").classList.add("hidden"); $("#bar").style.width = "0";
+  const msg = $("#msg"), bar = $("#bar");
+  try {
+    if (mode() === "story") {
+      setSteps("plan", "story"); msg.textContent = "กำลังเริ่ม…";
+      const fd = commonFields(new FormData());
+      fd.append("text", $("#storyText").value.trim());
+      fd.append("style", (document.querySelector("input[name=style]:checked") || {}).value || "cinematic");
+      fd.append("script_mode", document.querySelector("input[name=script_mode]:checked").value);
+      fd.append("image_source", document.querySelector("input[name=image_source]:checked").value);
+      const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
+    }
+    if (n > 1) {  // หลายคลิป → ชุดงาน
+      setSteps("download");
+      const ids = [];
+      for (const [k, f] of files.entries()) {
+        ids.push(await uploadFile(f, (pct, off, tries) => {
+          bar.style.width = ((k + pct / 100) / files.length * 100) + "%";
+          msg.textContent = `อัปโหลดไฟล์ ${k + 1}/${files.length} — ${pct.toFixed(0)}%` + (tries ? ` (ลองส่งใหม่ครั้งที่ ${tries})` : "");
+        }));
+      }
+      const fd = commonFields(new FormData());
+      fd.append("urls", urls.join("\n"));
+      fd.append("upload_ids", ids.join(","));
+      fd.append("filenames", files.map(f => f.name).join("\n"));
+      fd.append("compile", mode() === "game" && document.querySelector("input[name=bmode]:checked").value === "compile" ? "1" : "");
+      const r = await api("/api/batches", {method: "POST", body: fd});
+      location.hash = "b=" + r.id; return openBatch(r.id);
+    }
+    if (urls.length) {
+      setSteps("download"); msg.textContent = "กำลังเริ่ม…";
+      const fd = commonFields(new FormData()); fd.append("url", urls[0]);
+      const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
+    }
+    setSteps("transcribe");
+    const f = files[0];
+    const upload_id = await uploadFile(f, (pct, off, tries) => {
+      bar.style.width = pct + "%";
+      msg.textContent = `กำลังอัปโหลด ${pct.toFixed(0)}% (${(off/1048576).toFixed(0)}/${(f.size/1048576).toFixed(0)} MB)` + (tries ? ` — ลองส่งใหม่ครั้งที่ ${tries}` : "");
+    });
+    const fd = commonFields(new FormData());
+    fd.append("upload_id", upload_id);
+    fd.append("filename", f.name);
+    const r = await api("/api/jobs", {method: "POST", body: fd});
+    location.hash = r.id; openJob(r.id);
+  } catch (e) { fail(e.message); }
+};
+
+// ── หลายเกม ──
+let bPoll = null;
+const TH_ST = {queued:"รอคิว", analyzing:"กำลังวิเคราะห์", review:"รอตรวจบท", rendering:"กำลังตัดต่อ", done:"เสร็จ ✓", error:"ผิดพลาด", cancelled:"ยกเลิกแล้ว"};
+async function openBatch(bid) {
+  clearTimeout(bPoll); clearTimeout(poll);
+  let b; try { b = await api(`/api/batches/${bid}`); } catch { location.hash = ""; return show("s-upload"); }
+  show("s-batch");
+  const row = (j, i, cmp) => {
+    const st = j.status === "review" && b.compile ? "วิเคราะห์เสร็จ ✓" : (TH_ST[j.status] || j.status);
+    const working = ["queued", "analyzing", "rendering"].includes(j.status);
+    return `<a class="brow ${cmp ? "cmp" : ""}" href="#${j.id}"><span>${cmp ? "🏆" : "🎬"}</span>
+      <div class="nm">${cmp ? "" : `<span class="hint">เกม ${i + 1} · </span>`}${esc(j.name)}${working ? `<div class="mini"><i style="width:${Math.round(j.progress || 0)}%"></i></div>` : ""}</div>
+      <span class="st">${esc(st)}${working && j.message ? `<br>${esc(j.message).slice(0, 40)}` : ""}</span></a>`;
+  };
+  $("#batchList").innerHTML = b.jobs.map((j, i) => row(j, i, false)).join("");
+  const done = b.jobs.filter(j => ["done", "error", "cancelled"].includes(j.status) || (b.compile && j.status === "review")).length;
+  $("#batchTitle").textContent = b.compile ? `รวมช็อตเด็ด ${b.jobs.length} เกม` : `ทำ ${b.jobs.length} คลิป — เสร็จ ${done}/${b.jobs.length}`;
+  const cbox = $("#batchCompile");
+  cbox.classList.toggle("hidden", !b.compile);
+  if (b.compile) cbox.innerHTML = b.compile_job ? row(b.compile_job, 0, true)
+    : `<div class="hint">🏆 คลิปรวมจะเริ่มทำเมื่อวิเคราะห์ครบทุกเกม (${done}/${b.jobs.length})</div>`;
+  const all = [...b.jobs, ...(b.compile_job ? [b.compile_job] : [])];
+  const finished = b.compile ? b.compile_job && ["done", "error", "cancelled"].includes(b.compile_job.status) : done === b.jobs.length;
+  if (!finished) bPoll = setTimeout(() => openBatch(bid), 2000);
+}
+$("#cancelBtn").onclick = async () => {
+  if (!job) return;
+  $("#cancelBtn").disabled = true; $("#cancelBtn").textContent = "กำลังยกเลิก…";
+  try { await api(`/api/jobs/${job.id}/cancel`, {method: "POST"}); } catch (e) { alert(e.message); }
+  setTimeout(() => { $("#cancelBtn").disabled = false; $("#cancelBtn").textContent = "✕ ยกเลิกงานนี้"; }, 3000);
+};
+$("#batchNew").onclick = () => { clearTimeout(bPoll); location.hash = ""; show("s-upload"); };
+
+// ── ติดตามงาน ──
+const STEPS = {
+  media: [["download","ดาวน์โหลด"],["transcribe","ถอดเสียง"],["plan","สรุปเนื้อหา"],["review","ตรวจบท"],["render","ตัดต่อ+พากย์"],["done","เสร็จ"]],
+  story: [["plan","เขียนบท"],["images","วาดภาพ"],["review","ตรวจบท"],["render","แอนิเมชัน+พากย์"],["done","เสร็จ"]],
+};
+function setSteps(cur, kind) {
+  kind = kind || (cur === "images" || (job?.opts?.mode === "story") ? "story" : "media");
+  const list = STEPS[kind], i = list.findIndex(x => x[0] === cur);
+  $("#steps").innerHTML = list.map(([k, t], n) => `<div class="${n < i ? "done" : n === i ? "on" : ""}">${t}</div>`).join("");
+}
+function fail(m, detail) {
+  show("s-progress"); $("#cancelRow").classList.add("hidden");
+  $("#msg").innerHTML = `<span class="err">เกิดข้อผิดพลาด: ${esc(m || "ไม่ทราบสาเหตุ")}</span>` +
+    (detail ? `<details style="margin-top:8px"><summary class="hint">รายละเอียดสำหรับแจ้งปัญหา (แคปหน้าจอส่งได้)</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:260px;overflow:auto">${esc(detail)}</pre></details>` : ""); $("#errRow").classList.remove("hidden"); $("#retryBack").classList.toggle("hidden", !job?.plan); }
+
+async function openJob(id) {
+  clearTimeout(poll); clearTimeout(bPoll);
+  try { job = await api(`/api/jobs/${id}`); } catch { location.hash = ""; return show("s-upload"); }
+  const st = job.status;
+  if (st === "review") return enterReview();
+  if (st === "done") return enterDone();
+  if (st === "error") return fail(job.message, job.detail);
+  if (st === "cancelled") { $("#cancelRow").classList.add("hidden"); return fail("ยกเลิกงานแล้ว"); }
+  $("#cancelRow").classList.toggle("hidden", !["queued", "analyzing", "rendering"].includes(st));
+  show("s-progress");
+  const story = job.opts?.mode === "story";
+  setSteps(st === "rendering" ? "render" : job.step === "queued" ? (story ? "plan" : job.url ? "download" : "transcribe") : job.step === "extract" ? "transcribe" : job.step, story ? "story" : "media");
+  $("#bar").style.width = (job.progress || 0) + "%";
+  $("#msg").textContent = job.message || "";
+  poll = setTimeout(() => openJob(id), 1200);
+}
+
+// ── ตรวจบท ──
+const isStory = () => job?.opts?.mode === "story";
+function enterReview() {
+  show("s-review"); loadJobs();
+  const p = job.plan || {clips: []};
+  clips = (isStory() ? p.scenes : p.clips || []).map(c => ({...c}));
+  $("#clipsTitle").textContent = isStory() ? "ฉากและบทพากย์" : "ช่วงไฮไลต์และบทพากย์";
+  $("#addScene").classList.toggle("hidden", !isStory());
+  document.querySelectorAll(".noStory").forEach(e => e.classList.toggle("hidden", isStory()));
+  $("#title").value = p.title || ""; $("#summary").value = p.summary || "";
+  if (!isStory()) {
+    const v = $("#srcVid"); if (!v.src.includes(`/api/jobs/${job.id}/source`)) v.src = `/api/jobs/${job.id}/source`;
+    watchPreview(job.id);
+  }
+  const r = job.render_opts || job.opts?.render;
+  const multi = !!job.multi || isStory();
+  $("#s-review .card.sticky").classList.toggle("hidden", multi);
+  $("#addClip").classList.toggle("hidden", multi);
+  if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
+           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; }
+  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
+  drawClips();
+}
+
+let prevPoll = null;
+async function watchPreview(id) {
+  clearTimeout(prevPoll);
+  const j = await api(`/api/jobs/${id}`).catch(() => null);
+  if (!j || job?.id !== id) return;
+  const pp = j.preview_progress, note = $("#prevNote");
+  if (pp == null || pp < 0 || pp >= 100) {
+    note.classList.add("hidden");
+    if (pp === 100) {  // วิดีโอตัวอย่างเสร็จ → สลับมาใช้ (เปิดบนมือถือได้ลื่นกว่า)
+      const v = $("#srcVid");
+      if (!v.src.includes("?p=1")) { const t = v.currentTime; v.src = `/api/jobs/${id}/source?p=1`; v.currentTime = t; }
+    }
+    return;
+  }
+  note.classList.remove("hidden");
+  note.textContent = `กำลังเตรียมวิดีโอตัวอย่างให้เปิดลื่นขึ้น ${pp}% — ระหว่างนี้แก้บทได้เลย`;
+  prevPoll = setTimeout(() => watchPreview(id), 2000);
+}
+
+function drawScenes() {
+  const src = n => `/api/jobs/${job.id}/scenes/${n}`;
+  $("#clips").innerHTML = (job.plan?.note ? `<p class="hint">⚠️ ${esc(job.plan.note)}</p>` : "") + clips.map((c, i) => {
+    const opts = [...new Set([...(c.options || []), ...(c.img ? [c.img] : [])])];
+    return `
+    <div class="scene" data-i="${i}">
+      <div class="pic"><img src="${c.img ? src(c.img) : ""}" alt=""></div>
+      <div>
+        <div class="head"><span class="num">${String(i + 1).padStart(2, "0")}</span><span class="spacer"></span>
+          <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del">ลบ</button></div>
+        <input type="text" data-k="headline" maxlength="40" placeholder="ข้อความบนจอ (เว้นว่างได้)" value="${esc(c.headline || "")}">
+        <textarea data-k="narration" rows="3" placeholder="บทพากย์ฉากนี้">${esc(c.narration || "")}</textarea>
+      </div>
+      <div class="opts-row">
+        ${opts.length > 1 ? `<div class="thumbs">${opts.map(n => `<img data-pick="${esc(n)}" src="${src(n)}" class="${n === c.img ? "on" : ""}" alt="">`).join("")}</div>` : ""}
+        <div class="row imgbtns">
+          <button data-a="regen">🎲 AI วาด 3 ภาพ</button>
+          ${cfg.pexels ? `<button data-a="photo">📷 ภาพถ่ายจริง</button>` : ""}
+          <button data-a="mine">📁 รูปของฉัน</button>
+        </div>
+        <details><summary>คำบรรยายภาพ / คำค้น (ภาษาอังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
+          <label class="hint">ให้ AI วาด:</label><input type="text" data-k="image" maxlength="300" value="${esc(c.image || "")}">
+          <label class="hint">คำค้นภาพถ่าย:</label><input type="text" data-k="search" maxlength="60" placeholder="เช่น dark hotel corridor" value="${esc(c.search || "")}">
+        </details>
+      </div>
+    </div>`; }).join("");
+  $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(2.5, (c.narration || "").replace(/\s/g, "").length / 11 + 0.7), 0).toFixed(0);
+}
+$("#addScene").onclick = () => { clips.push({narration: "", headline: "", image: "", img: ""}); drawScenes(); };
+
+function drawClips() {
+  if (isStory()) return drawScenes();
+  $("#clips").innerHTML = clips.map((c, i) => {
+    const len = c.end - c.start, need = c.narration.replace(/\s/g, "").length / 11;
+    return `<div class="clip" data-i="${i}">
+      <div class="head"><span class="num">${String(i+1).padStart(2,"0")}</span>${c.label ? `<span class="evt">${esc(c.label)}</span>` : ""}
+        <input class="t" data-k="start" inputmode="decimal" value="${fmt(c.start)}"> → <input class="t" data-k="end" inputmode="decimal" value="${fmt(c.end)}">
+        <span class="len">${len.toFixed(1)}s</span>${job?.multi ? "" : `<button data-a="play">▶ ดู</button>`}<span class="spacer"></span>
+        <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del" title="ลบ">ลบ</button></div>
+      ${job?.multi ? "" : `<div class="row" style="margin-bottom:6px"><button class="tset" data-a="setStart">⏱ เริ่ม = ตำแหน่งวิดีโอ</button><button class="tset" data-a="setEnd">⏱ จบ = ตำแหน่งวิดีโอ</button></div>`}
+      <textarea data-k="narration" rows="3" placeholder="บทพากย์ช่วงนี้ (เว้นว่าง = ใช้เสียงต้นฉบับ)">${esc(c.narration)}</textarea>
+      ${need > len + 0.5 ? `<div class="warn">บทยาวกว่าช่วงคลิป (~${need.toFixed(0)} วิ) — ภาพจะยืดต่อให้อัตโนมัติ หรือตัดบทให้สั้นลง</div>` : ""}
+    </div>`;
+  }).join("") || `<p class="hint">ยังไม่มีช่วง — หยุดวิดีโอตรงจุดที่ต้องการแล้วกด "เพิ่มช่วงตรงนี้"</p>`;
+  $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(c.end - c.start, c.narration.replace(/\s/g,"").length/11), 0).toFixed(0);
+}
+
+$("#clips").addEventListener("change", e => {
+  if (isStory()) { const el = e.target, i = +el.closest(".scene")?.dataset.i; if (!isNaN(i) && el.dataset.k) clips[i][el.dataset.k] = el.value; return; }
+  const el = e.target, i = +el.closest(".clip")?.dataset.i, k = el.dataset.k; if (isNaN(i) || !k) return;
+  clips[i][k] = k === "narration" ? el.value : parseT(el.value);
+  if (k !== "narration") { const c = clips[i]; if (c.end < c.start) [c.start, c.end] = [c.end, c.start]; if (!job?.multi) clips.sort((a, b) => a.start - b.start); }
+  drawClips();
+});
+$("#clips").addEventListener("input", e => {
+  const el = e.target, i = +el.closest(isStory() ? ".scene" : ".clip")?.dataset.i;
+  if (isNaN(i)) return;
+  if (isStory() && el.dataset.k) clips[i][el.dataset.k] = el.value;
+  else if (el.dataset.k === "narration") clips[i].narration = el.value;
+});
+$("#clips").addEventListener("click", async e => {
+  if (e.target.dataset.pick && isStory()) {
+    const i = +e.target.closest(".scene").dataset.i; clips[i].img = e.target.dataset.pick; return drawScenes();
+  }
+  const a = e.target.dataset.a, i = +e.target.closest(isStory() ? ".scene" : ".clip")?.dataset.i; if (!a) return;
+  if (isStory() && (a === "regen" || a === "photo")) {
+    const card = e.target.closest(".scene"), b = e.target, label = b.textContent;
+    card.querySelectorAll(".imgbtns button").forEach(x => x.disabled = true);
+    b.textContent = a === "regen" ? "กำลังวาด 3 ภาพ…" : "กำลังค้นหา…"; card.querySelector(".pic img").classList.add("busy");
+    try {
+      const c = clips[i];
+      const r = a === "regen"
+        ? await api(`/api/jobs/${job.id}/scenes/${i}/regen`, {method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({prompt: c.image || c.headline || c.narration, n: 3})})
+        : await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({query: c.search || "", prompt: c.image || ""})});
+      c.options = [...new Set([...(c.options || []), ...(c.img ? [c.img] : []), ...r.imgs])];
+      c.img = r.imgs[0];
+      if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
+    } catch (err) { alert(err.message); }
+    b.textContent = label;
+    return drawScenes();
+  }
+  if (isStory() && a === "mine") {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      const b = e.target; b.disabled = true; b.textContent = "กำลังอัปโหลด…";
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await api(`/api/jobs/${job.id}/scenes/${i}/upload`, {method: "POST", body: fd});
+        clips[i].options = [...new Set([...(clips[i].options || []), ...(clips[i].img ? [clips[i].img] : []), r.img])];
+        clips[i].img = r.img;
+      } catch (err) { alert(err.message); }
+      drawScenes();
+    };
+    inp.click(); return;
+  }
+  if (a === "del") { clips.splice(i, 1); return drawClips(); }
+  if (a === "setStart" || a === "setEnd") {
+    const t = $("#srcVid").currentTime || 0, c = clips[i];
+    if (a === "setStart") c.start = t; else c.end = t;
+    if (c.end < c.start) [c.start, c.end] = [c.end, c.start];
+    clips.sort((x, y) => x.start - y.start); drawClips();
+  }
+  if (a === "up" && i > 0) { [clips[i-1], clips[i]] = [clips[i], clips[i-1]]; drawClips(); }
+  if (a === "play") {
+    const v = $("#srcVid"); v.currentTime = clips[i].start; stopAt = clips[i].end; v.play();
+    if (innerWidth <= 820) v.scrollIntoView({behavior: "smooth", block: "center"});
+    document.querySelectorAll(".clip").forEach(d => d.classList.toggle("playing", +d.dataset.i === i));
+  }
+});
+$("#srcVid").ontimeupdate = e => { if (stopAt != null && e.target.currentTime >= stopAt) { e.target.pause(); stopAt = null; document.querySelectorAll(".clip.playing").forEach(d => d.classList.remove("playing")); } };
+$("#addClip").onclick = () => {
+  const t = $("#srcVid").currentTime || 0, d = job.duration || t + 8;
+  clips.push({start: t, end: Math.min(d, t + 8), narration: ""}); clips.sort((a, b) => a.start - b.start); drawClips();
+};
+
+$("#renderBtn").onclick = async () => {
+  if (!clips.length) return alert("ต้องมีอย่างน้อย 1 ช่วง");
+  try {
+    await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
+      clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value,
+      rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, layout: $("#layout").value,
+      music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked})});
+    $("#srcVid").pause(); openJob(job.id);
+  } catch (e) { alert(e.message); }
+};
+
+// ── ผลลัพธ์ ──
+function enterDone() {
+  show("s-done"); loadJobs();
+  const p = job.plan || {};
+  $("#doneTitle").textContent = p.title || job.name || "วิดีโอสรุปพร้อมแล้ว";
+  $("#outVid").src = `/api/jobs/${job.id}/output?t=${Date.now()}`;
+  $("#dl").href = `/api/jobs/${job.id}/output?download=1`;
+  $("#doneSum").textContent = p.summary || "-";
+  $("#thumbBox").classList.toggle("hidden", !job.thumb);
+  if (job.thumb) {
+    $("#thumbImg").src = `/api/jobs/${job.id}/thumb.jpg?t=${Date.now()}`;
+    $("#thumbDl").href = `/api/jobs/${job.id}/thumb.jpg?download=1`;
+    const pf = new File([""], "x.jpg", {type: "image/jpeg"});
+    $("#thumbShare").classList.toggle("hidden", !(navigator.canShare && navigator.canShare({files: [pf]})));
+  }
+  ccBlobs = null; capcutView(job.capcut); if (job.capcut?.status === "working") watchCapcut();
+  const probe = new File([""], "x.mp4", {type: "video/mp4"});
+  $("#shareBtn").classList.toggle("hidden", !(navigator.canShare && navigator.canShare({files: [probe]})));
+}
+$("#shareBtn").onclick = async () => {
+  const b = $("#shareBtn"), label = b.textContent;
+  try {
+    b.textContent = "กำลังเตรียมไฟล์…"; b.disabled = true;
+    const blob = await (await fetch(`/api/jobs/${job.id}/output`)).blob();
+    const f = new File([blob], ((job.plan?.title || "สรุปคลิป").replace(/[\\/:*?"<>|]/g, "") || "สรุปคลิป") + ".mp4", {type: "video/mp4"});
+    await navigator.share({files: [f], title: job.plan?.title || "สรุปคลิป"});
+  } catch (e) { if (e.name !== "AbortError") alert("แชร์ไม่ได้ — กดปุ่มดาวน์โหลดแทน"); }
+  finally { b.textContent = label; b.disabled = false; }
+};
+// ── CapCut ──
+let ccPoll = null, ccBlobs = null; const CC_HINT = $("#ccHint").innerHTML;
+function capcutView(cc) {
+  const st = cc?.status;
+  $("#ccProg").classList.toggle("hidden", st !== "working");
+  $("#ccDone").classList.toggle("hidden", st !== "done");
+  $("#ccBtn").classList.toggle("hidden", st === "working" || st === "done");
+  $("#ccBtn").textContent = st === "error" ? "ลองส่งออกใหม่" : "ส่งออกสำหรับ CapCut";
+  $("#ccHint").innerHTML = st === "error" ? `<span class="err">ส่งออกไม่สำเร็จ: ${esc(cc.message)}</span>` : CC_HINT;
+  if (st === "working") { $("#ccBar").style.width = (cc.progress || 0) + "%"; $("#ccMsg").textContent = cc.message || ""; }
+  if (st === "done") {
+    const base = `/api/jobs/${job.id}/capcut/`;
+    $("#ccZip").href = `/api/jobs/${job.id}/capcut.zip`;
+    $("#ccFiles").innerHTML = cc.files.map(n => `<a href="${base}${encodeURIComponent(n)}?download=1">⬇️ ${esc(n)}</a>`).join("");
+    const probe = new File([""], "x.mp4", {type: "video/mp4"});
+    const canShare = !!(navigator.canShare && navigator.canShare({files: [probe]}));
+    $("#ccShare").classList.toggle("hidden", !canShare);
+    if (canShare && !ccBlobs) prefetchCapcut(cc.files);
+  }
+}
+async function prefetchCapcut(files) {
+  // โหลดไฟล์ไว้ก่อน เพื่อให้กดแชร์แล้วขึ้นหน้าแชร์ทันที (เบราว์เซอร์ไม่ยอมให้แชร์ถ้ารอนานหลังกด)
+  const b = $("#ccShare"); b.disabled = true; b.textContent = "กำลังเตรียมไฟล์…";
+  try {
+    const id = job.id;
+    ccBlobs = await Promise.all(files.map(async n => new File([await (await fetch(`/api/jobs/${id}/capcut/${encodeURIComponent(n)}`)).blob()], n, {type: "video/mp4"})));
+  } catch { ccBlobs = null; }
+  b.disabled = false; b.textContent = "แชร์ไปที่ CapCut";
+}
+$("#ccShare").onclick = async () => {
+  if (!ccBlobs) return prefetchCapcut((job.capcut || {}).files || []);
+  try { await navigator.share({files: ccBlobs, title: job.plan?.title || "สรุปคลิป"}); }
+  catch (e) {
+    if (e.name === "AbortError") return;
+    // บางเครื่องแชร์หลายไฟล์ไม่ได้ → แชร์เฉพาะวิดีโอเต็ม
+    try { await navigator.share({files: [ccBlobs[0]]}); } catch (e2) { if (e2.name !== "AbortError") alert("แชร์ไม่ได้ — ใช้ปุ่มดาวน์โหลดด้านล่างแทน"); }
+  }
+};
+async function watchCapcut() {
+  clearTimeout(ccPoll);
+  const j = await api(`/api/jobs/${job.id}`).catch(() => null);
+  if (!j || j.id !== job?.id) return;
+  job.capcut = j.capcut; capcutView(j.capcut);
+  if (j.capcut?.status === "working") ccPoll = setTimeout(watchCapcut, 1500);
+}
+$("#ccBtn").onclick = async () => {
+  try { await api(`/api/jobs/${job.id}/capcut`, {method: "POST"}); ccBlobs = null; watchCapcut(); }
+  catch (e) { alert(e.message); }
+};
+$("#thumbShare").onclick = async () => {
+  try {
+    const blob = await (await fetch(`/api/jobs/${job.id}/thumb.jpg`)).blob();
+    await navigator.share({files: [new File([blob], "ภาพปก.jpg", {type: "image/jpeg"})]});
+  } catch (e) { if (e.name !== "AbortError") alert("แชร์ไม่ได้ — กดดาวน์โหลดแทน"); }
+};
+$("#copySum").onclick = () => navigator.clipboard.writeText(`${job.plan?.title || ""}\n\n${job.plan?.summary || ""}`.trim());
+$("#editAgain").onclick = $("#retryBack").onclick = () => { $("#outVid").pause(); enterReview(); };
+$("#newClip").onclick = $("#restart").onclick = () => { $("#outVid").pause(); location.hash = ""; job = null; show("s-upload"); };
+
+async function loadJobs() {
+  const list = await api("/api/jobs").catch(() => []);
+  const th = {queued:"รอคิว", analyzing:"กำลังวิเคราะห์", review:"รอตรวจบท", rendering:"กำลังตัดต่อ", done:"เสร็จ", error:"ผิดพลาด", cancelled:"ยกเลิก"};
+  $("#jobs").innerHTML = list.length ? list.map(j => `<a href="#${j.id}">🎬 <span class="nm">${esc(j.name)}</span><span class="st">${th[j.status] || j.status}</span>
+      ${["analyzing", "rendering"].includes(j.status) ? "" : `<button class="ghost del" data-del="${j.id}" title="ลบงานนี้">🗑</button>`}</a>`).join("")
+    : `<span class="hint">ยังไม่มี</span>`;
+}
+$("#jobs").addEventListener("click", async e => {
+  const id = e.target.dataset.del; if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  if (!confirm("ลบงานนี้และไฟล์ทั้งหมดของงาน?")) return;
+  try { await api(`/api/jobs/${id}`, {method: "DELETE"}); if (job?.id === id) { location.hash = ""; job = null; show("s-upload"); } loadJobs(); }
+  catch (err) { alert(err.message); }
+});
+window.onhashchange = () => {
+  const h = location.hash.slice(1);
+  if (h.startsWith("b=")) return openBatch(h.slice(2));
+  if (h && h !== job?.id) openJob(h);
+};
+init();
+</script>
+</body>
+</html>
