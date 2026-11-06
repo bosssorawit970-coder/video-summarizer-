@@ -385,8 +385,5 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
             seq.insert(0, cv)
         except RuntimeError as e:
             print("ใส่ภาพปกต้นคลิปไม่ได้:", e)
-    if len(seq) == 1:
-        joined.replace(out)
-    else:
-        P.concat(seq, out, workdir)
+    P.concat(seq, out, workdir)  # เข้ารหัสใหม่เป็นสเปกมาตรฐาน (มือถือเล่นได้แน่นอน)
     return files

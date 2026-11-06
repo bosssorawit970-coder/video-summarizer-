@@ -923,11 +923,32 @@ def add_music(video: Path, music: Path, volume: float, out: Path) -> None:
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.3f}", str(out)])
 
 
+# สเปกไฟล์สุดท้าย: H.264 High 4.1 / yuv420p / 30fps คงที่ / AAC 44.1kHz — มือถือทุกรุ่นเล่นได้
+FINAL_AUDIO = ["-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2"]
+
+
+def _final_video_args(nvenc: bool) -> list[str]:
+    if nvenc:
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "22", "-b:v", "0",
+                "-profile:v", "high", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high",
+            "-level:v", "4.1", "-pix_fmt", "yuv420p"]
+
+
 def concat(clips: list[Path], out: Path, workdir: Path) -> None:
+    """ต่อคลิปแล้วเข้ารหัสใหม่ทั้งไฟล์เป็นมาตรฐานเดียว
+    (ต่อแบบคัดลอกตรงๆ ทำให้รอยต่อเวลาเพี้ยน/หัวไฟล์ไม่ตรงกัน → แกลเลอรีมือถือหลายรุ่นเล่นไม่ได้)"""
     lst = workdir / "list.txt"
     lst.write_text("".join(f"file '{p.name}'\n" for p in clips), encoding="utf-8")
-    run(["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst.name,
-         "-c", "copy", "-movflags", "+faststart", str(out.resolve())], cwd=workdir)
+    base = ["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst.name, "-r", "30"]
+    tail = [*FINAL_AUDIO, "-movflags", "+faststart", str(out.resolve())]
+    if _has_nvenc():
+        try:
+            run(base + _final_video_args(True) + tail, cwd=workdir)
+            return
+        except RuntimeError as e:
+            print("เข้ารหัสด้วยการ์ดจอไม่ได้ ใช้ CPU แทน:", str(e)[-200:])
+    run(base + _final_video_args(False) + tail, cwd=workdir)
 
 
 def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
