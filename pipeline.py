@@ -331,8 +331,10 @@ def _ask_claude(prompt: str) -> str:
 
 
 def _ask_ollama(prompt: str) -> str:
+    # context พอดีกับความยาวคำสั่ง (ภาษาไทย ~1 token ต่อ 1-2 ตัวอักษร) — ใหญ่เกินจะช้าและกินการ์ดจอ
+    ctx = min(32768, max(4096, 1 << (len(prompt) + 3000).bit_length()))
     body = json.dumps({"model": DEFAULT_OLLAMA_MODEL, "stream": False, "format": "json",
-                       "options": {"num_ctx": 32768, "temperature": 0.3}, "keep_alive": 0,
+                       "options": {"num_ctx": ctx, "temperature": 0.3}, "keep_alive": 0,
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})

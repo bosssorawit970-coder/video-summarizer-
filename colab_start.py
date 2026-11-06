@@ -92,7 +92,15 @@ if AI == "ollama":
                        shell=True)
     subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if wait_url("http://127.0.0.1:11434/api/tags", 60):
-        subprocess.run(["ollama", "pull", "qwen2.5:7b"], stdout=subprocess.DEVNULL)
+        # มีการ์ดจอ → รุ่น 14B เข้าใจภาษาไทยและคิดภาพได้ตรงกว่า 7B มาก (โหลดเพิ่ม ~9 GB)
+        om = globals().get("OLLAMA_MODEL") or ("qwen2.5:14b" if gpu else "qwen2.5:7b")
+        step(f"   โมเดล: {om}")
+        r = subprocess.run(["ollama", "pull", om], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if r.returncode != 0 and om != "qwen2.5:7b":
+            step("   ⚠️ โหลดรุ่นใหญ่ไม่สำเร็จ ใช้ qwen2.5:7b แทน")
+            om = "qwen2.5:7b"
+            subprocess.run(["ollama", "pull", om], stdout=subprocess.DEVNULL)
+        env["OLLAMA_MODEL"] = om
     else:
         step("   ⚠️ เปิด Ollama ไม่สำเร็จ — จะใช้โหมดเขียนบทเอง")
 else:

@@ -31,26 +31,39 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 ข้อมูล:
 {text}"""
 
-VISUAL_PROMPT = """ด้านล่างคือบทพากย์คลิปสั้นภาษาไทยที่แบ่งเป็นฉากแล้ว (ห้ามแก้บทพากย์)
-งานของคุณ: คิดภาพประกอบและข้อความบนจอให้แต่ละฉาก
+VISUAL_PROMPT = """You are a storyboard artist for short vertical videos.
+Below is a Thai narration script, already split into {n} numbered scenes. Do NOT change the narration.
 
-สำหรับแต่ละฉาก:
-- headline: ข้อความสั้นบนจอ 2-6 คำ ภาษาไทย จับใจความฉากนั้น (เว้นว่างได้ถ้าไม่จำเป็น)
-- image: คำบรรยายภาพประกอบภาษาอังกฤษ 12-30 คำ ที่สื่อเนื้อหาฉากนั้นตรงๆ
-  บอกให้ชัดว่า "ใคร/อะไร ทำอะไร ที่ไหน" + บรรยากาศ แสง มุมกล้อง (เช่น close-up, wide shot)
-  ภาพเดียวต้องเห็นเรื่องชัด ไม่ซับซ้อน ห้ามมีตัวหนังสือในภาพ
-  ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ ให้บรรยายแบบทั่วไปแทน
-  ตัวละครหลักที่โผล่หลายฉาก ให้บรรยายรูปลักษณ์เหมือนเดิมทุกฉาก (เช่น "a young Thai man with short black hair in a blue shirt")
-  เริ่มด้วยสิ่งสำคัญที่สุดของภาพก่อน (โมเดลวาดภาพอ่านได้แค่ช่วงต้นของคำบรรยาย)
-- search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ ที่หาเจอง่าย (เช่น "black coffee cup", "dark hotel corridor")
+Step 1 — read the WHOLE script and work out: the main topic, the setting/place, the era, and the main characters.
+Step 2 — for EACH scene write:
+- "headline": short on-screen text in THAI, 2-6 words, summarising that scene (may be empty "")
+- "image": an English image-generation prompt, 15-35 words, that shows EXACTLY what that scene's narration talks about.
+  Start with the main subject, then the action, then the place, lighting and camera shot (close-up / wide shot).
+  Stay consistent with the topic and setting from Step 1 — every image must clearly belong to this same story.
+  Recurring characters must be described with the SAME appearance every time (age, gender, hair, clothes).
+  If the scene states a fact, number or idea, show a concrete visual of it (never an unrelated generic scene).
+  No text or letters in the image. No real people's names, celebrities, brands or copyrighted characters — describe them generically.
+- "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
 
-ตอบเป็น JSON อย่างเดียว:
-{{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
+Reply with JSON only:
+{{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty",
+ "title": "catchy Thai title (1-2 emoji ok)", "summary": "Thai caption 1-2 sentences + 3-5 hashtags",
  "scenes": [{{"headline": "...", "image": "...", "search": "..."}}]}}
-ต้องมี scenes {n} รายการพอดี เรียงตามฉาก
+"scenes" must contain exactly {n} items, in order.
 
-บทพากย์:
+Script:
 {scenes}"""
+
+SCENE_PROMPT = """Write an English image-generation prompt for ONE scene of a Thai short video.
+Story topic: {topic}
+Previous scene: {prev}
+THIS scene's Thai narration: {narr}
+Next scene: {next}
+
+The image must show exactly what THIS scene's narration is about, matching the story topic.
+15-30 words: main subject first, then action, place, lighting, camera shot. No text in the image.
+No real people's names, celebrities, brands or copyrighted characters.
+Reply with JSON only: {{"image": "...", "search": "2-4 English words for a stock photo", "headline": "Thai 2-6 words"}}"""
 
 GENERIC_IMAGES = [
     "soft glowing abstract background, bokeh lights, calm atmosphere",
@@ -128,25 +141,58 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
         if plan:
             return plan
     narrs = split_script(text)
-    scenes = [{"narration": n_, "headline": "", "img": "", "image": GENERIC_IMAGES[i % len(GENERIC_IMAGES)]}
-              for i, n_ in enumerate(narrs)]
+    scenes = [{"narration": n_, "headline": "", "img": "", "image": "", "search": ""} for n_ in narrs]
     plan = {"title": narrs[0][:40] if narrs else "", "summary": "", "scenes": scenes}
     if provider != "none":
-        try:
-            prompt = VISUAL_PROMPT.format(n=len(scenes), scenes="\n".join(
-                f"ฉาก {i + 1}: {s['narration']}" for i, s in enumerate(scenes)))
-            raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
-            data = P._parse_json(raw)
-            for s, v in zip(scenes, data.get("scenes", [])):
-                if isinstance(v, dict):
-                    s["headline"] = P.clean_text(str(v.get("headline", "")))[:40]
-                    s["image"] = str(v.get("image", "")).strip()[:300] or s["image"]
-                    s["search"] = str(v.get("search", "")).strip()[:60]
-            plan["title"] = str(data.get("title") or plan["title"])
-            plan["summary"] = str(data.get("summary") or "")
-        except Exception as e:
-            print("AI คิดภาพประกอบไม่สำเร็จ ใช้ภาพทั่วไปแทน:", e)
+        fill_visuals(plan, provider)
+    for i, s in enumerate(scenes):  # AI คิดภาพให้ไม่ได้จริงๆ → ใช้ภาพทั่วไป แต่ทำเครื่องหมายเตือนไว้
+        if not s["image"]:
+            s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
     return plan
+
+
+def _ask(provider: str, prompt: str) -> dict:
+    raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+    return P._parse_json(raw)
+
+
+def fill_visuals(plan: dict, provider: str) -> None:
+    """คิดภาพประกอบทุกฉากจากบททั้งเรื่อง (รู้ว่าเรื่องเกี่ยวกับอะไร ตัวละครหน้าตายังไง)
+    ฉากที่ได้ไม่ครบ → ถามทีละฉากซ้ำ (งานเล็กลง โมเดลเล็กทำได้แม่นขึ้น)"""
+    scenes = plan["scenes"]
+    topic = characters = ""
+    try:
+        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), scenes="\n".join(
+            f"Scene {i + 1}: {s['narration']}" for i, s in enumerate(scenes))))
+        topic = str(data.get("topic") or "")[:300]
+        characters = str(data.get("characters") or "")[:300]
+        got = [v for v in data.get("scenes", []) if isinstance(v, dict)]
+        if len(got) == len(scenes):  # จำนวนไม่ตรง = จับคู่ฉากผิดได้ → ไม่ใช้ แล้วถามทีละฉาก
+            for s, v in zip(scenes, got):
+                s["headline"] = P.clean_text(str(v.get("headline", "")))[:40]
+                s["image"] = str(v.get("image", "")).strip()[:400]
+                s["search"] = str(v.get("search", "")).strip()[:60]
+        plan["title"] = str(data.get("title") or plan["title"])
+        plan["summary"] = str(data.get("summary") or "")
+    except Exception as e:
+        print("AI คิดภาพทั้งเรื่องไม่สำเร็จ จะถามทีละฉาก:", e)
+    if not topic:
+        topic = " ".join(s["narration"] for s in scenes)[:300]
+    for i, s in enumerate(scenes):
+        if s["image"]:
+            continue
+        try:
+            v = _ask(provider, SCENE_PROMPT.format(
+                topic=topic, narr=s["narration"],
+                prev=scenes[i - 1]["narration"] if i else "(start of video)",
+                next=scenes[i + 1]["narration"] if i + 1 < len(scenes) else "(end of video)"))
+            s["image"] = str(v.get("image", "")).strip()[:400]
+            s["search"] = s["search"] or str(v.get("search", "")).strip()[:60]
+            s["headline"] = s["headline"] or P.clean_text(str(v.get("headline", "")))[:40]
+        except Exception as e:
+            print(f"AI คิดภาพฉากที่ {i + 1} ไม่สำเร็จ:", e)
+    if characters:  # ให้ตัวละครหน้าตาเหมือนกันทุกฉาก
+        plan["characters"] = characters
 
 
 def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
@@ -165,7 +211,16 @@ def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
                                "image": str(s.get("image", "")).strip()[:300] or GENERIC_IMAGES[0], "img": "",
                                "search": str(s.get("search", "")).strip()[:60]})
         if scenes:
-            return {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
+            plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
+            for s in scenes:
+                if s["image"] == GENERIC_IMAGES[0]:
+                    s["image"] = ""
+            if any(not s["image"] for s in scenes):
+                fill_visuals(plan, provider)
+            for i, s in enumerate(scenes):
+                if not s["image"]:
+                    s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
+            return plan
     except Exception as e:
         print("AI เรียบเรียงบทไม่สำเร็จ ใช้บทเดิมแทน:", e)
     return None

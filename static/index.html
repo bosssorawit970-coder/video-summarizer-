@@ -752,6 +752,7 @@ function drawScenes() {
         <textarea data-k="narration" rows="3" placeholder="บทพากย์ฉากนี้">${esc(c.narration || "")}</textarea>
       </div>
       <div class="opts-row">
+        ${c.generic ? `<div class="warn" style="margin-bottom:6px">⚠️ AI คิดภาพให้ฉากนี้ไม่ได้ ภาพอาจไม่เกี่ยวกับบท — เปิด "คำบรรยายภาพ" ด้านล่าง พิมพ์ภาพที่อยากได้ (อังกฤษ) แล้วกด 🎲</div>` : ""}
         ${opts.length > 1 ? `<div class="thumbs">${opts.map(n => `<img data-pick="${esc(n)}" src="${src(n)}" class="${n === c.img ? "on" : ""}" alt="">`).join("")}</div>` : ""}
         <div class="row imgbtns">
           <button data-a="regen">🎲 AI วาด 3 ภาพ</button>
@@ -815,7 +816,7 @@ $("#clips").addEventListener("click", async e => {
         : await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({query: c.search || "", prompt: c.image || ""})});
       c.options = [...new Set([...(c.options || []), ...(c.img ? [c.img] : []), ...r.imgs])];
-      c.img = r.imgs[0];
+      c.img = r.imgs[0]; c.generic = false;
       if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
     } catch (err) { alert(err.message); }
     b.textContent = label;
