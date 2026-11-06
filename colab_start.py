@@ -105,31 +105,58 @@ if not wait_url("http://127.0.0.1:8000/api/config", 60):
     print(open("/content/app.log").read()); raise SystemExit("โปรแกรมเปิดไม่สำเร็จ ดูข้อความด้านบน")
 
 step("4/4 สร้างลิงก์…")
-from google.colab.output import eval_js
-main_url = eval_js("google.colab.kernel.proxyPort(8000, {'cache': false})")
+# ลิงก์สำรอง (Cloudflare) ทำก่อน — ไม่ต้องรอหน้าเว็บ Colab ตอบ ใช้ได้แม้จอดับ/สลับแอป
 backup = ""
 if BACKUP_LINK:
-    if not os.path.exists("/content/cloudflared"):
-        urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
-                                   "/content/cloudflared")
-        os.chmod("/content/cloudflared", 0o755)
-    cf = open("/content/cloudflared.log", "w")
-    subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
-                     stdout=cf, stderr=cf)
-    for _ in range(40):
-        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
-        if m:
-            backup = m.group(0); break
-        time.sleep(1)
+    try:
+        if not os.path.exists("/content/cloudflared"):
+            urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
+                                       "/content/cloudflared")
+            os.chmod("/content/cloudflared", 0o755)
+        cf = open("/content/cloudflared.log", "w")
+        subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
+                         stdout=cf, stderr=cf)
+        for _ in range(40):
+            m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
+            if m:
+                backup = m.group(0)
+                break
+            time.sleep(1)
+    except Exception as e:
+        step(f"   ⚠️ สร้างลิงก์สำรองไม่ได้: {e}")
+    if backup:
+        print(f"   ลิงก์สำรอง: {backup}", flush=True)
+
+# ลิงก์หลักต้องให้หน้าเว็บ Colab ตอบกลับ — รอไม่เกิน 20 วินาที (ถ้าหน้าเว็บหลุด จะไม่ค้าง)
+main_url = ""
+import threading
+def _ask_proxy(box):
+    try:
+        from google.colab.output import eval_js
+        box.append(eval_js("google.colab.kernel.proxyPort(8000, {'cache': false})"))
+    except Exception:
+        pass
+_box = []
+_t = threading.Thread(target=_ask_proxy, args=(_box,), daemon=True)
+_t.start()
+_t.join(20)
+main_url = _box[0] if _box else ""
+if not main_url and not backup:
+    step("   ⚠️ สร้างลิงก์ไม่ได้ — หน้าเว็บ Colab หลุดการเชื่อมต่อ แตะหน้าจอให้เชื่อมต่อใหม่ แล้วกดรันเซลล์นี้อีกครั้ง")
 
 btn = "display:block;text-align:center;padding:16px;border-radius:12px;font:600 18px sans-serif;text-decoration:none;margin:10px 0"
-html = f'<a href="{main_url}" target="_blank" style="{btn};background:#d9480f;color:#fff">▶ เปิดโปรแกรม</a>'
+html = ""
+if main_url:
+    html += f'<a href="{main_url}" target="_blank" style="{btn};background:#d9480f;color:#fff">▶ เปิดโปรแกรม</a>'
 if backup:
-    html += (f'<a href="{backup}" target="_blank" style="{btn};border:2px solid #d9480f;color:#d9480f">ลิงก์สำรอง (ถ้าปุ่มบนเปิดไม่ได้)</a>'
+    style = "background:#d9480f;color:#fff" if not main_url else "border:2px solid #d9480f;color:#d9480f"
+    label = "▶ เปิดโปรแกรม" if not main_url else "ลิงก์สำรอง (ถ้าปุ่มบนเปิดไม่ได้)"
+    html += (f'<a href="{backup}" target="_blank" style="{btn};{style}">{label}</a>'
              '<div style="font:13px sans-serif;color:#888">ลิงก์เปลี่ยนทุกครั้งที่รันใหม่ · ต้องใส่ PIN ก่อนใช้ทั้งสองลิงก์</div>')
 html += (f'<div style="text-align:center;font:15px sans-serif;margin-top:6px">รหัส PIN เข้าโปรแกรม</div>'
          f'<div style="text-align:center;font:700 34px monospace;letter-spacing:.3em">{pin}</div>')
 display(HTML(html))
+print(f"   รหัส PIN: {pin}", flush=True)
 print("\n✅ พร้อมใช้งาน — เปิดหน้านี้ค้างไว้ระหว่างใช้ (กดปุ่ม ■ หยุดเซลล์นี้เมื่อเลิกใช้)")
 
 # วนรอไว้เพื่อให้ Colab รู้ว่ายังใช้งานอยู่ และแจ้งถ้าโปรแกรมล่ม
