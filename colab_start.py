@@ -44,7 +44,10 @@ subprocess.run(f"cp {APP}/fonts/*.ttf ~/.fonts/ 2>/dev/null; fc-cache -f > /dev/
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "deno"], capture_output=True)
 
 gpu = subprocess.run("nvidia-smi", shell=True, capture_output=True).returncode == 0
-step("   การ์ดจอ: " + ("มี ✓ (ถอดเสียงเร็ว)" if gpu else "ไม่มี — ถอดเสียงจะช้า แนะนำเปลี่ยนเป็น T4 GPU"))
+step("   การ์ดจอ: " + ("มี ✓ (ถอดเสียงเร็ว)" if gpu else "ไม่มี ⚠️"))
+if not gpu:
+    step("   ⚠️ ไม่มีการ์ดจอ: ทุกอย่างจะช้าลงมาก · AI วาดภาพไม่ได้ (ใช้ภาพถ่าย Pexels / รูปของคุณแทน)")
+    step("      ใช้ AI รุ่นเล็กให้อัตโนมัติ เพื่อไม่ให้ RAM เต็มจนเครื่องค้าง · ถ้ามีคีย์ Claude ใช้ Claude จะดีและเร็วกว่า")
 
 env = os.environ.copy()
 env["HOST"], env["PORT"] = "127.0.0.1", "8000"
@@ -93,10 +96,11 @@ if AI == "ollama":
     subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if wait_url("http://127.0.0.1:11434/api/tags", 60):
         # มีการ์ดจอ → รุ่น 14B เข้าใจภาษาไทยและคิดภาพได้ตรงกว่า 7B มาก (โหลดเพิ่ม ~9 GB)
-        om = globals().get("OLLAMA_MODEL") or ("qwen2.5:14b" if gpu else "qwen2.5:7b")
+        # ไม่มีการ์ดจอ → รุ่น 3B (เบา ~2 GB เร็วกว่า ไม่ทำให้ RAM เต็ม)
+        om = globals().get("OLLAMA_MODEL") or ("qwen2.5:14b" if gpu else "qwen2.5:3b")
         step(f"   โมเดล: {om}")
         r = subprocess.run(["ollama", "pull", om], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        if r.returncode != 0 and om != "qwen2.5:7b":
+        if r.returncode != 0 and om == "qwen2.5:14b":
             step("   ⚠️ โหลดรุ่นใหญ่ไม่สำเร็จ ใช้ qwen2.5:7b แทน")
             om = "qwen2.5:7b"
             subprocess.run(["ollama", "pull", om], stdout=subprocess.DEVNULL)

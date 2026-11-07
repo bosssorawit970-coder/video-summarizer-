@@ -61,7 +61,12 @@ def _load(progress=None):
         print("วาดภาพด้วย AI ไม่ได้ จะใช้ภาพพื้นหลังไล่สีแทน:", _pipe_err)
         return None
     cuda = torch.cuda.is_available()
-    models = MODELS if cuda else MODELS[-1:]  # ไม่มีการ์ดจอ → รุ่นเล็กสุด
+    if not cuda and not os.environ.get("IMAGEGEN_CPU"):
+        # ไม่มีการ์ดจอ: วาดบน CPU ช้ามาก (หลายนาที/ภาพ) และกิน RAM ~5 GB จน Colab ค้างได้ → ไม่วาด
+        _pipe_err = "ไม่มีการ์ดจอ"
+        print("ไม่มีการ์ดจอ — ข้ามการวาดภาพด้วย AI (ใช้ภาพถ่าย/รูปของคุณ/ภาพพื้นหลังแทน)")
+        return None
+    models = MODELS if cuda else MODELS[-1:]
     for m in models:
         try:
             if progress:
@@ -89,10 +94,11 @@ def _load(progress=None):
 
 
 def available() -> bool:
+    """วาดภาพด้วย AI ได้ไหม (ต้องมีไลบรารี + การ์ดจอ)"""
     try:
         import diffusers  # noqa: F401
-        import torch  # noqa: F401
-        return True
+        import torch
+        return bool(torch.cuda.is_available() or os.environ.get("IMAGEGEN_CPU"))
     except Exception:
         return False
 

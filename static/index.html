@@ -143,6 +143,11 @@ video{width:100%;border-radius:10px;background:#000;display:block}
     <p>ถอดเสียง → AI เลือกไฮไลต์ → พากย์เสียงไทย → ได้คลิปสั้นพร้อมใช้</p>
   </header>
 
+  <div id="noGpu" class="card hidden" style="border-color:var(--warn);padding:12px 16px">
+    ⚠️ <b>เครื่อง Colab นี้ไม่มีการ์ดจอ</b> — ทุกอย่างจะช้าลงมาก (คลิปยาวอาจรอเป็นชั่วโมง) และ AI วาดภาพไม่ได้
+    <div class="hint">แนะนำ: ใช้คลิปสั้นๆ · โหมดข้อความใช้ภาพถ่ายจริง/รูปของคุณ · หรือรอโควตาการ์ดจอกลับมาแล้วรันใหม่</div>
+  </div>
+
   <!-- 1. อัปโหลด -->
   <section id="s-upload" class="card">
     <div class="seg mode" id="modeSeg">
@@ -395,6 +400,8 @@ async function init() {
   document.querySelector(`input[name=prov][value=${first}]`).checked = true;
   const hint = () => { const k = document.querySelector("input[name=prov]:checked").value; $("#provHint").textContent = names[k][1]; };
   $("#providers").onchange = hint; hint();
+  $("#noGpu").classList.toggle("hidden", !!cfg.gpu);
+  if (!cfg.gpu) $("#whisper").value = "small";  // ไม่มีการ์ดจอ → รุ่นเล็ก เร็วและไม่กิน RAM
   if (cfg.gpu) { $("#whisper").value = "large-v3-turbo"; $("#gpuTag").textContent = "มีการ์ดจอ ✓"; $("#gpuTag").classList.add("ok"); }
   $("#layout").innerHTML = $("#layout0").innerHTML = Object.entries(cfg.layouts).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
   modeChanged();
