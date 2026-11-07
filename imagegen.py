@@ -2,13 +2,14 @@
 ภาพประกอบฉาก:
   • AI วาดภาพ — SDXL-Lightning (1024px คมและตรงคำสั่งกว่า) บนการ์ดจอ Colab
     ถ้าโหลดไม่ได้ ถอยไป SDXL-Turbo → SD-Turbo → ภาพพื้นหลังไล่สี ตามลำดับ
-  • ภาพถ่ายจริงจาก Pexels (ฟรี ต้องมีคีย์ PEXELS_API_KEY)
+  • ภาพถ่ายจริงจากคลังภาพฟรี: Pexels / Pixabay (ถ้ามีคีย์) หรือ Openverse (ไม่ต้องมีคีย์)
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -132,49 +133,106 @@ def generate(prompt: str, out: Path, width: int = 1024, height: int = 1024, styl
     return False
 
 
-# ───────────────────────── ภาพถ่ายจริง (Pexels) ─────────────────────────
+# ───────────────────────── ภาพถ่ายจริง (คลังภาพฟรี) ─────────────────────────
+# ลำดับ: Pexels (ถ้ามีคีย์) → Pixabay (ถ้ามีคีย์) → Openverse (ไม่ต้องมีคีย์ ภาพสาธารณะ CC0/Public Domain)
+UA = {"User-Agent": "sarupclip/1.0 (personal short-video maker)"}
 
-def pexels_key() -> str:
-    return (os.environ.get("PEXELS_API_KEY") or "").strip()
+
+def _keys() -> tuple[str, str]:
+    """คืน (คีย์ Pexels, คีย์ Pixabay) — วางคีย์ Pixabay ในช่อง PEXELS_API_KEY ก็ได้ (แยกจากรูปแบบคีย์)"""
+    pex = (os.environ.get("PEXELS_API_KEY") or "").strip()
+    pix = (os.environ.get("PIXABAY_API_KEY") or "").strip()
+    if pex and re.fullmatch(r"\d+-[0-9a-f]{16,}", pex):  # รูปแบบคีย์ Pixabay
+        pix, pex = pix or pex, ""
+    return pex, pix
 
 
-def _pexels(query: str, n: int, orientation: str | None) -> list[dict]:
-    params = {"query": query, "per_page": n, "size": "medium"}
-    if orientation:
-        params["orientation"] = orientation
-    req = urllib.request.Request("https://api.pexels.com/v1/search?" + urllib.parse.urlencode(params),
-                                 headers={"Authorization": pexels_key(), "User-Agent": "Mozilla/5.0 sarupclip"})
+def pexels_key() -> str:  # คงไว้ให้โค้ดเดิมเรียกได้
+    return _keys()[0]
+
+
+def photo_source() -> str:
+    pex, pix = _keys()
+    return "Pexels" if pex else "Pixabay" if pix else "Openverse"
+
+
+def _get_json(url: str, headers: dict | None = None) -> dict:
+    req = urllib.request.Request(url, headers={**UA, **(headers or {})})
     with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read()).get("photos", [])
+        return json.loads(r.read())
+
+
+def _pexels_urls(query: str, n: int) -> list[str]:
+    for q, ori in ((query, "square"), (query, None)):
+        params = {"query": q, "per_page": n, "size": "medium", **({"orientation": ori} if ori else {})}
+        photos = _get_json("https://api.pexels.com/v1/search?" + urllib.parse.urlencode(params),
+                           {"Authorization": _keys()[0]}).get("photos", [])
+        if photos:
+            return [p["src"].get("large2x") or p["src"]["original"] for p in photos]
+    return []
+
+
+def _pixabay_urls(query: str, n: int) -> list[str]:
+    params = {"key": _keys()[1], "q": query[:100], "image_type": "photo", "per_page": max(3, n),
+              "safesearch": "true", "order": "popular"}
+    hits = _get_json("https://pixabay.com/api/?" + urllib.parse.urlencode(params)).get("hits", [])
+    return [h.get("largeImageURL") or h["webformatURL"] for h in hits[:n]]
+
+
+def _openverse_urls(query: str, n: int) -> list[str]:
+    params = {"q": query, "license": "cc0,pdm", "page_size": n * 2, "mature": "false"}
+    res = _get_json("https://api.openverse.org/v1/images/?" + urllib.parse.urlencode(params)).get("results", [])
+    return [r["url"] for r in res if r.get("url")]
 
 
 def search_photos(query: str, outs: list[Path]) -> list[Path]:
-    """ค้นภาพถ่ายจาก Pexels แล้วบันทึกเป็น PNG ตามรายชื่อไฟล์ที่ให้ คืนไฟล์ที่ได้จริง"""
-    if not pexels_key():
-        raise RuntimeError("ยังไม่ได้ใส่คีย์ Pexels (ใส่ในช่อง PEXELS_API_KEY ในหน้า Colab)")
+    """ค้นภาพถ่ายจริงแล้วบันทึกเป็น PNG ตามรายชื่อไฟล์ที่ให้ คืนไฟล์ที่ได้จริง"""
     from PIL import Image
-    query = " ".join(query.split()[:6]) or "nature"
-    photos = []
-    for q, ori in ((query, "square"), (query, None), (" ".join(query.split()[:2]), None)):
-        try:
-            photos = _pexels(q, len(outs), ori)
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                raise RuntimeError("คีย์ Pexels ไม่ถูกต้อง") from e
-            raise
-        if photos:
-            break
-    got = []
-    for ph, out in zip(photos, outs):
-        url = ph["src"].get("large2x") or ph["src"].get("large") or ph["src"]["original"]
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 sarupclip"})
-        tmp = out.with_suffix(".dl")
-        with urllib.request.urlopen(req, timeout=30) as r:
-            tmp.write_bytes(r.read())
-        Image.open(tmp).convert("RGB").save(out)
-        tmp.unlink(missing_ok=True)
-        got.append(out)
-    return got
+    words = query.split()
+    query = " ".join(words[:6]) or "nature"
+    pex, pix = _keys()
+    sources = ([("Pexels", _pexels_urls)] if pex else []) + ([("Pixabay", _pixabay_urls)] if pix else []) \
+        + [("Openverse", _openverse_urls)]
+    errors = []
+    for name, fn in sources:
+        urls = []
+        for q in dict.fromkeys([query, " ".join(words[:2])]):  # ไม่เจอ → ลองคำค้นสั้นลง
+            try:
+                urls = fn(q, len(outs))
+            except urllib.error.HTTPError as e:
+                errors.append(f"{name}: " + ("คีย์ไม่ถูกต้อง" if e.code in (401, 403) else
+                                            "ค้นบ่อยเกินโควตา ลองใหม่ภายหลัง" if e.code == 429 else f"HTTP {e.code}"))
+                break
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+                break
+            if urls:
+                break
+        got = []
+        for url in urls:
+            if len(got) >= len(outs):
+                break
+            out = outs[len(got)]
+            try:
+                req = urllib.request.Request(url, headers=UA)
+                tmp = out.with_suffix(".dl")
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    tmp.write_bytes(r.read())
+                im = Image.open(tmp).convert("RGB")
+                if min(im.size) < 300:  # ภาพเล็กเกิน ไม่คมในคลิป
+                    raise ValueError("ภาพเล็กเกินไป")
+                im.thumbnail((2048, 2048))
+                im.save(out)
+                got.append(out)
+            except Exception:
+                pass
+            finally:
+                out.with_suffix(".dl").unlink(missing_ok=True)
+        if got:
+            return got
+    if errors:
+        raise RuntimeError("หาภาพถ่ายไม่ได้ — " + "; ".join(errors))
+    return []
 
 
 def placeholder(out: Path, width: int, height: int, seed: int = 0) -> None:

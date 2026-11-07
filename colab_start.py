@@ -46,7 +46,7 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q", "deno"], capture_o
 gpu = subprocess.run("nvidia-smi", shell=True, capture_output=True).returncode == 0
 step("   การ์ดจอ: " + ("มี ✓ (ถอดเสียงเร็ว)" if gpu else "ไม่มี ⚠️"))
 if not gpu:
-    step("   ⚠️ ไม่มีการ์ดจอ: ทุกอย่างจะช้าลงมาก · AI วาดภาพไม่ได้ (ใช้ภาพถ่าย Pexels / รูปของคุณแทน)")
+    step("   ⚠️ ไม่มีการ์ดจอ: ทุกอย่างจะช้าลงมาก · AI วาดภาพไม่ได้ (ใช้ภาพถ่ายจริงจากคลังภาพฟรี / รูปของคุณแทน)")
     step("      ใช้ AI รุ่นเล็กให้อัตโนมัติ เพื่อไม่ให้ RAM เต็มจนเครื่องค้าง · ถ้ามีคีย์ Claude ใช้ Claude จะดีและเร็วกว่า")
 
 env = os.environ.copy()
@@ -71,7 +71,14 @@ if not pex:
     except Exception:
         pex = ""
 if pex:
-    env["PEXELS_API_KEY"] = pex
+    env["PEXELS_API_KEY"] = pex  # ใส่คีย์ Pixabay ในช่องนี้ก็ได้ (โปรแกรมแยกให้เอง)
+try:
+    from google.colab import userdata
+    pix = userdata.get("PIXABAY_API_KEY") or ""
+except Exception:
+    pix = ""
+if pix:
+    env["PIXABAY_API_KEY"] = pix
 pin = APP_PIN.strip()
 if not pin:  # สุ่ม PIN 6 หลัก (ใช้ค่าเดิมถ้ารันซ้ำในรอบเดียวกัน)
     pin = open("/content/.pin").read().strip() if os.path.exists("/content/.pin") else f"{random.randint(0, 999999):06d}"

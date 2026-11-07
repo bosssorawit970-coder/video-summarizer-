@@ -169,7 +169,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <label class="f">ภาพประกอบ</label>
       <div class="seg" id="srcSeg">
         <label><input type="radio" name="image_source" value="ai" checked> 🎨 AI วาดภาพ</label>
-        <label id="srcPhoto"><input type="radio" name="image_source" value="photo"> 📷 ภาพถ่ายจริง (Pexels) <span class="tag" id="pexTag"></span></label>
+        <label id="srcPhoto"><input type="radio" name="image_source" value="photo"> 📷 ภาพถ่ายจริง (คลังภาพฟรี) <span class="tag" id="pexTag"></span></label>
       </div>
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
@@ -407,7 +407,7 @@ async function init() {
   modeChanged();
   $("#styleSeg").innerHTML = Object.entries(cfg.styles || {}).map(([k, v], i) => `<label><input type="radio" name="style" value="${k}" ${i ? "" : "checked"}> ${esc(v)}</label>`).join("");
   const pin = $("#srcPhoto input");
-  pin.disabled = !cfg.pexels; $("#pexTag").textContent = cfg.pexels ? "พร้อม" : "ใส่คีย์ใน Colab ก่อน";
+  pin.disabled = !cfg.pexels; $("#pexTag").textContent = cfg.photo_source || "พร้อม";
   $("#pexTag").classList.toggle("ok", !!cfg.pexels); $("#srcPhoto").classList.toggle("dis", !cfg.pexels);
   $("#srcSeg").onchange = () => $("#styleBox").classList.toggle("hidden", document.querySelector("input[name=image_source]:checked").value !== "ai");
   if (!cfg.imagegen) $("#storyHint").textContent = "⚠️ เครื่องนี้ยังวาดภาพด้วย AI ไม่ได้ (ต้องใช้ Colab การ์ดจอ) — จะใช้ภาพพื้นหลังไล่สีแทน";

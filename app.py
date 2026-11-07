@@ -379,7 +379,8 @@ async def config(_: Request):
         "layouts": P.LAYOUTS,
         "styles": {k: v[0] for k, v in imagegen.STYLES.items()},
         "imagegen": imagegen.available(),
-        "pexels": bool(imagegen.pexels_key()),
+        "pexels": True,  # ภาพถ่ายจริงใช้ได้เสมอ (Openverse ไม่ต้องมีคีย์)
+        "photo_source": imagegen.photo_source(),
         "providers": {p: provider_available(p) for p in ("claude", "ollama", "none")},
         "claude_model": P.DEFAULT_CLAUDE_MODEL,
         "ollama_model": P.DEFAULT_OLLAMA_MODEL,
@@ -427,7 +428,7 @@ def job_opts(form) -> dict:
         opts["text"] = str(form.get("text") or "")[:8000]
         opts["style"] = str(form.get("style") or "") if form.get("style") in imagegen.STYLES else "cinematic"
         opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" else "verbatim"
-        opts["image_source"] = "photo" if form.get("image_source") == "photo" and imagegen.pexels_key() else "ai"
+        opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
     opts["render"] = _render_opts(form, opts["mode"])
     return opts
 
@@ -879,7 +880,7 @@ async def regen_scene(req: Request):
 
 
 async def photo_scene(req: Request):
-    """ค้นภาพถ่ายจริงจาก Pexels 4 ภาพให้เลือก"""
+    """ค้นภาพถ่ายจริงจากคลังภาพฟรี 4 ภาพให้เลือก"""
     from starlette.concurrency import run_in_threadpool
     j, err = _get(req.path_params["jid"])
     if err:

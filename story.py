@@ -271,17 +271,13 @@ def photo_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "")
 
 def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
                 only_missing: bool = True, source: str = "ai") -> int:
-    """หาภาพทุกฉาก (AI วาด หรือภาพถ่าย Pexels) คืนจำนวนฉากที่ได้ภาพจริง (ไม่ใช่ภาพไล่สี)"""
+    """หาภาพทุกฉาก (AI วาด หรือภาพถ่ายจริง) คืนจำนวนฉากที่ได้ภาพจริง (ไม่ใช่ภาพไล่สี)"""
     scene_dir.mkdir(parents=True, exist_ok=True)
     n, ok = len(plan["scenes"]), 0
     photo_err = None
-    if source == "ai" and not imagegen.available():
-        if imagegen.pexels_key():  # ไม่มีการ์ดจอ แต่มีคีย์ Pexels → ใช้ภาพถ่ายจริงแทน
-            source = "photo"
-            plan["note"] = "เครื่องนี้ไม่มีการ์ดจอ จึงใช้ภาพถ่ายจริงจาก Pexels แทนการวาดด้วย AI"
-        else:
-            plan["note"] = ("เครื่องนี้ไม่มีการ์ดจอ จึงวาดภาพด้วย AI ไม่ได้ (ใช้ภาพพื้นหลังแทน) — "
-                            "กด 📁 รูปของฉัน หรือใส่คีย์ Pexels เพื่อใช้ภาพถ่ายจริง")
+    if source == "ai" and not imagegen.available():  # ไม่มีการ์ดจอ → ใช้ภาพถ่ายจริงแทน
+        source = "photo"
+        plan["note"] = f"เครื่องนี้ไม่มีการ์ดจอ จึงใช้ภาพถ่ายจริงจาก {imagegen.photo_source()} แทนการวาดด้วย AI"
     for i, s in enumerate(plan["scenes"]):
         if only_missing and s.get("img") and (scene_dir / s["img"]).exists():
             continue
