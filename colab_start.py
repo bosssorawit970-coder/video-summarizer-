@@ -167,12 +167,40 @@ display(HTML(html))
 print(f"   รหัส PIN: {pin}", flush=True)
 print("\n✅ พร้อมใช้งาน — เปิดหน้านี้ค้างไว้ระหว่างใช้ (กดปุ่ม ■ หยุดเซลล์นี้เมื่อเลิกใช้)")
 
-# วนรอไว้เพื่อให้ Colab รู้ว่ายังใช้งานอยู่ และแจ้งถ้าโปรแกรมล่ม
+# วนรอไว้ + ปิด Colab อัตโนมัติเมื่อไม่มีคนใช้ (ประหยัดโควตาการ์ดจอฟรี)
+AUTO_STOP_MIN = float(globals().get("AUTO_STOP_MIN", 30) or 0)   # 0 = ไม่ปิดเอง
+CHECK_EVERY = int(globals().get("CHECK_EVERY", 60))
+if AUTO_STOP_MIN:
+    print(f"⏱ ถ้าไม่มีใครใช้โปรแกรม {AUTO_STOP_MIN:g} นาที (และไม่มีงานค้าง) จะปิด Colab ให้อัตโนมัติ เพื่อประหยัดโควตาการ์ดจอ", flush=True)
+    if not SAVE_TO_DRIVE:
+        print("   ไฟล์งานอยู่ในเครื่อง Colab ชั่วคราว — ดาวน์โหลดวิดีโอเก็บไว้ก่อนเลิกใช้", flush=True)
+
+
+def _stop_all():
+    subprocess.run("pkill -f 'python app.py'; pkill -f cloudflared; pkill -f 'ollama serve'", shell=True)
+
+
 try:
     while True:
-        time.sleep(60)
-        if not wait_url("http://127.0.0.1:8000/api/config", 5):
-            print("⚠️ โปรแกรมหยุดทำงาน:\n" + open("/content/app.log").read()[-2000:]); break
+        time.sleep(CHECK_EVERY)
+        try:
+            import json as _json
+            st = _json.loads(urllib.request.urlopen("http://127.0.0.1:8000/api/idle", timeout=5).read())
+        except Exception:
+            if not wait_url("http://127.0.0.1:8000/api/config", 5):
+                print("⚠️ โปรแกรมหยุดทำงาน:\n" + open("/content/app.log").read()[-2000:])
+                break
+            continue
+        if AUTO_STOP_MIN and not st.get("busy") and st.get("idle_seconds", 0) >= AUTO_STOP_MIN * 60:
+            print(f"💤 ไม่มีการใช้งาน {AUTO_STOP_MIN:g} นาที — ปิดโปรแกรมและคืนเครื่อง Colab แล้ว", flush=True)
+            print("   ใช้ครั้งหน้า: กด เรียกใช้ทุกเซลล์ ใหม่ได้เลย", flush=True)
+            _stop_all()
+            try:
+                from google.colab import runtime
+                runtime.unassign()  # คืนเครื่อง = หยุดนับโควตาการ์ดจอ
+            except Exception as e:
+                print("   (คืนเครื่องเองไม่ได้ — ไปที่ รันไทม์ → ยกเลิกการเชื่อมต่อและลบรันไทม์)", e)
+            break
 except KeyboardInterrupt:
-    subprocess.run("pkill -f 'python app.py'; pkill -f cloudflared; pkill -f 'ollama serve'", shell=True)
+    _stop_all()
     print("ปิดโปรแกรมแล้ว")

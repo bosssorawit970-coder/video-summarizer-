@@ -965,13 +965,28 @@ async def login(req: Request):
     return HTMLResponse(LOGIN_HTML.replace("__ERR__", "รหัสไม่ถูกต้อง"), status_code=401)
 
 
+LAST_ACTIVITY = [time.time()]  # ครั้งล่าสุดที่มีคนเปิดใช้โปรแกรม (ไว้ปิด Colab อัตโนมัติเมื่อไม่มีใครใช้)
+
+
+async def idle_status(_: Request):
+    busy = any(j.get("status") in ("queued", "analyzing", "rendering")
+               or (j.get("capcut") or {}).get("status") == "working" for j in jobs.values())
+    if busy:
+        LAST_ACTIVITY[0] = time.time()  # งานที่กำลังทำอยู่ = ยังใช้งานอยู่
+    return JSONResponse({"idle_seconds": int(time.time() - LAST_ACTIVITY[0]), "busy": busy})
+
+
 class PinGate:
-    """ต้องใส่ PIN ก่อนใช้งาน (กันคนอื่นที่ได้ลิงก์ไป)"""
+    """ต้องใส่ PIN ก่อนใช้งาน (กันคนอื่นที่ได้ลิงก์ไป) + จดเวลาที่มีคนใช้งานล่าสุด"""
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/api/idle":
+            return await self.app(scope, receive, send)  # ให้ตัวเฝ้าใน Colab ถามได้ (ไม่มีข้อมูลลับ)
+        if scope["type"] == "http":
+            LAST_ACTIVITY[0] = time.time()
         if scope["type"] != "http" or not APP_PIN or scope["path"] == "/login":
             return await self.app(scope, receive, send)
         cookie = ""
@@ -1011,6 +1026,7 @@ for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
         pass
 app = Starlette(routes=[
     Route("/login", login, methods=["GET", "POST"]),
+    Route("/api/idle", idle_status),
     Route("/api/jobs/{jid}/cancel", cancel_job, methods=["POST"]),
     Route("/", index),
     Route("/api/config", config),
