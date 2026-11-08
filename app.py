@@ -42,6 +42,7 @@ import story as ST  # noqa: E402
 import voice as V  # noqa: E402
 import graphics as G2  # noqa: E402
 import source as SRC  # noqa: E402
+import product as PR  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -161,9 +162,29 @@ def finish_analyze(jid: str, plan: dict) -> None:
          message="วิเคราะห์เสร็จ รอรวมคลิป" if j["opts"].get("batch_hold") else "พร้อมให้ตรวจบทพากย์")
 
 
+def analyze_product(jid: str) -> dict:
+    d, j = job_dir(jid), jobs[jid]
+    o = j["opts"]
+    media, shots = PR.move_uploads(Path(o.get("upload_dir") or ""), d / "product_files")
+    save(jid, status="analyzing", step="plan", progress=5,
+         message="AI กำลังเขียนบทป้ายยา" + (" (อ่านภาพหน้าจอสินค้าด้วย)" if shots else ""))
+    plan = PR.make_product_plan(o["product_info"], o["provider"], o["target_seconds"], shots,
+                                graphics=o.get("graphics", True))
+    save(jid, plan=plan, step="images", progress=30, message=f"ได้บท {len(plan['scenes'])} ฉาก — ใส่รูป/วิดีโอสินค้า")
+    used = PR.add_media(plan, media, d / "scenes", lambda m: save(jid, step="images", progress=40, message=m))
+    if not used:  # ไม่มีรูปสินค้า → ใช้ภาพ/วิดีโอฟรีประกอบ (ไม่ใช่ตัวสินค้าจริง)
+        ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), "cinematic",
+                       lambda pct, msg: save(jid, step="images", progress=40 + pct * 0.58, message=msg), source="photo")
+        plan["note"] = ((plan.get("note") or "") + " · ยังไม่มีรูป/วิดีโอสินค้าจริง จึงใช้ภาพฟรีประกอบไปก่อน — "
+                        "แนะนำกด 📁 รูปของฉัน ใส่รูปสินค้าที่ถ่ายเองทีละฉาก คนดูจะเชื่อมากกว่า").strip(" ·")
+    return plan
+
+
 def analyze_story(jid: str) -> dict:
     d, j = job_dir(jid), jobs[jid]
     o = j["opts"]
+    if o.get("product_info"):
+        return analyze_product(jid)
     rewrite = o.get("script_mode") == "rewrite"
     text, extra, source = o.get("text", ""), "", None
     if o.get("source_url"):
@@ -325,6 +346,10 @@ def do_render_story(jid: str) -> None:
     d, j = job_dir(jid), jobs[jid]
     try:
         r, plan = j["render_opts"], j["plan"]
+        if plan.get("product") and str(r.get("voice", "")).startswith("clone:"):
+            # โมเดลโคลนเสียงห้ามใช้เชิงพาณิชย์ (CC BY-NC-SA) — งานขายของ/affiliate ใช้ไม่ได้
+            r = {**r, "voice": "gemini:Leda" if V.gemini_ready() else P.THAI_VOICES[0]["id"]}
+            P.TTS_NOTES.append("งานขายสินค้าใช้เสียงโคลนไม่ได้ (สัญญาอนุญาตห้ามใช้เชิงพาณิชย์) จึงใช้เสียงอื่นแทน")
         work = d / "work"
         shutil.rmtree(work, ignore_errors=True)
         out = d / "output.mp4"
@@ -473,6 +498,12 @@ def job_opts(form) -> dict:
         "mode": "game" if form.get("mode") == "game" else "talk",
         "note": str(form.get("note") or "")[:300],
     }
+    if form.get("mode") == "product":  # 🛒 โหมดสินค้า = งานแบบข้อความ→คลิป ที่ใช้บทป้ายยา
+        opts["mode"] = "story"
+        opts["product_info"] = {k: str(form.get(f"p_{k}") or "")[:3000] for k in ("name", "price", "full", "points", "cta")}
+        opts["graphics"] = _bool(form.get("graphics"), True)
+        opts["image_source"], opts["videos"], opts["script_mode"] = "photo", False, "rewrite"
+        opts["text"] = opts["product_info"]["name"]
     if form.get("mode") == "story":
         opts["mode"] = "story"
         opts["text"] = str(form.get("text") or "")[:8000]
@@ -487,6 +518,11 @@ def job_opts(form) -> dict:
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
     opts["render"] = _render_opts(form, opts["mode"])
+    if opts.get("product_info"):
+        if not form.get("tone"):
+            opts["render"]["tone"] = "bright"  # ป้ายยา = เสียงสดใส
+        if str(opts["render"]["voice"]).startswith("clone:"):  # โคลนเสียงห้ามใช้เชิงพาณิชย์
+            opts["render"]["voice"] = "gemini:Leda" if V.gemini_ready() else P.THAI_VOICES[0]["id"]
     return opts
 
 
@@ -517,6 +553,27 @@ async def create_job(req: Request):
     uid = str(form.get("upload_id") or "")
     url = str(form.get("url") or "").strip()
     part = None
+    if form.get("mode") == "product":
+        opts = job_opts(form)
+        info = opts["product_info"]
+        ids = [u for u in str(form.get("media_ids") or "").split(",") if u]
+        sids = [u for u in str(form.get("shot_ids") or "").split(",") if u]
+        names = str(form.get("media_names") or "").split("\n")
+        if not info["name"].strip() and not info["points"].strip() and not sids:
+            return JSONResponse({"error": "ใส่ชื่อสินค้า หรือรายละเอียด/ภาพหน้าจอสินค้าอย่างน้อย 1 อย่าง"}, status_code=400)
+        up_dir = UPLOADS / f"prod_{uuid.uuid4().hex}"
+        up_dir.mkdir(parents=True, exist_ok=True)
+        for k, uid in enumerate(ids[:12]):
+            part = _upload_part(uid)
+            if part:
+                ext = Path(names[k] if k < len(names) else "").suffix.lower()[:6] or ".jpg"
+                shutil.move(str(part), up_dir / f"media_{k + 1:02}{ext}")
+        for k, uid in enumerate(sids[:4]):
+            part = _upload_part(uid)
+            if part:
+                shutil.move(str(part), up_dir / f"shot_{k + 1:02}.jpg")
+        opts["upload_dir"] = str(up_dir)
+        return JSONResponse({"id": new_job("🛒 " + (info["name"].strip()[:40] or "สินค้า"), "", None, opts)})
     if form.get("mode") == "story":
         text = str(form.get("text") or "").strip()
         if len(text) < 10:

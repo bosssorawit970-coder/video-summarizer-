@@ -160,6 +160,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <label><input type="radio" name="mode" value="talk" checked> 🗣️ คลิปพูด / ทั่วไป</label>
       <label><input type="radio" name="mode" value="game"> 🎮 ไฮไลต์เกม MLBB</label>
       <label><input type="radio" name="mode" value="story"> 📝 ข้อความ → คลิป</label>
+      <label><input type="radio" name="mode" value="product"> 🛒 ป้ายยาสินค้า</label>
     </div>
     <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
     <div class="storyOnly hidden">
@@ -183,6 +184,32 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
       <div class="hint" style="margin-top:6px">💡 ใช้ Gemini (ฟรี) หรือ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
+    </div>
+    <div class="productOnly hidden">
+      <h2>1. ข้อมูลสินค้า</h2>
+      <label class="f">ชื่อสินค้า</label>
+      <input type="text" id="pName" maxlength="120" placeholder="เช่น พัดลมพกพา 3 ระดับ ชาร์จ USB-C">
+      <div class="row" style="gap:8px;flex-wrap:nowrap">
+        <div style="flex:1"><label class="f">ราคาโปร (บาท)</label><input type="text" id="pPrice" inputmode="decimal" placeholder="199"></div>
+        <div style="flex:1"><label class="f">ราคาปกติ (ถ้ามี)</label><input type="text" id="pFull" inputmode="decimal" placeholder="399"></div>
+      </div>
+      <label class="f">จุดเด่น / รายละเอียด (คัดลอกจากหน้าร้านมาวางได้)</label>
+      <textarea id="pPoints" rows="5" maxlength="3000" placeholder="เช่น&#10;- ลมแรง 3 ระดับ เสียงเงียบ&#10;- แบตอยู่ได้ 8 ชั่วโมง&#10;- พับได้ พกใส่กระเป๋า"></textarea>
+      <label class="f">📸 ภาพหน้าจอหน้าร้าน (ให้ AI อ่านข้อมูล — ไม่เอาไปใส่ในคลิป)</label>
+      <input type="file" id="pShots" accept="image/*" multiple>
+      <div class="hint" id="pShotsHint">แคปหน้าสินค้าใน Shopee (ชื่อ ราคา รายละเอียด) ได้สูงสุด 4 ภาพ · ต้องใช้ AI Gemini</div>
+      <label class="f">🎬 รูป/วิดีโอสินค้าที่ถ่ายเอง (ใส่ในคลิป)</label>
+      <input type="file" id="pMedia" accept="image/*,video/*" multiple>
+      <div class="hint" id="pMediaHint">แนะนำมาก — คลิปจากของจริงคนดูเชื่อกว่า และไม่ติดลิขสิทธิ์รูปของร้าน (สูงสุด 12 ไฟล์)</div>
+      <label class="f">ปิดท้ายชวนซื้อ</label>
+      <select id="pCta">
+        <option value="cart">กดตะกร้าเหลือง (TikTok Shop / Shopee Video)</option>
+        <option value="profile">ลิงก์ในโปรไฟล์</option>
+        <option value="comment">ลิงก์ในคอมเมนต์</option>
+        <option value="desc">ลิงก์ใต้คลิป (YouTube)</option>
+      </select>
+      <div class="seg" style="margin-top:10px"><label><input type="checkbox" id="pGraphics" checked> 📊 กราฟิกราคา/จุดเด่น</label></div>
+      <div class="hint" style="margin-top:8px;background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px">✅ AI เขียนจากข้อมูลจริงเท่านั้น ไม่แต่งรีวิว/ประสบการณ์ใช้ · แคปชันบอกว่าเป็นลิงก์ affiliate ให้ · งานขายของใช้เสียงโคลนไม่ได้ (สัญญาอนุญาตห้ามเชิงพาณิชย์) — แนะนำเสียง ✨ Gemini</div>
     </div>
     <div class="mediaOnly">
     <h2>1. ใส่ลิงก์คลิป</h2>
@@ -527,6 +554,7 @@ async function init() {
 
 if (matchMedia("(pointer:coarse)").matches) $("#dropTitle").textContent = "แตะเพื่อเลือกคลิปจากเครื่อง";
 const MODE_HINT = {
+  product: "ใส่ข้อมูลสินค้า + รูป/วิดีโอที่ถ่ายเอง → AI เขียนบทป้ายยา (ฮุก → ปัญหา → จุดเด่น → ราคา → ชวนกดตะกร้า) ใส่กราฟิกราคา พากย์เสียง และแคปชัน affiliate ให้",
   story: "พิมพ์หรือวางข้อความ → AI เขียนบทคลิปสั้น แบ่งฉาก วาดภาพประกอบ ทำแอนิเมชัน และพากย์เสียงไทยให้",
   talk: "ถอดคำพูดในคลิป ให้ AI สรุปเนื้อหา เลือกช่วงสำคัญ แล้วพากย์เสียงไทยทับ",
   game: "หาช็อตเด็ดจากเสียงประกาศในเกม (Double Kill, Maniac, Savage, Lord…) ใส่ป้ายตัวใหญ่ + พากย์แบบแคสเตอร์ · ตอนอัดหน้าจอต้องเปิดเสียงเกมด้วย",
@@ -535,17 +563,20 @@ function mode() { return document.querySelector("input[name=mode]:checked").valu
 function modeChanged() {
   const g = mode() === "game";
   document.querySelectorAll(".gameOnly").forEach(e => e.classList.toggle("hidden", !g));
-  const st = mode() === "story";
+  const pr = mode() === "product", st = mode() === "story" || pr;
   document.querySelectorAll(".talkOnly").forEach(e => e.classList.toggle("hidden", g || st));
-  document.querySelectorAll(".storyOnly").forEach(e => e.classList.toggle("hidden", !st));
+  document.querySelectorAll(".storyOnly").forEach(e => e.classList.toggle("hidden", mode() !== "story"));
+  document.querySelectorAll(".productOnly").forEach(e => e.classList.toggle("hidden", !pr));
   document.querySelectorAll(".mediaOnly").forEach(e => e.classList.toggle("hidden", st));
+  if (pr && cfg) { if (cfg.gemini_tts) $("#voice0").value = "gemini:Leda";
+    else if (($("#voice0").value || "").startsWith("clone:")) $("#voice0").value = cfg.voices[0].id; }
   if (typeof refreshItems === "function") refreshItems();
   if (typeof scriptModeChanged === "function" && $("#scriptSeg")) scriptModeChanged();
   $("#modeHint").textContent = MODE_HINT[mode()];
   if (!g) { const sep = document.querySelector("input[name=bmode][value=separate]"); if (sep) sep.checked = true; }
   if (typeof decorSummary === "function" && $("#decorSum")) decorSummary();
   if (cfg) $("#layout0").value = g ? "vertical_blur" : st ? "vertical_crop" : "original";
-  $("#target").value = g ? 45 : st ? 40 : 60; $("#tgtV").textContent = $("#target").value;
+  $("#target").value = g ? 45 : pr ? 30 : st ? 40 : 60; $("#tgtV").textContent = $("#target").value;
 }
 $("#modeSeg").onchange = modeChanged;
 $("#target").oninput = e => $("#tgtV").textContent = e.target.value;
@@ -566,6 +597,12 @@ const URLS_RE = /https?:\/\/\S+/g;
 const DROP_TXT = () => matchMedia("(pointer:coarse)").matches ? "แตะเพื่อเลือกคลิปจากเครื่อง" : "ลากไฟล์มาวาง หรือคลิกเพื่อเลือก";
 const links = () => [...new Set($("#url").value.match(URLS_RE) || [])];
 function refreshItems() {
+  if (mode() === "product") {
+    const ok = $("#pName").value.trim() || $("#pPoints").value.trim() || $("#pShots").files.length;
+    $("#go").disabled = !ok; $("#go").textContent = "สร้างคลิปป้ายยา";
+    $("#pMediaHint").textContent = $("#pMedia").files.length ? `เลือกแล้ว ${$("#pMedia").files.length} ไฟล์ — จะวนใส่ทุกฉาก` : "แนะนำมาก — คลิปจากของจริงคนดูเชื่อกว่า และไม่ติดลิขสิทธิ์รูปของร้าน (สูงสุด 12 ไฟล์)";
+    $("#batchBox").classList.add("hidden"); return;
+  }
   if (mode() === "story") {
     const len = $("#storyText").value.trim().length, link = URL_RE.test($("#storyText").value);
     $("#go").disabled = len < 10; $("#go").textContent = link ? "อ่านลิงก์ แปล แล้วสร้างคลิป" : "สร้างคลิปจากข้อความ";
@@ -590,6 +627,8 @@ function urlChanged() {
 }
 $("#url").oninput = urlChanged;
 $("#storyText").oninput = () => refreshItems();
+for (const id of ["pName", "pPoints"]) $("#" + id).oninput = () => refreshItems();
+for (const id of ["pShots", "pMedia"]) $("#" + id).onchange = () => refreshItems();
 function scriptModeChanged() {
   const rw = document.querySelector("input[name=script_mode]:checked").value === "rewrite";
   $("#scriptHint").textContent = rw ? "AI จะเรียบเรียงใหม่ให้กระชับ ตามความยาวคลิปที่ตั้งไว้ด้านล่าง" : "ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ";
@@ -704,6 +743,22 @@ $("#go").onclick = async () => {
   show("s-progress"); $("#errRow").classList.add("hidden"); $("#bar").style.width = "0";
   const msg = $("#msg"), bar = $("#bar");
   try {
+    if (mode() === "product") {
+      setSteps("plan", "story");
+      const up = async (list, tag) => { const ids = [];
+        for (const [k, f0] of [...list].entries()) {
+          const f = await shrinkImage(f0);
+          ids.push(await uploadFile(f, pct => { msg.textContent = `อัปโหลด${tag} ${k + 1}/${list.length} — ${pct.toFixed(0)}%`; bar.style.width = pct + "%"; }));
+        } return ids; };
+      const media = [...$("#pMedia").files].slice(0, 12), shots = [...$("#pShots").files].slice(0, 4);
+      const mids = await up(media, "รูป/วิดีโอสินค้า"), sids = await up(shots, "ภาพหน้าจอ");
+      const fd = commonFields(new FormData());
+      for (const k of ["Name", "Price", "Full", "Points"]) fd.append("p_" + k.toLowerCase(), $("#p" + k).value.trim());
+      fd.append("p_cta", $("#pCta").value); fd.append("graphics", $("#pGraphics").checked ? "1" : "0");
+      fd.append("media_ids", mids.join(",")); fd.append("shot_ids", sids.join(","));
+      fd.append("media_names", media.map(f => f.type.startsWith("video/") ? (f.name || "v.mp4") : "img.jpg").join("\n"));
+      const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
+    }
     if (mode() === "story") {
       setSteps("plan", "story"); msg.textContent = "กำลังเริ่ม…";
       const fd = commonFields(new FormData());

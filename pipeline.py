@@ -466,12 +466,25 @@ POST_TAGS = {
     "game": ["#MLBB", "#MobileLegends", "#ไฮไลต์เกม", "#เกมมือถือ", "#fyp"],
     "story": ["#เรื่องเล่า", "#fyp", "#tiktokไทย"],
     "talk": ["#สรุปให้", "#สาระ", "#fyp", "#tiktokไทย"],
+    "product": ["#ShopeeAffiliate", "#ของดีบอกต่อ", "#ป้ายยา", "#fyp"],
 }
 
 
 def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
     """แคปชัน + แฮชแท็กสำหรับโพสต์ TikTok/Reels"""
-    post = _make_post(plan, mode, provider, note)
+    prod = plan.get("product")
+    post = _make_post(plan, "product" if prod else mode, provider, note)
+    if prod:  # เปิดเผยว่าเป็นลิงก์ affiliate (กฎของแพลตฟอร์ม + ความน่าเชื่อถือ)
+        cta = {"cart": "กดตะกร้าเหลือง 🛒", "profile": "ลิงก์ในโปรไฟล์ 🛒", "comment": "ลิงก์ในคอมเมนต์ 🛒",
+               "desc": "ลิงก์ใต้คลิป 🛒"}.get(prod.get("cta"), "ลิงก์ในโปรไฟล์ 🛒")
+        post["caption"] = post["caption"].rstrip() + f"\n{cta}\n(ลิงก์ affiliate — ได้ค่าคอมเล็กน้อยเมื่อซื้อผ่านลิงก์)"
+        if not any(h.lower() == "#shopeeaffiliate" for h in post["hashtags"]):
+            post["hashtags"] = ["#ShopeeAffiliate"] + post["hashtags"][:7]
+        if post.get("youtube"):
+            yt = post["youtube"]
+            body, _, tags = yt["description"].rpartition("\n\n")
+            yt["description"] = (body or yt["description"]) + "\n🛒 ลิงก์สินค้า: (วางลิงก์ affiliate ตรงนี้)" + \
+                "\nลิงก์ affiliate — ได้ค่าคอมเล็กน้อยเมื่อซื้อผ่านลิงก์" + (f"\n\n{tags}" if body else "")
     src = plan.get("source") or {}
     if src.get("site"):  # ให้เครดิตต้นทาง (เนื้อหาแปล/เรียบเรียงจากโพสต์/ข่าว)
         post["caption"] = post["caption"].rstrip() + f"\n📌 ที่มา: {src['site']}"
@@ -491,7 +504,8 @@ def _make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
                       for c in items[:12])[:2500]
     if provider != "none":
         kind = {"game": "คลิปไฮไลต์เกม Mobile Legends (MLBB)", "story": "คลิปสั้นเล่าเรื่อง",
-                "talk": "คลิปสรุปเนื้อหา"}.get(mode, "คลิปสั้น")
+                "talk": "คลิปสรุปเนื้อหา",
+                "product": "คลิปป้ายยาสินค้า (affiliate) — ห้ามแต่งรีวิวหรือประสบการณ์ใช้จริง"}.get(mode, "คลิปสั้น")
         prompt = f"""เขียนแคปชันโพสต์ TikTok ภาษาไทยสำหรับ{kind}นี้
 ชื่อคลิป: {title}
 สรุป: {summary}
@@ -529,7 +543,8 @@ def _make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
             "youtube": _youtube_post({}, title, summary, mode, tags)}
 
 
-YT_TAGS = {"game": ["MLBB", "Mobile Legends", "ไฮไลต์เกม", "เกมมือถือ", "MLBB ไทย"],
+YT_TAGS = {"product": ["รีวิวสินค้า", "ของดีบอกต่อ", "Shopee", "ป้ายยา"],
+           "game": ["MLBB", "Mobile Legends", "ไฮไลต์เกม", "เกมมือถือ", "MLBB ไทย"],
            "story": ["เรื่องเล่า", "เรื่องน่ารู้", "สาระ"], "talk": ["สรุป", "สาระ", "ความรู้"]}
 
 

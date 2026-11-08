@@ -1,0 +1,194 @@
+"""
+🛒 โหมดสินค้า (Shopee affiliate / ป้ายยา)
+ข้อมูลสินค้า (+ ภาพหน้าจอหน้าร้านให้ AI อ่าน) + รูป/วิดีโอที่ถ่ายเอง → บทป้ายยา ฮุก-ปัญหา-จุดเด่น-ราคา-ชวนกดตะกร้า
+หลักการ: เขียนจากข้อมูลจริงเท่านั้น ไม่แต่งรีวิว/ประสบการณ์ใช้จริง ไม่อ้างสรรพคุณเกินจริง และแคปชันบอกว่าเป็นลิงก์ affiliate
+"""
+from __future__ import annotations
+
+import base64
+import io
+import re
+import shutil
+from pathlib import Path
+
+import graphics as G
+import imagegen
+import pipeline as P
+import story as ST
+
+CTAS = {
+    "cart": "กดตะกร้าเหลืองได้เลย",
+    "profile": "ลิงก์อยู่ในโปรไฟล์",
+    "comment": "ลิงก์อยู่ในคอมเมนต์",
+    "desc": "ลิงก์อยู่ใต้คลิป",
+}
+
+PRODUCT_PROMPT = """คุณเป็นครีเอเตอร์คลิปป้ายยาสินค้าบน TikTok/Reels/Shorts ที่คนไทยชอบดู เขียนบทคลิปแนวตั้งภาษาไทยขายสินค้านี้
+
+ข้อมูลสินค้า (ใช้เฉพาะข้อมูลนี้เท่านั้น):
+ชื่อสินค้า: {name}
+ราคาขาย: {price}
+ราคาเต็ม/ก่อนลด: {full}
+จุดเด่น/รายละเอียดจากผู้ใช้:
+{points}
+{shots_note}
+
+โครงบท {n} ฉาก รวมยาวราว {target} วินาที:
+1. ฮุก 3 วินาทีแรก — คำถามหรือปัญหาที่คนดูเจอจริง หรือผลลัพธ์ที่อยากได้ (ห้ามขึ้นต้นด้วย "สวัสดี")
+2. ปัญหา/สถานการณ์ที่สินค้านี้ช่วยได้
+3. จุดเด่นของสินค้า ฉากละ 1 ข้อ (เอาเฉพาะที่มีในข้อมูล)
+4. ราคา/โปรโมชัน (ถ้ามีราคา) — พูดตัวเลขเป็นเลขอารบิก เช่น "เหลือแค่ 299 บาท"
+5. ปิดท้ายชวนซื้อ: "{cta}"
+
+กติกาสำคัญ:
+- บทพากย์ทุกฉากรวมกันไม่เกิน {budget} ตัวอักษร ฉากละ 1-2 ประโยคสั้น ภาษาพูดเป็นกันเอง กระชับ มีพลัง ห้ามอีโมจิ
+- ห้ามแต่งประสบการณ์ใช้จริง ("ใช้มา 3 เดือน", "ลองแล้วดีมาก") ห้ามแต่งรีวิว/ยอดขาย/คะแนน/ตัวเลขที่ไม่มีในข้อมูล
+- ห้ามอ้างสรรพคุณเกินจริง รักษาโรค หรือรับประกันผล ห้ามใช้ "ดีที่สุด" "อันดับ 1" ถ้าข้อมูลไม่ได้บอก
+- headline: ข้อความบนจอ 2-6 คำ ตัวใหญ่ เช่น "ลด 50%" "กันน้ำได้" (เว้นว่างได้)
+- image: คำบรรยายภาพประกอบภาษาอังกฤษ (ใช้เมื่อไม่มีรูปสินค้าจริง)
+- search: คำค้นภาพ/วิดีโอฟรีภาษาอังกฤษ 2-4 คำ ที่เข้ากับฉาก (เช่น "woman applying skincare")
+{graphic_rules}
+  (ฉากราคาควรใช้ stat เช่น {{"type":"stat","value":"299","unit":"บาท","label":"ราคาโปร"}} หรือ compare ราคาเต็ม vs ราคาโปร)
+
+ตอบเป็น JSON อย่างเดียว:
+{{"title": "ชื่อคลิปดึงดูด", "summary": "สรุป 1 ประโยค",
+ "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null}}]}}"""
+
+
+def _shot_parts(shots: list[Path]) -> list[dict]:
+    from PIL import Image
+    parts = []
+    for f in shots[:4]:
+        try:
+            im = Image.open(f).convert("RGB")
+            im.thumbnail((1024, 1024))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}})
+        except Exception as e:
+            print("อ่านภาพหน้าจอสินค้าไม่ได้:", e)
+    return parts
+
+
+def _money(v: str) -> str:
+    v = re.sub(r"[^\d.,]", "", str(v or ""))
+    return v.strip(".,")
+
+
+def make_product_plan(info: dict, provider: str, target: float, shots: list[Path] | None = None,
+                      graphics: bool = True) -> dict:
+    ST.GRAPHICS_ON = graphics
+    name = P.clean_text(info.get("name", ""))[:120]
+    price, full = _money(info.get("price")), _money(info.get("full"))
+    points = str(info.get("points") or "").strip()[:3000]
+    cta = CTAS.get(info.get("cta"), CTAS["cart"])
+    if not name and not points and not shots:
+        raise RuntimeError("ใส่ชื่อสินค้า หรือรายละเอียด/ภาพหน้าจอสินค้าอย่างน้อย 1 อย่าง")
+    n = max(4, min(10, round(target / 6)))
+    budget = ST.speech_budget(target)
+    plan = None
+    if provider != "none":
+        parts = _shot_parts(shots or []) if provider == "gemini" else []
+        prompt = PRODUCT_PROMPT.format(
+            name=name or "(ดูจากภาพหน้าจอ)", price=f"{price} บาท" if price else "(ไม่ระบุ)",
+            full=f"{full} บาท" if full else "(ไม่ระบุ)", points=points or "(ไม่ระบุ)",
+            shots_note="ข้อมูลเพิ่มเติม: อ่านชื่อ ราคา และจุดเด่นจากภาพหน้าจอหน้าร้านที่แนบมาด้วย (เชื่อตัวเลขที่ผู้ใช้พิมพ์มากกว่า)"
+            if parts else "", n=n, target=int(target), cta=cta, budget=budget, graphic_rules=ST._graphic_rules())
+        facts = " ".join([name, price, full, points])
+        try:
+            raw = P._ask_gemini(prompt, parts) if parts else P.ask_ai(provider, prompt)
+            data = P._parse_json(raw)
+            scenes = []
+            for s in data.get("scenes") or []:
+                narr = P.clean_text(str(s.get("narration") or ""))
+                if not narr:
+                    continue
+                g = G.clean(s.get("graphic"), narr)
+                if g and g["type"] in ("stat", "compare") and not parts:
+                    # ตัวเลขในกราฟิกต้องมาจากข้อมูลสินค้าจริงด้วย (ไม่ใช่แค่ในบท)
+                    nums = G._digits(facts)
+                    vals = [g.get("value", "")] if g["type"] == "stat" else [f"{i['value']:g}" for i in g["items"]]
+                    if any(re.sub(r"[,\s]", "", str(v)) not in nums for v in vals):
+                        g = None
+                scenes.append({"narration": narr, "headline": P.clean_text(str(s.get("headline") or ""))[:30],
+                               "image": str(s.get("image") or "").strip()[:300], "img": "",
+                               "search": str(s.get("search") or "").strip()[:60], "graphic": g})
+            if scenes:
+                ST.fit_length(scenes, budget)
+                plan = {"title": P.clean_text(str(data.get("title") or name))[:80],
+                        "summary": str(data.get("summary") or ""), "scenes": scenes}
+        except Exception as e:
+            print("AI เขียนบทป้ายยาไม่สำเร็จ:", e)
+            if provider != "none" and not points and not name:
+                raise RuntimeError(f"AI อ่านภาพหน้าจอสินค้าไม่สำเร็จ ({P.error_text(e)[:120]}) — พิมพ์ชื่อ/จุดเด่นสินค้าเพิ่ม")
+    if plan is None:
+        plan = _template_plan(name, price, full, points, cta)
+    plan["product"] = {"name": name, "price": price, "full": full, "cta": info.get("cta") or "cart"}
+    ST.finish_graphics(plan["scenes"])
+    for s in plan["scenes"]:  # ฉากราคา: ถ้า AI ไม่ได้ใส่กราฟิก ใส่ให้ (ตัวเลขจากข้อมูลจริง)
+        if price and price in s["narration"].replace(",", "") and not s.get("graphic") and graphics:
+            s["graphic"] = ({"type": "compare", "unit": "บาท", "items": [
+                {"label": "ราคาปกติ", "value": float(full.replace(",", ""))},
+                {"label": "ราคาโปร", "value": float(price.replace(",", ""))}]}
+                if full and full != price else {"type": "stat", "value": price, "unit": "บาท", "label": "ราคาโปร"})
+            break
+    return plan
+
+
+def _template_plan(name: str, price: str, full: str, points: str, cta: str) -> dict:
+    """ไม่มี AI: บทป้ายยาแบบพื้นฐานจากข้อมูลที่พิมพ์มา"""
+    feats = [P.clean_text(x) for x in re.split(r"[\n•\-–,]+", points) if len(P.clean_text(x)) >= 4][:3]
+    sc = [{"narration": f"ใครกำลังหา{name or 'ของดีราคาโดน'}อยู่ ดูคลิปนี้ก่อน", "headline": "ของมันต้องมี"}]
+    sc += [{"narration": f"จุดเด่นคือ {f}", "headline": ""} for f in feats]
+    if price:
+        sc.append({"narration": f"ตอนนี้ราคาแค่ {price} บาท" + (f" จากปกติ {full} บาท" if full and full != price else ""),
+                   "headline": "ราคาโปร"})
+    sc.append({"narration": f"สนใจ{cta}", "headline": "🛒"})
+    for s in sc:
+        s.update({"image": "", "img": "", "search": "", "graphic": None})
+        s["headline"] = s["headline"].replace("🛒", "กดเลย")
+    return {"title": name or "ของดีบอกต่อ", "summary": "", "scenes": sc}
+
+
+def add_media(plan: dict, media: list[Path], scene_dir: Path, progress=None) -> int:
+    """รูป/วิดีโอสินค้าที่ถ่ายเอง → ใส่ทุกฉาก (วนใช้ซ้ำถ้าฉากเยอะกว่าไฟล์) คืนจำนวนไฟล์ที่ใช้ได้"""
+    from PIL import Image, ImageOps
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    names: list[str] = []
+    for k, f in enumerate(media):
+        if progress:
+            progress(f"เตรียมรูป/วิดีโอสินค้า {k + 1}/{len(media)}")
+        is_vid = f.suffix.lower() in (".mp4", ".mov", ".webm", ".m4v", ".3gp", ".mkv")
+        out = scene_dir / f"product_{k + 1:02}{'.mp4' if is_vid else '.png'}"
+        try:
+            if is_vid:
+                imagegen.normalize_video(f, out)
+            else:
+                im = ImageOps.exif_transpose(Image.open(f)).convert("RGB")
+                im.thumbnail((1600, 1600))
+                im.save(out)
+            names.append(out.name)
+        except Exception as e:
+            print("ใช้ไฟล์สินค้าไม่ได้:", f.name, e)
+    if not names:
+        return 0
+    for i, s in enumerate(plan["scenes"]):
+        mine = names[i % len(names)]
+        s["img"] = mine
+        s["options"] = [mine] + [x for x in names if x != mine]
+        s["generic"] = False
+    return len(names)
+
+
+def move_uploads(src_dir: Path, dest: Path) -> tuple[list[Path], list[Path]]:
+    """ย้ายไฟล์ที่อัปโหลดมา (media_*, shot_*) เข้าโฟลเดอร์งาน"""
+    media, shots = [], []
+    if not src_dir or not src_dir.exists():
+        return media, shots
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in sorted(src_dir.iterdir()):
+        target = dest / f.name
+        shutil.move(str(f), target)
+        (shots if f.name.startswith("shot_") else media).append(target)
+    shutil.rmtree(src_dir, ignore_errors=True)
+    return media, shots
