@@ -367,6 +367,64 @@ def ask_ai(provider: str, prompt: str) -> str:
     return _ask_ollama(prompt)
 
 
+POST_TAGS = {
+    "game": ["#MLBB", "#MobileLegends", "#ไฮไลต์เกม", "#เกมมือถือ", "#fyp"],
+    "story": ["#เรื่องเล่า", "#fyp", "#tiktokไทย"],
+    "talk": ["#สรุปให้", "#สาระ", "#fyp", "#tiktokไทย"],
+}
+
+
+def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
+    """แคปชัน + แฮชแท็กสำหรับโพสต์ TikTok/Reels"""
+    title = (plan.get("title") or "").strip()
+    summary = (plan.get("summary") or "").strip()
+    items = plan.get("clips") or plan.get("scenes") or []
+    lines = "\n".join(f"- {(c.get('label') or c.get('headline') or '')} {c.get('narration', '')}".strip()
+                      for c in items[:12])[:2500]
+    if provider != "none":
+        kind = {"game": "คลิปไฮไลต์เกม Mobile Legends (MLBB)", "story": "คลิปสั้นเล่าเรื่อง",
+                "talk": "คลิปสรุปเนื้อหา"}.get(mode, "คลิปสั้น")
+        prompt = f"""เขียนแคปชันโพสต์ TikTok ภาษาไทยสำหรับ{kind}นี้
+ชื่อคลิป: {title}
+สรุป: {summary}
+{('ข้อมูลเพิ่ม: ' + note) if note else ''}
+บทพากย์:
+{lines}
+
+กติกา:
+- caption: 1-2 ประโยคสั้น เปิดด้วยฮุกที่ทำให้อยากดูจนจบ (คำถาม/ประโยคเร้าใจ) ใส่อีโมจิได้ 1-3 ตัว แล้วปิดด้วยชวนคอมเมนต์หรือกดติดตาม ไม่เกิน 150 ตัวอักษร ห้ามใส่แฮชแท็กในนี้
+- hashtags: 5-8 อัน ผสมแท็กกว้าง (#fyp #tiktokไทย) กับแท็กเฉพาะเรื่อง ภาษาไทยหรืออังกฤษ ขึ้นต้นด้วย # ไม่มีช่องว่าง
+- อย่าแต่งข้อมูลที่ไม่มีในบท
+ตอบเป็น JSON เท่านั้น: {{"caption": "...", "hashtags": ["#...", "#..."]}}"""
+        try:
+            data = _parse_json(ask_ai(provider, prompt))
+            cap = clean_post(str(data.get("caption") or ""))
+            tags = _tags(data.get("hashtags") or [])
+            if cap:
+                return {"caption": cap, "hashtags": tags or POST_TAGS.get(mode, POST_TAGS["talk"]), "ai": True}
+        except Exception as e:
+            print("เขียนแคปชันด้วย AI ไม่ได้:", e)
+    # ไม่มี AI: ใช้ชื่อ + ประโยคแรกของสรุป
+    first = re.split(r"(?<=[.!?])\s|\n", re.sub(r"#\S+", "", summary).strip())[0][:120]
+    cap = " ".join(x for x in [title, first if first != title else ""] if x) or "ดูให้จบ แล้วมาคุยกันในคอมเมนต์ 👇"
+    found = re.findall(r"#[^\s#]+", summary)
+    return {"caption": cap + " 👇 ชอบกดติดตามด้วยนะ", "ai": False,
+            "hashtags": _tags(found + POST_TAGS.get(mode, POST_TAGS["talk"]))}
+
+
+def clean_post(t: str) -> str:
+    return re.sub(r"\s*#[^\s#]+", "", t).strip()
+
+
+def _tags(tags) -> list[str]:
+    out = []
+    for t in tags if isinstance(tags, list) else str(tags).split():
+        t = "#" + re.sub(r"[\s#]+", "", str(t))
+        if len(t) > 1 and t.lower() not in {x.lower() for x in out}:
+            out.append(t[:40])
+    return out[:10]
+
+
 def _ask_claude(prompt: str) -> str:
     import anthropic
     client = anthropic.Anthropic()  # อ่าน ANTHROPIC_API_KEY จาก environment
@@ -599,6 +657,8 @@ class Ass:
                    60, 60, 0)
         self.style("Brand", f, u * 0.024, _ass_color("FFFFFF", 0x14), black, black, 1, 1, 3, 0, 7,
                    40, 40, int(H * (0.065 if vertical else 0.035)))
+        self.style("Pop", f, u * (0.052 if vertical else 0.046), white, black, _ass_color("000000", 0x60), 1, 1, 7, 3, 2,
+                   50, 50, int(H * (0.24 if vertical else 0.09)))
         self.style("Title", f, u * 0.05, white, black, _ass_color("000000", 0x70), 1, 3, 22, 0, 2,
                    50, 50, int(H * (0.2 if vertical else 0.12)))
 
@@ -614,9 +674,34 @@ class Ass:
         self.events.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},{style},,0,0,0,,"
                            f"{('{' + tags + '}') if tags else ''}{ass_text(text)}")
 
-    def subs(self, narration: str, start: float, dur: float, max_chars: int) -> None:
+    def subs(self, narration: str, start: float, dur: float, max_chars: int, pop: bool = False) -> None:
+        if pop:
+            return self.pop_subs(narration, start, dur, max_chars)
         for t0, t1, chunk in sub_chunks(narration, start, dur, max_chars):
             self.add("Sub", t0, t1, chunk)
+
+    def pop_subs(self, narration: str, start: float, dur: float, max_chars: int) -> None:
+        """ซับเด้งทีละคำแบบคลิปไวรัล: ตัวใหญ่ทีละท่อนสั้นๆ คำที่กำลังพูดเป็นสีเหลือง + เด้งขยาย"""
+        hi = _ass_color("FFD43B")
+        limit = max(8, int(max_chars * 0.6))
+        for chunk in pop_chunks(narration, start, dur, limit):
+            c0 = chunk[0][1]
+            for k, (_, t0, t1) in enumerate(chunk):
+                t1 = chunk[k + 1][1] if k + 1 < len(chunk) else t1
+                body = ""
+                for m, (tok, _, _) in enumerate(chunk):
+                    sep = " " if tok.startswith(" ") and m else ""
+                    word = ass_text(tok.strip())
+                    if m == k:
+                        body += (sep + "{\\c" + hi + "&\\fscx112\\fscy112\\t(0,90,\\fscx122\\fscy122)"
+                                 "\\t(90,200,\\fscx112\\fscy112)}" + word + "{\\r}")
+                    else:
+                        body += sep + word
+                intro = "\\fscx70\\fscy70\\t(0,120,\\fscx100\\fscy100)" if t0 == c0 else ""
+                if t1 > t0:
+                    self.events.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Pop,,0,0,0,,"
+                                       f"{{{intro}}}{body}" if intro else
+                                       f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Pop,,0,0,0,,{body}")
 
     def headline(self, text: str, t0: float, t1: float, y: int) -> None:
         """หัวข้อกล่องสี เลื่อนขึ้น + จางเข้า"""
@@ -680,6 +765,48 @@ def _words(text: str) -> list[str]:
         return out
     except Exception:
         return text.split()
+
+
+_TH_SILENT = set("ัิีึืฺุู็่้๊๋์ํ")  # สระบน/ล่าง/วรรณยุกต์ ไม่กินเวลาพูดเพิ่ม
+
+
+def _speak_len(t: str) -> float:
+    return sum(0 if ch in _TH_SILENT else 0.3 if ch in " ,." else 1 for ch in t) + 0.6
+
+
+def pop_chunks(text: str, start: float, dur: float, limit: int = 13) -> list[list[tuple[str, float, float]]]:
+    """แบ่งเป็นท่อนสั้น (≤ limit ตัวอักษร) แต่ละคำมีเวลาของตัวเอง [(คำ, เริ่ม, จบ)]
+    คำที่ขึ้นต้นด้วยช่องว่าง = ต้นฉบับเว้นวรรคไว้ (หยุดหายใจ → ให้เวลาเพิ่มนิดนึง)"""
+    toks: list[str] = []
+    for w in _words(text):
+        for k, part in enumerate(p for p in w.split("\u200b") if p):
+            if len(part) > limit + 4:  # คำยาวผิดปกติ → หั่นไม่ให้ล้นจอ
+                while len(part) > limit + 4:
+                    c = _thai_cut(part, limit)
+                    toks.append(("" if k or not toks else " ") + part[:c])
+                    part, k = part[c:], 1
+            toks.append(("" if k or not toks else " ") + part)
+    if not toks:
+        return []
+    weights = [_speak_len(t) + (1.2 if t.startswith(" ") else 0) for t in toks]
+    total = sum(weights)
+    t, timed = start, []
+    for tok, w in zip(toks, weights):
+        d = dur * w / total
+        timed.append((tok, t, t + d))
+        t += d
+    chunks, cur, n = [], [], 0
+    for tok, a, b in timed:
+        ln = len(tok.strip())
+        # ขึ้นท่อนใหม่เมื่อยาวเกิน หรือเจอช่องว่าง (ช่วงหายใจ) และท่อนเดิมยาวพอแล้ว
+        if cur and (n + ln > limit or (tok.startswith(" ") and n >= limit * 0.35)):
+            chunks.append(cur)
+            cur, n = [], 0
+        cur.append((tok if cur else tok.lstrip(), a, b))
+        n += ln
+    if cur:
+        chunks.append(cur)
+    return chunks
 
 
 def write_srt(text: str, start: float, dur: float, path: Path, max_chars: int = 42) -> None:
@@ -917,7 +1044,7 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     if text:
         ass.brand(text, length, x=(40 + logo_h + 18) if logo else 40)
     if extras and subtitles and narr:
-        ass.subs(clip["narration"], LEAD_IN, narr_dur, 22 if vertical else 40)
+        ass.subs(clip["narration"], LEAD_IN, narr_dur, 22 if vertical else 40, pop=subtitles == "pop")
     if ass.write(workdir / "text.ass"):
         vf.append(ass_filter("text.ass"))
 
@@ -1053,10 +1180,27 @@ def _final_video_args(nvenc: bool) -> list[str]:
 
 def concat(clips: list[Path], out: Path, workdir: Path) -> None:
     """ต่อคลิปแล้วเข้ารหัสใหม่ทั้งไฟล์เป็นมาตรฐานเดียว
-    (ต่อแบบคัดลอกตรงๆ ทำให้รอยต่อเวลาเพี้ยน/หัวไฟล์ไม่ตรงกัน → แกลเลอรีมือถือหลายรุ่นเล่นไม่ได้)"""
-    lst = workdir / "list.txt"
-    lst.write_text("".join(f"file '{p.name}'\n" for p in clips), encoding="utf-8")
-    base = ["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst.name, "-r", "30"]
+    ใช้ concat filter (ไม่ใช่ concat demuxer) — ไฟล์ที่ timebase ต่างกัน (เช่น ภาพปก + เนื้อคลิป)
+    ต่อด้วย demuxer แล้วภาพจะสั้นกว่าเสียง/ค้าง · และให้ไฟล์มาตรฐานที่มือถือทุกรุ่นเล่นได้"""
+    clips = [Path(c).resolve() for c in clips]
+    W = H = None
+    try:
+        i0 = probe(clips[0])
+        W, H = int(i0.get("width") or 0) // 2 * 2, int(i0.get("height") or 0) // 2 * 2
+    except Exception:
+        pass
+    inputs, parts, joins = [], [], ""
+    for k, c in enumerate(clips):
+        inputs += ["-i", str(c)]
+        size = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2," if W and H else ""
+        parts.append(f"[{k}:v]{size}fps=30,format=yuv420p,setsar=1,setpts=PTS-STARTPTS[v{k}]")
+        parts.append(f"[{k}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{k}]")
+        joins += f"[v{k}][a{k}]"
+    parts.append(f"{joins}concat=n={len(clips)}:v=1:a=1[v][a]")
+    script = workdir / "concat_filter.txt"
+    script.write_text(";\n".join(parts), encoding="utf-8")
+    base = ["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex_script", str(script.resolve()),
+            "-map", "[v]", "-map", "[a]", "-r", "30"]
     tail = [*FINAL_AUDIO, "-movflags", "+faststart", str(out.resolve())]
     if _has_nvenc():
         try:
@@ -1094,7 +1238,7 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
         progress((i + 0.5) / n * 100, f"ตัดต่อช่วงที่ {i + 1}/{n}" + (" (สโลว์+เอฟเฟกต์)" if fx and not clean else ""))
         f = workdir / f"clip_{i:03}.mp4"
         render_clip(s_path, infos[s_path], {**c, "narration": text}, narr, f,
-                    orig_volume, subtitles and not clean, workdir, layout=layout,
+                    orig_volume, (subtitles if not clean else False), workdir, layout=layout,
                     extras=not clean, fades=not clean, fx=fx and not clean,
                     brand=None if clean else brand)
         files.append(f)

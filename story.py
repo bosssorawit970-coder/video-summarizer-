@@ -347,7 +347,7 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     if text:
         ass.brand(text, D, x=(40 + 96 + 18) if logo else 40)
     if extras and subtitles and narr and scene.get("narration"):
-        ass.subs(scene["narration"], LEAD, nd, 22 if vertical else 40)
+        ass.subs(scene["narration"], LEAD, nd, 22 if vertical else 40, pop=subtitles == "pop")
     if ass.write(workdir / f"text_{i}.ass"):
         vf.append(P.ass_filter(f"text_{i}.ass"))
 

@@ -333,7 +333,10 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">ตกแต่ง</label>
               <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label></div></div>
             <div><label class="f">ซับไตเติล</label>
-              <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div></div>
+              <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div>
+              <div class="seg" id="subStyle" style="margin-top:6px">
+                <label><input type="radio" name="sub_style" value="pop" checked> ✨ เด้งทีละคำ (แบบไวรัล)</label>
+                <label><input type="radio" name="sub_style" value="classic"> ซับปกติด้านล่าง</label></div></div>
           </div>
           <div class="row" style="margin-top:20px">
             <span class="spacer"></span><button class="primary" id="renderBtn">สร้างวิดีโอสรุป →</button>
@@ -371,6 +374,14 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <button id="shareBtn" class="hidden">บันทึกลงคลังภาพ / แชร์</button>
       <button id="editAgain">แก้บทแล้วสร้างใหม่</button>
       <span class="spacer"></span><button id="newClip">เริ่มคลิปใหม่</button>
+    </div>
+    <div id="postBox" class="hidden" style="margin:0 0 14px">
+      <b>📝 แคปชันสำหรับโพสต์</b> <span class="tag" id="postAi"></span>
+      <textarea id="postText" rows="5" style="margin-top:6px"></textarea>
+      <div class="row" style="gap:6px;margin-top:6px">
+        <button class="primary" id="postCopy">📋 คัดลอกแคปชัน</button>
+        <button id="postRegen">🔄 เขียนใหม่</button>
+      </div>
     </div>
     <div id="thumbBox" class="thumbbox hidden">
       <img id="thumbImg" alt="ภาพปก">
@@ -753,7 +764,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; }
-  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
+  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
 
@@ -900,7 +911,7 @@ $("#renderBtn").onclick = async () => {
   try {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
-      rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, layout: $("#layout").value,
+      rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
       music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
@@ -985,6 +996,26 @@ $("#vSave").onclick = async () => {
   vReady();
 };
 
+// ── แคปชัน + แฮชแท็ก ──
+function showPost(p) {
+  $("#postBox").classList.toggle("hidden", !p);
+  if (!p) return;
+  $("#postText").value = `${p.caption}\n\n${(p.hashtags || []).join(" ")}`;
+  $("#postAi").textContent = p.ai ? "AI เขียน" : "แบบพื้นฐาน";
+}
+$("#postCopy").onclick = async () => {
+  const t = $("#postText").value, b = $("#postCopy");
+  try { await navigator.clipboard.writeText(t); }
+  catch { $("#postText").select(); document.execCommand("copy"); }
+  b.textContent = "✓ คัดลอกแล้ว"; setTimeout(() => b.textContent = "📋 คัดลอกแคปชัน", 1800);
+};
+$("#postRegen").onclick = async () => {
+  const b = $("#postRegen"); b.disabled = true; b.textContent = "⏳ กำลังเขียน…";
+  try { const r = await api(`/api/jobs/${job.id}/post`, {method: "POST"}); job.post = r.post; showPost(r.post); }
+  catch (e) { alert(e.message); }
+  b.disabled = false; b.textContent = "🔄 เขียนใหม่";
+};
+
 // ── ผลลัพธ์ ──
 function enterDone() {
   show("s-done"); loadJobs();
@@ -993,6 +1024,7 @@ function enterDone() {
   $("#outVid").src = `/api/jobs/${job.id}/output?t=${Date.now()}`;
   $("#dl").href = `/api/jobs/${job.id}/output?download=1`;
   $("#doneSum").textContent = p.summary || "-";
+  showPost(job.post);
   $("#doneWarn").textContent = job.warn ? "ℹ️ " + job.warn : ""; $("#doneWarn").classList.toggle("hidden", !job.warn);
   $("#thumbBox").classList.toggle("hidden", !job.thumb);
   if (job.thumb) {

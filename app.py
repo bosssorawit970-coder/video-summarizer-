@@ -266,7 +266,7 @@ def do_render(jid: str) -> None:
             print("ทำภาพปกไม่ได้:", e)
         P.render(src, clips, work, out,
                  voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"],
-                 subtitles=r["subtitles"], layout=r.get("layout", "original"),
+                 subtitles=_subs(r), layout=r.get("layout", "original"),
                  fx=r.get("fx", False), brand=brand,
                  cover=thumb if r.get("cover") and thumb.exists() else None,
                  src_resolver=_resolve,
@@ -278,6 +278,7 @@ def do_render(jid: str) -> None:
             P.add_music(out, music, r.get("music_volume", 0.25), tmp)
             tmp.replace(out)
         shutil.rmtree(work, ignore_errors=True)
+        _make_post(jid)
         save(jid, status="done", step="done", progress=100, message="เสร็จแล้ว!",
              output_duration=P.probe(out)["duration"], warn=" • ".join(P.TTS_NOTES))
     except Exception as e:
@@ -304,7 +305,7 @@ def do_render_story(jid: str) -> None:
             except Exception as e:
                 print("ทำภาพปกไม่ได้:", e)
         ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
-                        subtitles=r["subtitles"], brand=brand, style=j["opts"].get("style", "cinematic"),
+                        subtitles=_subs(r), brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
         save(jid, plan=plan)  # ภาพที่วาดเพิ่มระหว่างตัดต่อ
@@ -315,6 +316,7 @@ def do_render_story(jid: str) -> None:
             P.add_music(out, music, r.get("music_volume", 0.25), tmp)
             tmp.replace(out)
         shutil.rmtree(work, ignore_errors=True)
+        _make_post(jid)
         save(jid, status="done", step="done", progress=100, message="เสร็จแล้ว!",
              output_duration=P.probe(out)["duration"], warn=" • ".join(P.TTS_NOTES))
     except Exception as e:
@@ -365,7 +367,7 @@ def do_capcut(jid: str) -> None:
 
 def public(j: dict) -> dict:
     keep = ("id", "name", "url", "detail", "capcut", "preview_progress", "status", "step", "progress", "message", "duration",
-            "plan", "opts", "render_opts", "output_duration", "created")
+            "plan", "opts", "render_opts", "output_duration", "created", "post", "warn")
     out = {k: j.get(k) for k in keep}
     out["segments"] = len(j.get("transcript") or [])
     out["thumb"] = (job_dir(j["id"]) / "thumb.jpg").exists()
@@ -622,6 +624,8 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "orig_volume": max(0.0, min(1.0, _num(body.get("orig_volume"), 0.7 if game else 0.15))),
         "layout": layout if layout in P.LAYOUTS else ("vertical_blur" if game else "vertical_crop" if mode == "story" else "original"),
         "subtitles": _bool(body.get("subtitles"), True),
+        "sub_style": body.get("sub_style") if body.get("sub_style") in ("pop", "classic")
+        else ("classic" if mode == "talk" and layout == "original" else "pop"),
         "fx": _bool(body.get("fx"), game),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
@@ -631,8 +635,32 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "fx", "cover", "music",
                "music_volume", "channel", "logo")
+
+
+def _subs(r: dict):
+    """False = ไม่มีซับ · True = ซับปกติ · "pop" = ซับเด้งทีละคำ"""
+    return ("pop" if r.get("sub_style") == "pop" else True) if r.get("subtitles") else False
+
+
+def _make_post(jid: str, quiet: bool = False) -> None:
+    j = jobs[jid]
+    try:
+        if not quiet:
+            save(jid, progress=99, message="เขียนแคปชัน + แฮชแท็ก")
+        save(jid, post=P.make_post(j.get("plan") or {}, j["opts"].get("mode", "talk"),
+                                   j["opts"].get("provider", "none"), j["opts"].get("note", "")))
+    except Exception as e:
+        print("ทำแคปชันไม่ได้:", e)
+
+
+async def regen_post(req: Request):
+    j, err = _get(req.path_params["jid"])
+    if err:
+        return err
+    await asyncio.to_thread(_make_post, j["id"], True)
+    return JSONResponse({"post": jobs[j["id"]].get("post")})
 
 
 def _bool(v, default: bool) -> bool:
@@ -1135,6 +1163,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}", get_job, methods=["GET"]),
     Route("/api/jobs/{jid}", delete_job, methods=["DELETE"]),
     Route("/api/jobs/{jid}/render", render_job, methods=["POST"]),
+    Route("/api/jobs/{jid}/post", regen_post, methods=["POST"]),
     Route("/api/jobs/{jid}/source", source_video),
     Route("/api/jobs/{jid}/output", output_video),
     Route("/api/jobs/{jid}/thumb.jpg", thumb_image),
