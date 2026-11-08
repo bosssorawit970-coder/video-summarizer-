@@ -386,11 +386,24 @@ video{width:100%;border-radius:10px;background:#000;display:block}
     </div>
     <div id="postBox" class="hidden" style="margin:0 0 14px">
       <b>📝 แคปชันสำหรับโพสต์</b> <span class="tag" id="postAi"></span>
-      <textarea id="postText" rows="5" style="margin-top:6px"></textarea>
-      <div class="row" style="gap:6px;margin-top:6px">
-        <button class="primary" id="postCopy">📋 คัดลอกแคปชัน</button>
-        <button id="postRegen">🔄 เขียนใหม่</button>
+      <div class="seg" id="postTabs" style="margin-top:8px">
+        <label><input type="radio" name="postTab" value="tt" checked> 🎵 TikTok / Reels</label>
+        <label><input type="radio" name="postTab" value="yt"> ▶️ YouTube Shorts</label>
       </div>
+      <div id="postTT">
+        <textarea id="postText" rows="5" style="margin-top:6px"></textarea>
+        <div class="row" style="gap:6px;margin-top:6px"><button class="primary" id="postCopy">📋 คัดลอกแคปชัน</button></div>
+      </div>
+      <div id="postYT" class="hidden">
+        <label class="f">ชื่อคลิป (Title) <span class="hint" id="ytLen"></span></label>
+        <div class="row" style="gap:6px;flex-wrap:nowrap"><input type="text" id="ytTitle" maxlength="100" style="flex:1;min-width:0"><button data-copy="ytTitle">📋</button></div>
+        <label class="f">คำอธิบาย (Description) — แฮชแท็ก 3 อันแรกจะโชว์เหนือชื่อคลิป</label>
+        <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><textarea id="ytDesc" rows="5" style="flex:1;min-width:0"></textarea><button data-copy="ytDesc">📋</button></div>
+        <label class="f">แท็ก (ใส่ใน YouTube Studio → แท็ก) — คั่นด้วยจุลภาค</label>
+        <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><textarea id="ytTags" rows="3" style="flex:1;min-width:0"></textarea><button data-copy="ytTags">📋</button></div>
+        <p class="hint">วิธีใส่: แอป YouTube → ➕ → อัปโหลดวิดีโอ → วางชื่อในช่อง "ชื่อ" · แตะ "เพิ่มคำอธิบาย" วางคำอธิบาย · แท็กใส่ได้ใน YouTube Studio (แก้วิดีโอ → แท็ก)</p>
+      </div>
+      <div class="row" style="gap:6px;margin-top:6px"><button id="postRegen">🔄 เขียนใหม่ทั้งหมด</button></div>
     </div>
     <div id="thumbBox" class="thumbbox hidden">
       <img id="thumbImg" alt="ภาพปก">
@@ -1182,7 +1195,19 @@ function showPost(p) {
   if (!p) return;
   $("#postText").value = `${p.caption}\n\n${(p.hashtags || []).join(" ")}`;
   $("#postAi").textContent = p.ai ? "AI เขียน" : "แบบพื้นฐาน";
+  const yt = p.youtube || {title: (p.caption || "").slice(0, 90), description: `${p.caption}\n\n#Shorts`, tags: []};
+  $("#ytTitle").value = yt.title || ""; $("#ytDesc").value = yt.description || ""; $("#ytTags").value = (yt.tags || []).join(", ");
+  $("#ytTitle").oninput();
 }
+$("#ytTitle").oninput = () => { const n = [...$("#ytTitle").value].length; $("#ytLen").textContent = `${n}/100${n > 60 ? " · มือถือโชว์แค่ ~60 ตัวแรก" : ""}`; };
+$("#postTabs").onchange = () => { const yt = document.querySelector("input[name=postTab]:checked").value === "yt";
+  $("#postYT").classList.toggle("hidden", !yt); $("#postTT").classList.toggle("hidden", yt); };
+$("#postYT").addEventListener("click", async e => {
+  const id = e.target.dataset.copy; if (!id) return;
+  const t = $("#" + id).value, b = e.target;
+  try { await navigator.clipboard.writeText(t); } catch { $("#" + id).select(); document.execCommand("copy"); }
+  b.textContent = "✓"; setTimeout(() => b.textContent = "📋", 1500);
+});
 $("#postCopy").onclick = async () => {
   const t = $("#postText").value, b = $("#postCopy");
   try { await navigator.clipboard.writeText(t); }

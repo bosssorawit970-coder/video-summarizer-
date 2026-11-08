@@ -396,21 +396,63 @@ def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
 - caption: 1-2 ประโยคสั้น เปิดด้วยฮุกที่ทำให้อยากดูจนจบ (คำถาม/ประโยคเร้าใจ) ใส่อีโมจิได้ 1-3 ตัว แล้วปิดด้วยชวนคอมเมนต์หรือกดติดตาม ไม่เกิน 150 ตัวอักษร ห้ามใส่แฮชแท็กในนี้
 - hashtags: 5-8 อัน ผสมแท็กกว้าง (#fyp #tiktokไทย) กับแท็กเฉพาะเรื่อง ภาษาไทยหรืออังกฤษ ขึ้นต้นด้วย # ไม่มีช่องว่าง
 - อย่าแต่งข้อมูลที่ไม่มีในบท
-ตอบเป็น JSON เท่านั้น: {{"caption": "...", "hashtags": ["#...", "#..."]}}"""
+
+และเขียนสำหรับ YouTube Shorts ด้วย (คนดูค้นหาเจอจากชื่อ ต่างจาก TikTok):
+- yt_title: ชื่อคลิปภาษาไทย ไม่เกิน 70 ตัวอักษร คำสำคัญที่คนจะค้นหาอยู่ต้นชื่อ ชวนสงสัยแต่ไม่หลอก อีโมจิได้ 1 ตัว ไม่ใส่แฮชแท็ก
+- yt_description: 2-3 บรรทัด บรรทัดแรกสรุปว่าคลิปนี้เกี่ยวกับอะไร (มีคำค้นหาสำคัญ) บรรทัดถัดไปชวนกดไลก์/ติดตาม/คอมเมนต์ ห้ามใส่แฮชแท็กในนี้
+- yt_hashtags: 3-5 อัน อันแรกเป็น #Shorts ที่เหลือเป็นแท็กเฉพาะเรื่อง
+- yt_tags: คำค้นหา 8-15 คำ/วลี (ไทยและอังกฤษ) สำหรับช่อง "แท็ก" ใน YouTube Studio ไม่มี #
+ตอบเป็น JSON เท่านั้น: {{"caption": "...", "hashtags": ["#...", "#..."],
+ "yt_title": "...", "yt_description": "...", "yt_hashtags": ["#Shorts", "#..."], "yt_tags": ["...", "..."]}}"""
         try:
             data = _parse_json(ask_ai(provider, prompt))
             cap = clean_post(str(data.get("caption") or ""))
             tags = _tags(data.get("hashtags") or [])
             if cap:
-                return {"caption": cap, "hashtags": tags or POST_TAGS.get(mode, POST_TAGS["talk"]), "ai": True}
+                return {"caption": cap, "hashtags": tags or POST_TAGS.get(mode, POST_TAGS["talk"]), "ai": True,
+                        "youtube": _youtube_post(data, title, summary, mode, tags)}
         except Exception as e:
             print("เขียนแคปชันด้วย AI ไม่ได้:", e)
     # ไม่มี AI: ใช้ชื่อ + ประโยคแรกของสรุป
     first = re.split(r"(?<=[.!?])\s|\n", re.sub(r"#\S+", "", summary).strip())[0][:120]
     cap = " ".join(x for x in [title, first if first != title else ""] if x) or "ดูให้จบ แล้วมาคุยกันในคอมเมนต์ 👇"
     found = re.findall(r"#[^\s#]+", summary)
-    return {"caption": cap + " 👇 ชอบกดติดตามด้วยนะ", "ai": False,
-            "hashtags": _tags(found + POST_TAGS.get(mode, POST_TAGS["talk"]))}
+    tags = _tags(found + POST_TAGS.get(mode, POST_TAGS["talk"]))
+    return {"caption": cap + " 👇 ชอบกดติดตามด้วยนะ", "ai": False, "hashtags": tags,
+            "youtube": _youtube_post({}, title, summary, mode, tags)}
+
+
+YT_TAGS = {"game": ["MLBB", "Mobile Legends", "ไฮไลต์เกม", "เกมมือถือ", "MLBB ไทย"],
+           "story": ["เรื่องเล่า", "เรื่องน่ารู้", "สาระ"], "talk": ["สรุป", "สาระ", "ความรู้"]}
+
+
+def _youtube_post(data: dict, title: str, summary: str, mode: str, tk_tags: list[str]) -> dict:
+    """ชื่อ + คำอธิบาย + แฮชแท็ก + แท็ก สำหรับ YouTube Shorts (ตรวจความยาวตามข้อจำกัดของ YouTube)"""
+    yt_title = clean_post(str(data.get("yt_title") or "")) or clean_post(title) or "คลิปสั้นน่าดู"
+    yt_title = re.sub(r"\s+", " ", yt_title).strip()[:95]  # YouTube รับไม่เกิน 100 ตัวอักษร
+    desc = clean_post(str(data.get("yt_description") or "")).strip()
+    if not desc:
+        first = re.split(r"(?<=[.!?])\s|\n", re.sub(r"#\S+", "", summary).strip())[0][:150]
+        desc = "\n".join(x for x in [first or yt_title, "ถ้าชอบ ฝากกดไลก์ กดติดตาม และคอมเมนต์บอกกันได้เลย 🙏"] if x)
+    hashtags = _tags(data.get("yt_hashtags") or [])
+    if not any(h.lower() == "#shorts" for h in hashtags):
+        hashtags.insert(0, "#Shorts")
+    for h in tk_tags:  # เติมแท็กเฉพาะเรื่องจาก TikTok (ข้ามแท็กเฉพาะ TikTok)
+        if len(hashtags) >= 5:
+            break
+        if h.lower() not in {x.lower() for x in hashtags} and h.lower() not in ("#fyp", "#tiktokไทย", "#foryou"):
+            hashtags.append(h)
+    hashtags = hashtags[:5]
+    raw = data.get("yt_tags") or []
+    tags = [re.sub(r"[#<>,]", "", str(t)).strip() for t in (raw if isinstance(raw, list) else str(raw).split(","))]
+    tags += [h.lstrip("#") for h in hashtags if h.lower() != "#shorts"] + YT_TAGS.get(mode, [])
+    out, total = [], 0
+    for t in dict.fromkeys(t for t in tags if t):
+        if total + len(t) + 1 > 480:  # ช่องแท็กรวมไม่เกิน 500 ตัวอักษร
+            break
+        out.append(t[:60])
+        total += len(t) + 1
+    return {"title": yt_title, "description": desc + "\n\n" + " ".join(hashtags), "tags": out}
 
 
 def clean_post(t: str) -> str:
