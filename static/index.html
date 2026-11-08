@@ -456,6 +456,12 @@ function netDown(down) {
 setInterval(async () => {
   try { const r = await fetch("/api/idle", {cache: "no-store"}); netDown(!r.ok); } catch { netDown(true); }
 }, 20000);
+// ── บอกโปรแกรมว่ายังใช้งานอยู่ (กำลังพิมพ์บท/เลือกภาพ) กัน Colab ปิดเองเพราะคิดว่าไม่มีคนใช้ ──
+let lastTouch = Date.now();
+for (const ev of ["pointerdown", "keydown", "scroll", "input"]) addEventListener(ev, () => { lastTouch = Date.now(); }, {passive: true, capture: true});
+setInterval(() => {
+  if (document.visibilityState === "visible" && Date.now() - lastTouch < 5 * 60e3) fetch("/api/alive", {cache: "no-store"}).catch(() => {});
+}, 60e3);
 // ── ย่อรูปในเครื่องก่อนอัปโหลด (รูปมือถือ 5-15 MB → ~1 MB อัปเร็ว ไม่ติดขนาด) ──
 async function shrinkImage(f, max = 2048) {
   if (!f.type.startsWith("image/") || f.size < 1.5e6) return f;

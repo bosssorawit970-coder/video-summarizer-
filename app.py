@@ -1151,6 +1151,11 @@ async def idle_status(_: Request):
     return JSONResponse({"idle_seconds": int(time.time() - LAST_ACTIVITY[0]), "busy": busy})
 
 
+async def alive(_: Request):
+    """หน้าเว็บส่งมาเป็นระยะตอนผู้ใช้กำลังแก้บท/เลือกภาพ (ไม่มีคำขออื่น) → นับว่ายังใช้งานอยู่ ไม่ปิดเครื่อง"""
+    return JSONResponse({"ok": True})
+
+
 class PinGate:
     """ต้องใส่ PIN ก่อนใช้งาน (กันคนอื่นที่ได้ลิงก์ไป) + จดเวลาที่มีคนใช้งานล่าสุด"""
 
@@ -1202,6 +1207,7 @@ for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
 app = Starlette(routes=[
     Route("/login", login, methods=["GET", "POST"]),
     Route("/api/idle", idle_status),
+    Route("/api/alive", alive),
     Route("/api/jobs/{jid}/cancel", cancel_job, methods=["POST"]),
     Route("/", index),
     Route("/api/config", config),
