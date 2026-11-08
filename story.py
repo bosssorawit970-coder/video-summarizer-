@@ -148,6 +148,12 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     for i, s in enumerate(scenes):  # AI คิดภาพให้ไม่ได้จริงๆ → ใช้ภาพทั่วไป แต่ทำเครื่องหมายเตือนไว้
         if not s["image"]:
             s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
+    bad = sum(1 for s in scenes if s.get("generic"))
+    if bad:
+        why = "ยังไม่ได้เลือก AI" if provider == "none" else (plan.pop("ai_error", "") or "AI ตอบไม่ได้")
+        plan["note"] = (f"AI คิดภาพให้ตรงเนื้อหาไม่ได้ {bad}/{len(scenes)} ฉาก ({why}) — ฉากเหล่านี้ใช้ภาพทั่วไปที่ไม่เกี่ยวกับเรื่อง "
+                        "กด 📷 ภาพถ่ายจริง / 📁 รูปของฉัน ทีละฉาก หรือแก้ปัญหา AI แล้วเริ่มใหม่")
+    plan.pop("ai_error", None)
     return plan
 
 
@@ -176,6 +182,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
         plan["summary"] = str(data.get("summary") or "")
     except Exception as e:
         print("AI คิดภาพทั้งเรื่องไม่สำเร็จ จะถามทีละฉาก:", e)
+        plan["ai_error"] = P.error_text(e)
     if not topic:
         topic = " ".join(s["narration"] for s in scenes)[:300]
     for i, s in enumerate(scenes):
@@ -191,6 +198,9 @@ def fill_visuals(plan: dict, provider: str) -> None:
             s["headline"] = s["headline"] or P.clean_text(str(v.get("headline", "")))[:40]
         except Exception as e:
             print(f"AI คิดภาพฉากที่ {i + 1} ไม่สำเร็จ:", e)
+            plan["ai_error"] = P.error_text(e)
+            if i == 0 and not any(x["image"] for x in scenes):
+                break  # ฉากแรกก็ไม่ได้ + ทั้งเรื่องไม่ได้ = AI ใช้ไม่ได้เลย ไม่ต้องลองทุกฉาก
     if characters:  # ให้ตัวละครหน้าตาเหมือนกันทุกฉาก
         plan["characters"] = characters
 

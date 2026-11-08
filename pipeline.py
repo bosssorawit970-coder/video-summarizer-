@@ -555,6 +555,29 @@ def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
 
 def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
         note: Callable[[str], None] | None = None) -> None:
+    _tts_raw(text, out_mp3, voice, rate, tone, note)
+    _tidy_voice(out_mp3)
+
+
+def _tidy_voice(f: Path) -> None:
+    """ตัดช่วงเงียบหัว-ท้ายที่ระบบเสียงแถมมา (ไม่งั้นรอยต่อฉากเงียบนาน ฟังสะดุด)
+    + ปรับความดังให้เท่ากันทุกฉาก (เสียง AI แต่ละเจ้า/แต่ละท่อนดังไม่เท่ากัน)"""
+    tmp = f.with_name(f.stem + "_tidy.mp3")
+    try:
+        run(["ffmpeg", "-y", "-hide_banner", "-i", str(f), "-af",
+             "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,"
+             "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.12,areverse,"
+             "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "44100", "-c:a", "libmp3lame", "-q:a", "2", str(tmp)])
+        if probe(tmp)["duration"] > 0.3:
+            tmp.replace(f)
+    except Exception as e:
+        print("ปรับเสียงพากย์ไม่ได้ (ใช้เสียงเดิม):", str(e)[-150:])
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
+             note: Callable[[str], None] | None = None) -> None:
     """voice: th-TH-…Neural (Edge) | gemini:<ชื่อ> | clone:<ชื่อเสียงตัวอย่าง>
     ถ้าเสียง Gemini/โคลนใช้ไม่ได้ จะถอยไปใช้ Edge TTS ให้อัตโนมัติ (งานไม่พัง)"""
     import voice as V
@@ -1260,7 +1283,9 @@ def concat(clips: list[Path], out: Path, workdir: Path) -> None:
         parts.append(f"[{k}:v]{size}fps=30,format=yuv420p,setsar=1,setpts=PTS-STARTPTS[v{k}]")
         parts.append(f"[{k}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{k}]")
         joins += f"[v{k}][a{k}]"
-    parts.append(f"{joins}concat=n={len(clips)}:v=1:a=1[v][a]")
+    # ความดังมาตรฐาน TikTok/Reels (~-14 LUFS) — เดิมเบาไป ต้องเร่งเสียงมือถือ
+    parts.append(f"{joins}concat=n={len(clips)}:v=1:a=1[v][a0]")
+    parts.append("[a0]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[a]")
     script = workdir / "concat_filter.txt"
     script.write_text(";\n".join(parts), encoding="utf-8")
     base = ["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex_script", str(script.resolve()),

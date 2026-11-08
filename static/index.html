@@ -793,7 +793,7 @@ async function watchPreview(id) {
 
 function drawScenes() {
   const src = n => `/api/jobs/${job.id}/scenes/${n}`;
-  $("#clips").innerHTML = (job.plan?.note ? `<p class="hint">⚠️ ${esc(job.plan.note)}</p>` : "") + clips.map((c, i) => {
+  $("#clips").innerHTML = (job.plan?.note ? `<p class="hint" style="background:#fff4d6;color:#7a5200;padding:10px;border-radius:8px">⚠️ ${esc(job.plan.note)}</p>` : "") + clips.map((c, i) => {
     const opts = [...new Set([...(c.options || []), ...(c.img ? [c.img] : [])])];
     return `
     <div class="scene" data-i="${i}">
