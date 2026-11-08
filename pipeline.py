@@ -449,7 +449,42 @@ def clean_text(t: str) -> str:
 
 # ───────────────────────── 3) เสียงพากย์ ─────────────────────────
 
-def tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
+VOICE_DIR: Path | None = None   # โฟลเดอร์เสียงตัวอย่างสำหรับโคลน (app.py ตั้งให้)
+TTS_NOTES: list[str] = []      # เหตุที่ต้องถอยไปใช้เสียงสำรอง (แจ้งผู้ใช้ตอนจบ)
+
+
+def clone_voices() -> list[str]:
+    if not VOICE_DIR or not VOICE_DIR.exists():
+        return []
+    return sorted(f.stem for f in VOICE_DIR.glob("*.wav"))
+
+
+def voice_list() -> list[dict]:
+    import voice as V
+    out = [{**v, "group": "edge"} for v in THAI_VOICES]
+    out += [{"id": f"gemini:{n}", "name": f"✨ Gemini {n} ({d})", "group": "gemini"} for n, d in V.GEMINI_VOICES]
+    out += [{"id": f"clone:{n}", "name": f"🎙️ เสียงฉัน: {n}", "group": "clone"} for n in clone_voices()]
+    return out
+
+
+def valid_voice(v: str) -> bool:
+    if not v:
+        return False
+    if v.startswith("gemini:"):
+        import voice as V
+        return v[7:] in {n for n, _ in V.GEMINI_VOICES}
+    if v.startswith("clone:"):
+        return v[6:] in clone_voices()
+    return v in {x["id"] for x in THAI_VOICES}
+
+
+def _note(msg: str) -> None:
+    if msg not in TTS_NOTES:
+        TTS_NOTES.append(msg)
+        print("เสียงพากย์:", msg)
+
+
+def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
     import edge_tts
 
     async def go():
@@ -457,6 +492,40 @@ def tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
         await comm.save(str(out_mp3))
 
     asyncio.run(go())
+
+
+def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
+        note: Callable[[str], None] | None = None) -> None:
+    """voice: th-TH-…Neural (Edge) | gemini:<ชื่อ> | clone:<ชื่อเสียงตัวอย่าง>
+    ถ้าเสียง Gemini/โคลนใช้ไม่ได้ จะถอยไปใช้ Edge TTS ให้อัตโนมัติ (งานไม่พัง)"""
+    import voice as V
+    fallback = THAI_VOICES[0]["id"]
+    if voice.startswith("gemini:"):
+        name = voice[7:]
+        if name in ("Puck", "Charon", "Fenrir"):
+            fallback = "th-TH-NiwatNeural"
+        try:
+            return V.gemini_tts(text, out_mp3, name, tone, rate)
+        except Exception as e:
+            _note(f"ใช้เสียง Gemini ไม่ได้ ({e}) — ใช้เสียงเปรมวดี/นิวัฒน์แทน")
+    elif voice.startswith("clone:"):
+        fallback = "th-TH-NiwatNeural"
+        name = voice[6:]
+        ref = VOICE_DIR / f"{name}.wav" if VOICE_DIR else None
+        try:
+            if not ref or not ref.exists():
+                raise RuntimeError("ไม่พบเสียงตัวอย่าง")
+            txt = ref.with_suffix(".txt")
+            V.clone_tts(text, out_mp3, ref, txt.read_text("utf-8").strip() if txt.exists() else "", rate,
+                        progress=note)
+            return
+        except Exception as e:
+            _note(f"โคลนเสียงไม่ได้ ({str(e)[:150]}) — ใช้เสียงนิวัฒน์แทน")
+    elif voice not in {v["id"] for v in THAI_VOICES}:
+        voice = fallback
+    else:
+        fallback = voice
+    _edge_tts(text, out_mp3, fallback, rate)
 
 
 # ───────────────────────── 4) ตัดต่อ ─────────────────────────
@@ -1002,7 +1071,7 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
            voice: str, rate: int, orig_volume: float, subtitles: bool,
            progress: Progress, layout: str = "original", clean: bool = False,
            fx: bool = False, brand: dict | None = None, cover: Path | None = None,
-           src_resolver=None) -> list[Path]:
+           src_resolver=None, tone: str = "natural") -> list[Path]:
     """clean=True: สำหรับ CapCut — ไม่มีซับ ไม่มีป้าย/โลโก้ ไม่เฟดภาพ (ไปแต่งใน CapCut เอง)
     ช็อตที่มี "src" ใช้ต้นฉบับคนละไฟล์ได้ (คลิปรวมหลายเกม) — src_resolver แปลงเป็น path"""
     src, workdir, out = src.resolve(), workdir.resolve(), out.resolve()
@@ -1021,7 +1090,7 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
         if text:
             progress(i / n * 100, f"สร้างเสียงพากย์ช่วงที่ {i + 1}/{n}")
             narr = workdir / f"narr_{i:03}.mp3"
-            tts(text, narr, voice, rate)
+            tts(text, narr, voice, rate, tone, note=lambda m, i=i: progress(i / n * 100, m))
         progress((i + 0.5) / n * 100, f"ตัดต่อช่วงที่ {i + 1}/{n}" + (" (สโลว์+เอฟเฟกต์)" if fx and not clean else ""))
         f = workdir / f"clip_{i:03}.mp4"
         render_clip(s_path, infos[s_path], {**c, "narration": text}, narr, f,

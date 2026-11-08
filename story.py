@@ -404,7 +404,8 @@ def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -
 
 def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
-                 cover: Path | None = None, clean: bool = False, style: str = "cinematic") -> list[Path]:
+                 cover: Path | None = None, clean: bool = False, style: str = "cinematic",
+                 tone: str = "story") -> list[Path]:
     scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     scenes = plan["scenes"]
@@ -420,7 +421,7 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         if text:
             progress(i / n * 95, f"สร้างเสียงพากย์ฉากที่ {i + 1}/{n}")
             narr = workdir / f"narr_{i:03}.mp3"
-            P.tts(text, narr, voice, rate)
+            P.tts(text, narr, voice, rate, tone, note=lambda m, i=i: progress(i / n * 95, m))
         progress((i + 0.5) / n * 95, f"ทำแอนิเมชันฉากที่ {i + 1}/{n}")
         f = workdir / f"scene_{i:03}.mp4"
         sc = {**s, "narration": text}

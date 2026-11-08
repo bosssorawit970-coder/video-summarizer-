@@ -8,7 +8,7 @@ REPO = sys.argv[2] if len(sys.argv) > 2 else ""
 
 buf = io.BytesIO()
 with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-    for f in ["app.py", "pipeline.py", "game.py", "story.py", "imagegen.py", "colab_start.py", "requirements.txt", "static/index.html"]:
+    for f in ["app.py", "pipeline.py", "game.py", "story.py", "imagegen.py", "voice.py", "colab_start.py", "requirements.txt", "static/index.html"]:
         z.write(SRC / f, f"video-summarizer/{f}")
 APP_ZIP = base64.b64encode(buf.getvalue()).decode()
 

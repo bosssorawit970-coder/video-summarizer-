@@ -36,6 +36,8 @@ label.f{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}
 .seg input{accent-color:var(--accent)}
 .seg label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .seg label.dis{opacity:.5}
+.modal{position:fixed;inset:0;background:#0008;z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:12px;overflow:auto}
+.modal>.card{max-width:560px;width:100%;margin:auto}
 .tag{font-size:11px;padding:1px 7px;border-radius:99px;background:var(--line);color:var(--muted)}
 .tag.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
 select,input[type=text],input[type=number],textarea{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
@@ -312,7 +314,15 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <div class="card">
           <h2>เสียงพากย์</h2>
           <div class="opts">
-            <div><label class="f">ผู้พากย์</label><select id="voice"></select></div>
+            <div><label class="f">ผู้พากย์</label><select id="voice"></select>
+              <div class="row" style="margin-top:6px;gap:6px">
+                <button type="button" id="vPlay">▶ ฟังตัวอย่าง</button>
+                <button type="button" id="vRecOpen">🎙️ โคลนเสียงฉัน</button>
+                <button type="button" id="vDel" class="hidden">🗑 ลบเสียงนี้</button>
+              </div>
+              <audio id="vAudio" class="hidden" controls style="width:100%;margin-top:6px"></audio>
+              <p class="hint" id="vHint"></p></div>
+            <div id="toneBox" class="hidden"><label class="f">อารมณ์เสียง (Gemini)</label><select id="tone"></select></div>
             <div><label class="f">ความเร็วการพูด: <span id="rateV" class="stat">0%</span></label>
               <input type="range" id="rate" min="-30" max="40" step="5" value="10"></div>
             <div class="noStory"><label class="f">เสียงต้นฉบับเบื้องหลัง: <span id="volV" class="stat">15%</span></label>
@@ -334,8 +344,27 @@ video{width:100%;border-radius:10px;background:#000;display:block}
   </section>
 
   <!-- 4. ผลลัพธ์ -->
+  <div id="vRec" class="modal hidden"><div class="card">
+    <h2>🎙️ โคลนเสียงของฉัน</h2>
+    <p class="hint" style="background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px">⚠️ ใช้โมเดล ThonburianTTS (สัญญาอนุญาต CC BY-NC-SA 4.0) — <b>ใช้ส่วนตัวเท่านั้น ห้ามใช้หารายได้/เชิงพาณิชย์</b> · ใช้ได้เฉพาะเสียงของตัวเองหรือเสียงที่เจ้าของอนุญาต · ต้องเปิด Colab แบบมีการ์ดจอ (GPU)</p>
+    <p class="hint" id="vGpu"></p>
+    <label class="f">1) กดอัด แล้วอ่านประโยคนี้ช้าๆ ชัดๆ ในที่เงียบ (5-10 วินาที)</label>
+    <p id="vSentence" style="font-size:18px;line-height:1.6;background:var(--line);padding:10px;border-radius:8px"></p>
+    <div class="row" style="gap:6px"><button type="button" class="primary" id="vRecBtn">⏺ เริ่มอัด</button>
+      <span id="vTimer" class="stat"></span>
+      <label class="tag" style="cursor:pointer">📁 หรือเลือกไฟล์เสียง<input type="file" id="vFile" accept="audio/*,video/*" hidden></label></div>
+    <audio id="vRecAudio" class="hidden" controls style="width:100%;margin-top:8px"></audio>
+    <label class="f" style="margin-top:10px">2) ตั้งชื่อเสียง</label>
+    <input type="text" id="vName" maxlength="30" value="เสียงของฉัน">
+    <label style="display:block;margin-top:10px"><input type="checkbox" id="vOk"> นี่คือเสียงของฉันเอง และใช้ส่วนตัวเท่านั้น</label>
+    <div class="row" style="margin-top:12px"><button type="button" id="vCancel">ปิด</button><span class="spacer"></span>
+      <button type="button" class="primary" id="vSave" disabled>บันทึกเสียง</button></div>
+    <p class="hint" id="vMsg"></p>
+  </div></div>
+
   <section id="s-done" class="card hidden">
     <h2 id="doneTitle">วิดีโอสรุปพร้อมแล้ว</h2>
+    <p class="hint hidden" id="doneWarn" style="background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px"></p>
     <video id="outVid" controls></video>
     <div class="row" style="margin:14px 0">
       <a id="dl"><button class="primary">ดาวน์โหลดวิดีโอ</button></a>
@@ -411,7 +440,9 @@ async function init() {
   $("#pexTag").classList.toggle("ok", !!cfg.pexels); $("#srcPhoto").classList.toggle("dis", !cfg.pexels);
   $("#srcSeg").onchange = () => $("#styleBox").classList.toggle("hidden", document.querySelector("input[name=image_source]:checked").value !== "ai");
   if (!cfg.imagegen) $("#storyHint").textContent = "⚠️ เครื่องนี้ยังวาดภาพด้วย AI ไม่ได้ (ต้องใช้ Colab การ์ดจอ) — จะใช้ภาพพื้นหลังไล่สีแทน";
-  $("#voice").innerHTML = $("#voice0").innerHTML = cfg.voices.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
+  fillVoices(cfg.voices);
+  $("#tone").innerHTML = Object.entries(cfg.tones || {}).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  $("#vSentence").textContent = cfg.ref_sentence || "";
   loadJobs();
   loadAssets();
   const id = location.hash.slice(1); if (id.startsWith("b=")) openBatch(id.slice(2)); else if (id) openJob(id);
@@ -722,7 +753,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; }
-  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
+  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
 
@@ -868,11 +899,90 @@ $("#renderBtn").onclick = async () => {
   if (!clips.length) return alert("ต้องมีอย่างน้อย 1 ช่วง");
   try {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
-      clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value,
+      clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, layout: $("#layout").value,
       music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
+};
+
+// ── เสียงพากย์: Gemini / โคลนเสียง ──
+const VGROUP = {edge: "เสียงมาตรฐาน (Edge ฟรีไม่จำกัด)", gemini: "✨ Gemini — เหมือนคนจริง (ใช้คีย์ Gemini)", clone: "🎙️ เสียงของฉัน (โคลน)"};
+function fillVoices(list) {
+  cfg.voices = list;
+  const html = Object.keys(VGROUP).map(g => {
+    const vs = list.filter(v => (v.group || "edge") === g);
+    if (g === "gemini" && !cfg.gemini_tts) return vs.length ? `<optgroup label="${VGROUP[g]} — ยังไม่ได้ใส่คีย์">${vs.map(v => `<option value="${v.id}" disabled>${esc(v.name)}</option>`).join("")}</optgroup>` : "";
+    return vs.length ? `<optgroup label="${VGROUP[g]}">${vs.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join("")}</optgroup>` : "";
+  }).join("");
+  for (const id of ["voice", "voice0"]) { const el = $("#" + id), v = el.value; el.innerHTML = html; if (v && list.some(x => x.id === v)) el.value = v; }
+  voiceChanged();
+}
+function voiceChanged() {
+  const v = $("#voice").value || "";
+  $("#toneBox").classList.toggle("hidden", !v.startsWith("gemini:"));
+  $("#vDel").classList.toggle("hidden", !v.startsWith("clone:"));
+  $("#vHint").textContent = v.startsWith("gemini:") ? "เสียง Gemini ฟรีมีโควตาต่อวัน ถ้าเต็มจะสลับเป็นเสียงมาตรฐานให้อัตโนมัติ"
+    : v.startsWith("clone:") ? (cfg.clone_ok ? "ครั้งแรกจะติดตั้ง+โหลดโมเดลราว 3-5 นาที · ใช้ส่วนตัวเท่านั้น" : "⚠️ เครื่องนี้ไม่มีการ์ดจอ จะใช้เสียงนิวัฒน์แทน — เปิด Colab แบบ GPU เพื่อใช้เสียงโคลน") : "";
+}
+$("#voice").onchange = voiceChanged;
+$("#vPlay").onclick = async () => {
+  const b = $("#vPlay"); b.disabled = true; b.textContent = "⏳ กำลังสร้างเสียง…";
+  try {
+    const first = (clips.find(c => (c.narration || "").trim()) || {}).narration || "";
+    const r = await api("/api/voice-preview", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({voice: $("#voice").value, tone: $("#tone").value, rate: +$("#rate").value, text: first.slice(0, 160)})});
+    const a = $("#vAudio"); a.src = r.url; a.classList.remove("hidden"); a.play().catch(() => {});
+    if (r.warn) $("#vHint").textContent = "ℹ️ " + r.warn;
+  } catch (e) { alert(e.message); }
+  b.disabled = false; b.textContent = "▶ ฟังตัวอย่าง";
+};
+$("#vDel").onclick = async () => {
+  const v = $("#voice").value; if (!v.startsWith("clone:")) return;
+  try { const r = await api("/api/voices/" + encodeURIComponent(v.slice(6)), {method: "DELETE"}); fillVoices(r.voices); } catch (e) { alert(e.message); }
+};
+let vBlob = null, vRecorder = null, vTick = null, vText = "";
+function vReady() { $("#vSave").disabled = !(vBlob && $("#vOk").checked); }
+$("#vOk").onchange = vReady;
+$("#vRecOpen").onclick = () => {
+  $("#vGpu").textContent = cfg.clone_ok ? "" : "⚠️ ตอนนี้เครื่องไม่มีการ์ดจอ — บันทึกเสียงไว้ได้ แต่ตอนสร้างวิดีโอจะใช้เสียงนิวัฒน์แทนจนกว่าจะเปิดแบบ GPU";
+  $("#vMsg").textContent = ""; $("#vRec").classList.remove("hidden");
+};
+$("#vCancel").onclick = () => { if (vRecorder?.state === "recording") vRecorder.stop(); $("#vRec").classList.add("hidden"); };
+function vSetBlob(b, fromRec) {
+  vBlob = b; vText = fromRec ? $("#vSentence").textContent : "";
+  const a = $("#vRecAudio"); a.src = URL.createObjectURL(b); a.classList.remove("hidden"); vReady();
+}
+$("#vFile").onchange = e => { const f = e.target.files[0]; if (f) vSetBlob(f, false); };
+$("#vRecBtn").onclick = async () => {
+  const btn = $("#vRecBtn");
+  if (vRecorder?.state === "recording") return vRecorder.stop();
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return alert("เบราว์เซอร์นี้อัดเสียงไม่ได้ — ใช้ปุ่ม 'เลือกไฟล์เสียง' แทน (อัดด้วยแอปอัดเสียงของมือถือ)");
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true}}); }
+  catch (e) { return alert("ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน: " + e.message); }
+  const chunks = []; vRecorder = new MediaRecorder(stream);
+  vRecorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+  vRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop()); clearInterval(vTick);
+    btn.textContent = "⏺ อัดใหม่"; $("#vTimer").textContent = "";
+    vSetBlob(new Blob(chunks, {type: vRecorder.mimeType || "audio/webm"}), true);
+  };
+  vRecorder.start(); const t0 = Date.now(); btn.textContent = "⏹ หยุดอัด";
+  vTick = setInterval(() => { const s = (Date.now() - t0) / 1000; $("#vTimer").textContent = s.toFixed(0) + " วิ"; if (s >= 15) vRecorder.stop(); }, 250);
+};
+$("#vSave").onclick = async () => {
+  const b = $("#vSave"); b.disabled = true; $("#vMsg").textContent = "⏳ กำลังเตรียมเสียง…";
+  try {
+    const fd = new FormData();
+    const ext = (vBlob.type.includes("mp4") ? ".m4a" : vBlob.type.includes("ogg") ? ".ogg" : vBlob.name ? "." + vBlob.name.split(".").pop() : ".webm");
+    fd.append("file", vBlob, "voice" + ext); fd.append("name", $("#vName").value.trim()); fd.append("ref_text", vText);
+    const r = await api("/api/voices", {method: "POST", body: fd});
+    fillVoices(r.voices); $("#voice").value = r.id; voiceChanged();
+    $("#vMsg").textContent = `✓ บันทึกแล้ว (${r.duration} วิ)` + (r.text ? ` · ได้ยินว่า: "${r.text}"` : "");
+    setTimeout(() => $("#vRec").classList.add("hidden"), 2500);
+  } catch (e) { $("#vMsg").textContent = "⚠️ " + e.message; }
+  vReady();
 };
 
 // ── ผลลัพธ์ ──
@@ -883,6 +993,7 @@ function enterDone() {
   $("#outVid").src = `/api/jobs/${job.id}/output?t=${Date.now()}`;
   $("#dl").href = `/api/jobs/${job.id}/output?download=1`;
   $("#doneSum").textContent = p.summary || "-";
+  $("#doneWarn").textContent = job.warn ? "ℹ️ " + job.warn : ""; $("#doneWarn").classList.toggle("hidden", !job.warn);
   $("#thumbBox").classList.toggle("hidden", !job.thumb);
   if (job.thumb) {
     $("#thumbImg").src = `/api/jobs/${job.id}/thumb.jpg?t=${Date.now()}`;

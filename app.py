@@ -38,6 +38,7 @@ import pipeline as P  # noqa: E402 (ต้องโหลด .env ก่อน)
 import game as G  # noqa: E402
 import imagegen  # noqa: E402
 import story as ST  # noqa: E402
+import voice as V  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,6 +238,8 @@ def _resolve(rel: str) -> Path:
 
 
 def do_render(jid: str) -> None:
+    P.TTS_NOTES.clear()
+    V.reset()
     if jobs[jid]["opts"].get("mode") == "story":
         return do_render_story(jid)
     d, j = job_dir(jid), jobs[jid]
@@ -262,7 +265,7 @@ def do_render(jid: str) -> None:
         except Exception as e:
             print("ทำภาพปกไม่ได้:", e)
         P.render(src, clips, work, out,
-                 voice=r["voice"], rate=r["rate"], orig_volume=r["orig_volume"],
+                 voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"],
                  subtitles=r["subtitles"], layout=r.get("layout", "original"),
                  fx=r.get("fx", False), brand=brand,
                  cover=thumb if r.get("cover") and thumb.exists() else None,
@@ -276,7 +279,7 @@ def do_render(jid: str) -> None:
             tmp.replace(out)
         shutil.rmtree(work, ignore_errors=True)
         save(jid, status="done", step="done", progress=100, message="เสร็จแล้ว!",
-             output_duration=P.probe(out)["duration"])
+             output_duration=P.probe(out)["duration"], warn=" • ".join(P.TTS_NOTES))
     except Exception as e:
         fail_job(jid, e)
 
@@ -300,7 +303,7 @@ def do_render_story(jid: str) -> None:
                                  plan.get("title") or j["name"], "", thumb, work, brand)
             except Exception as e:
                 print("ทำภาพปกไม่ได้:", e)
-        ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], rate=r["rate"], layout=layout,
+        ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
                         subtitles=r["subtitles"], brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
@@ -313,7 +316,7 @@ def do_render_story(jid: str) -> None:
             tmp.replace(out)
         shutil.rmtree(work, ignore_errors=True)
         save(jid, status="done", step="done", progress=100, message="เสร็จแล้ว!",
-             output_duration=P.probe(out)["duration"])
+             output_duration=P.probe(out)["duration"], warn=" • ".join(P.TTS_NOTES))
     except Exception as e:
         fail_job(jid, e)
 
@@ -333,14 +336,14 @@ def do_capcut(jid: str) -> None:
         out_dir.mkdir(parents=True)
         full = out_dir / "00_ทั้งคลิป_ไม่มีซับ.mp4"
         if j["opts"].get("mode") == "story":
-            parts = ST.render_story(j["plan"], d / "scenes", work, full, voice=r["voice"], rate=r["rate"],
+            parts = ST.render_story(j["plan"], d / "scenes", work, full, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"],
                                     layout="original" if r.get("layout") == "original" else "vertical_crop",
                                     subtitles=False, progress=prog, clean=True)
             prefix, labels = "ฉาก", ["" for _ in parts]
         else:
             src = _resolve(j["source"]) if j.get("multi") else d / j["source"]
             parts = P.render(src, j["plan"]["clips"], work, full,
-                             voice=r["voice"], rate=r["rate"], orig_volume=r["orig_volume"],
+                             voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"],
                              subtitles=False, layout=r.get("layout", "original"),
                              progress=prog, clean=True, src_resolver=_resolve)
             prefix, labels = "ช็อต", [c.get("label") or "" for c in j["plan"]["clips"]]
@@ -377,7 +380,11 @@ async def index(_: Request):
 
 async def config(_: Request):
     return JSONResponse({
-        "voices": P.THAI_VOICES,
+        "voices": P.voice_list(),
+        "tones": {k: v[0] for k, v in V.TONES.items()},
+        "gemini_tts": V.gemini_ready(),
+        "clone_ok": P.has_gpu() or bool(os.environ.get("CLONE_CPU")),
+        "ref_sentence": V.REF_SENTENCE,
         "layouts": P.LAYOUTS,
         "styles": {k: v[0] for k, v in imagegen.STYLES.items()},
         "imagegen": imagegen.available(),
@@ -603,12 +610,13 @@ def _num(v, default: float) -> float:
 
 
 def _render_opts(body, mode: str = "talk") -> dict:
-    voices = {v["id"] for v in P.THAI_VOICES}
-    voice = body.get("voice")
+    voice = str(body.get("voice") or "")
+    tone = body.get("tone")
     layout = body.get("layout")
     game = mode == "game"
     return {
-        "voice": voice if voice in voices else P.THAI_VOICES[0]["id"],
+        "voice": voice if P.valid_voice(voice) else P.THAI_VOICES[0]["id"],
+        "tone": tone if tone in V.TONES else ("caster" if game else "story" if mode == "story" else "natural"),
         "rate": max(-50, min(50, int(_num(body.get("rate"), 15 if game else 10)))),
         # โหมดเกม: เสียงเกมดังกว่า (ระบบลดลงให้เองตอนมีเสียงพากย์)
         "orig_volume": max(0.0, min(1.0, _num(body.get("orig_volume"), 0.7 if game else 0.15))),
@@ -623,7 +631,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "rate", "orig_volume", "layout", "subtitles", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "fx", "cover", "music",
                "music_volume", "channel", "logo")
 
 
@@ -790,6 +798,7 @@ async def capcut_zip(req: Request):
 
 
 ASSETS = JOBS_DIR / "_assets"
+P.VOICE_DIR = ASSETS / "voice"
 ASSET_EXT = {"music": {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus"},
              "logo": {".png", ".jpg", ".jpeg", ".webp"}}
 
@@ -834,6 +843,92 @@ async def upload_asset(req: Request):
         orig.unlink(missing_ok=True)
         name = png.name
     return JSONResponse({"name": name})
+
+
+def _ref_text(wav24: Path) -> str:
+    """ถอดข้อความจากเสียงตัวอย่าง (โมเดลโคลนต้องรู้ว่าในตัวอย่างพูดว่าอะไร)"""
+    w16 = wav24.with_suffix(".16k.wav")
+    try:
+        P.extract_audio(wav24, w16)
+        segs = P.transcribe(w16, "small", P.probe(wav24)["duration"], lambda *_: None)
+        return " ".join(x.get("text", "").strip() for x in segs).strip()
+    finally:
+        w16.unlink(missing_ok=True)
+
+
+async def upload_voice(req: Request):
+    form = await req.form(max_part_size=30 * 1024 ** 2)
+    up = form.get("file")
+    if up is None or not getattr(up, "filename", ""):
+        return JSONResponse({"error": "ไม่มีไฟล์เสียง"}, status_code=400)
+    name = re.sub(r"[^\w\-ก-๙ ]+", "", str(form.get("name") or "")).strip()[:30] or "เสียงของฉัน"
+    vd = ASSETS / "voice"
+    vd.mkdir(parents=True, exist_ok=True)
+    raw = vd / f"_{uuid.uuid4().hex}{Path(up.filename).suffix.lower()[:6] or '.webm'}"
+    with open(raw, "wb") as f:
+        shutil.copyfileobj(up.file, f, 1024 * 1024)
+    wav = vd / f"{name}.wav"
+    try:
+        dur = await asyncio.to_thread(V.prepare_reference, raw, wav)
+    except Exception as e:
+        wav.unlink(missing_ok=True)
+        return JSONResponse({"error": f"เปิดไฟล์เสียงไม่ได้: {P.error_text(e)}"}, status_code=400)
+    finally:
+        raw.unlink(missing_ok=True)
+    if dur < 3:
+        wav.unlink(missing_ok=True)
+        return JSONResponse({"error": "เสียงสั้นเกินไป (ต้องพูดอย่างน้อย 5 วินาที)"}, status_code=400)
+    text = str(form.get("ref_text") or "").strip()
+    if not text:
+        try:
+            text = await asyncio.to_thread(_ref_text, wav)
+        except Exception as e:
+            print("ถอดข้อความเสียงตัวอย่างไม่ได้:", e)
+    wav.with_suffix(".txt").write_text(text, "utf-8")
+    return JSONResponse({"id": f"clone:{name}", "name": name, "duration": round(dur, 1), "text": text,
+                         "voices": P.voice_list()})
+
+
+async def delete_voice(req: Request):
+    name = req.path_params["name"]
+    if name not in P.clone_voices():
+        return JSONResponse({"error": "ไม่พบเสียงนี้"}, status_code=404)
+    for ext in (".wav", ".txt"):
+        (ASSETS / "voice" / f"{name}{ext}").unlink(missing_ok=True)
+    return JSONResponse({"voices": P.voice_list()})
+
+
+async def voice_sample(req: Request):
+    name = req.path_params["name"]
+    f = ASSETS / "voice" / f"{name}.wav"
+    return FileResponse(f) if name in P.clone_voices() else JSONResponse({"error": "ไม่พบเสียง"}, status_code=404)
+
+
+async def preview_voice(req: Request):
+    """ฟังตัวอย่างเสียงก่อนเลือก"""
+    body = await req.json()
+    voice, tone = str(body.get("voice") or ""), str(body.get("tone") or "natural")
+    if not P.valid_voice(voice):
+        return JSONResponse({"error": "ไม่รู้จักเสียงนี้"}, status_code=400)
+    text = P.clean_text(str(body.get("text") or "")) or "สวัสดีครับ นี่คือตัวอย่างเสียงพากย์ของคลิปนี้"
+    out = ASSETS / "_preview" / f"{uuid.uuid4().hex}.mp3"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for old in out.parent.glob("*.mp3"):
+        if time.time() - old.stat().st_mtime > 600:
+            old.unlink(missing_ok=True)
+    P.TTS_NOTES.clear()
+    try:
+        await asyncio.to_thread(P.tts, text[:200], out, voice, int(_num(body.get("rate"), 0)), tone)
+    except Exception as e:
+        return JSONResponse({"error": P.error_text(e)}, status_code=500)
+    return JSONResponse({"url": f"/api/voice-preview/{out.name}", "warn": " • ".join(P.TTS_NOTES)})
+
+
+async def voice_preview_file(req: Request):
+    name = req.path_params["name"]
+    f = ASSETS / "_preview" / name
+    return FileResponse(f) if re.fullmatch(r"[0-9a-f]{32}\.mp3", name) and f.exists() \
+        else JSONResponse({"error": "หมดอายุ"}, status_code=404)
 
 
 async def get_asset(req: Request):
@@ -1048,6 +1143,11 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/upload", upload_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/photos", photo_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
+    Route("/api/voices", upload_voice, methods=["POST"]),
+    Route("/api/voices/{name}", delete_voice, methods=["DELETE"]),
+    Route("/api/voices/{name}/sample", voice_sample),
+    Route("/api/voice-preview", preview_voice, methods=["POST"]),
+    Route("/api/voice-preview/{name}", voice_preview_file),
     Route("/api/assets", upload_asset, methods=["POST"]),
     Route("/api/assets/{kind}/{name}", get_asset),
     Route("/api/batches", create_batch, methods=["POST"]),
