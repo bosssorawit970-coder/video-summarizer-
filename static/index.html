@@ -799,6 +799,7 @@ function drawScenes() {
     return `
     <div class="scene" data-i="${i}">
       <div class="pic"><img src="${c.img ? src(c.img) : ""}" alt=""></div>
+      ${c.weak || c.weak_photo ? `<p class="hint" style="color:#b45309;margin:4px 0">⚠️ AI ดูแล้วว่าภาพยังไม่ค่อยตรงบท — ลองพิมพ์คำค้นเองแล้วกด 📷</p>` : ""}
       <div>
         <div class="head"><span class="num">${String(i + 1).padStart(2, "0")}</span><span class="spacer"></span>
           <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del">ลบ</button></div>
@@ -859,7 +860,7 @@ $("#clips").addEventListener("input", e => {
 });
 $("#clips").addEventListener("click", async e => {
   if (e.target.dataset.pick && isStory()) {
-    const i = +e.target.closest(".scene").dataset.i; clips[i].img = e.target.dataset.pick; return drawScenes();
+    const i = +e.target.closest(".scene").dataset.i; clips[i].img = e.target.dataset.pick; clips[i].weak = clips[i].weak_photo = false; return drawScenes();
   }
   const a = e.target.dataset.a, i = +e.target.closest(isStory() ? ".scene" : ".clip")?.dataset.i; if (!a) return;
   if (isStory() && (a === "regen" || a === "photo")) {
@@ -874,7 +875,7 @@ $("#clips").addEventListener("click", async e => {
         : await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || ""})});
       c.options = [...new Set([...(c.options || []), ...(c.img ? [c.img] : []), ...r.imgs])];
-      c.img = r.imgs[0]; c.generic = false;
+      c.img = r.imgs[0]; c.generic = false; c.weak = !!r.weak; c.weak_photo = false;
       if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
     } catch (err) { alert(err.message); }
     b.textContent = label;
@@ -924,10 +925,21 @@ $("#clips").addEventListener("click", async e => {
     const c = clips[i];
     try {
       const r = await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || ""})});
+        body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || "", rank: false})});
       c.options = [...new Set([...r.imgs, ...(c.options || []), ...(c.img ? [c.img] : [])])]; c.img = r.imgs[0]; c.generic = false;
+      c._fresh = r.imgs;
     } catch { fail++; }
   }
+  if (cfg.vision) {  // AI ดูภาพทุกฉากแล้วเลือกใบที่ตรงบทที่สุด (ส่งทีละ 3 ฉาก ประหยัดโควตา)
+    b.textContent = "🤖 AI กำลังดูภาพแล้วเลือกใบที่ตรงบท…";
+    const idx = clips.map((c, i) => c._fresh ? i : -1).filter(i => i >= 0);
+    try {
+      const r = await api(`/api/jobs/${job.id}/scenes-rank`, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({scenes: idx.map(i => ({narration: clips[i].narration, options: clips[i]._fresh}))})});
+      r.scenes.forEach((x, k) => { const c = clips[idx[k]]; if (x.img) { c.img = x.img; c.options = [...new Set([...x.options, ...(c.options || [])])]; } c.weak = x.weak; c.weak_photo = false; });
+    } catch (err) { console.log(err); }
+  }
+  clips.forEach(c => delete c._fresh);
   drawScenes();
   if (fail) alert(`หาภาพไม่เจอ ${fail} ฉาก — ฉากนั้นยังใช้ภาพเดิม ลองพิมพ์คำค้นเองแล้วกด 📷`);
 });

@@ -409,6 +409,7 @@ async def config(_: Request):
         "claude_model": P.DEFAULT_CLAUDE_MODEL,
         "ollama_model": P.DEFAULT_OLLAMA_MODEL,
         "gpu": P.has_gpu(),
+        "vision": ST.vision_ready(),
     })
 
 
@@ -1036,12 +1037,36 @@ async def photo_scene(req: Request):
             scene["narration"] = str(body["narration"])
         if body.get("prompt") and not scene.get("generic"):
             scene["image"] = str(body["prompt"])
-        names = await run_in_threadpool(ST.photo_options, scene, i, d, 4, query)
+        rank = _bool(body.get("rank"), True) and ST.vision_ready()
+        names = await run_in_threadpool(ST.photo_options, scene, i, d, 6 if rank else 4, query)
     except Exception as e:
         return JSONResponse({"error": P.error_text(e)}, status_code=400)
     if not names:
         return JSONResponse({"error": "ไม่เจอภาพที่ตรงคำค้น ลองพิมพ์คำค้นใหม่ (ไทยหรืออังกฤษก็ได้)"}, status_code=404)
-    return JSONResponse({"imgs": names})
+    weak = False
+    if rank and len(names) > 1:  # ให้ AI ดูแล้วเรียงภาพที่ตรงบทที่สุดขึ้นก่อน
+        sc = {"narration": scene.get("narration", ""), "options": list(names)}
+        if await run_in_threadpool(ST.rank_photos, [sc], d, (j.get("plan") or {}).get("title", "")):
+            names, weak = sc["options"], sc.get("weak_photo", False)
+    return JSONResponse({"imgs": names, "weak": weak})
+
+
+async def rank_scenes(req: Request):
+    """ให้ AI เลือกภาพที่ตรงบทที่สุดของหลายฉากพร้อมกัน (ใช้หลังกดเปลี่ยนเป็นภาพถ่ายทุกฉาก)"""
+    from starlette.concurrency import run_in_threadpool
+    j, err = _get(req.path_params["jid"])
+    if err:
+        return err
+    body = await req.json()
+    d = job_dir(j["id"]) / "scenes"
+    scenes = [{"narration": str(x.get("narration") or ""),
+               "options": [str(o) for o in x.get("options") or [] if re.fullmatch(r"[\w.\-]+", str(o))]}
+              for x in (body.get("scenes") or [])[:40]]
+    if not ST.vision_ready():
+        return JSONResponse({"error": "ต้องใส่คีย์ Gemini ก่อน AI ถึงจะช่วยเลือกภาพได้"}, status_code=400)
+    n = await run_in_threadpool(ST.rank_photos, scenes, d, (j.get("plan") or {}).get("title", ""))
+    return JSONResponse({"ranked": n, "scenes": [{"options": s["options"], "img": s.get("img"),
+                                                  "weak": s.get("weak_photo", False)} for s in scenes]})
 
 
 async def upload_scene(req: Request):
@@ -1191,6 +1216,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/regen", regen_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/upload", upload_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/photos", photo_scene, methods=["POST"]),
+    Route("/api/jobs/{jid}/scenes-rank", rank_scenes, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
     Route("/api/voices", upload_voice, methods=["POST"]),
     Route("/api/voices/{name}", delete_voice, methods=["DELETE"]),

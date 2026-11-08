@@ -330,6 +330,80 @@ def photo_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "")
     return [p.name for p in got]
 
 
+PICK_PROMPT = """You are a video editor choosing stock photos for a Thai short vertical video.
+Story topic: {topic}
+For each scene you get its Thai narration and several numbered candidate photos.
+Pick the photo that best illustrates THAT scene's narration: the right subject, place and mood.
+Prefer clear, relevant, good-looking photos. Avoid photos with big text/watermarks, or that contradict the narration.
+order = photo numbers from best to worst. score 0-10 = how well your best pick matches (0 = nothing relevant).
+Reply JSON only: {{"scenes": [{{"id": 1, "order": [2, 1, 3], "score": 7}}]}} with one item per scene."""
+
+
+def vision_ready() -> bool:
+    import os
+    return bool((os.environ.get("GEMINI_API_KEY") or "").strip())
+
+
+def _thumb_part(path: Path) -> dict | None:
+    import base64
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(path).convert("RGB")
+        im.thumbnail((384, 384))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=70)
+        return {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}}
+    except Exception:
+        return None
+
+
+def rank_photos(scenes: list[dict], scene_dir: Path, topic: str = "", progress=None,
+                per_call: int = 3) -> int:
+    """ให้ Gemini ดูภาพตัวเลือกของแต่ละฉาก แล้วเรียงภาพที่ตรงบทที่สุดขึ้นก่อน (ส่งทีละ 3 ฉากต่อครั้ง ประหยัดโควตา)
+    scenes: [{"narration", "options"}] — แก้ options/img ในตัว คืนจำนวนฉากที่เลือกให้สำเร็จ"""
+    if not vision_ready():
+        return 0
+    todo = [s for s in scenes if len([o for o in s.get("options") or [] if (scene_dir / o).exists()]) > 1]
+    topic = topic or " ".join(s.get("narration", "") for s in scenes)[:300]
+    done = 0
+    for g in range(0, len(todo), per_call):
+        group = todo[g:g + per_call]
+        if progress:
+            progress(f"AI กำลังเลือกภาพที่ตรงบท ({g + 1}-{g + len(group)}/{len(todo)})")
+        parts, cands = [], []
+        for k, s in enumerate(group, 1):
+            opts = [o for o in s["options"] if (scene_dir / o).exists()][:6]
+            cands.append(opts)
+            parts.append({"text": f"Scene {k} narration (Thai): {s.get('narration', '')}"})
+            for m, o in enumerate(opts, 1):
+                img = _thumb_part(scene_dir / o)
+                if img:
+                    parts += [{"text": f"Scene {k} - photo {m}:"}, img]
+        try:
+            data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic), parts))
+        except Exception as e:
+            print("AI เลือกภาพไม่ได้ (ใช้ภาพแรกตามเดิม):", e)
+            break  # โควตาเต็ม/ผิดพลาด → ไม่ต้องลองกลุ่มถัดไป
+        for r in data.get("scenes") or []:
+            try:
+                k = int(r.get("id")) - 1
+                order = [int(x) - 1 for x in r.get("order") or []]
+                score = float(r.get("score") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= k < len(group):
+                continue
+            s, opts = group[k], cands[k]
+            best = [opts[x] for x in dict.fromkeys(order) if 0 <= x < len(opts)]
+            new = best + [o for o in opts if o not in best]
+            s["options"] = new + [o for o in s["options"] if o not in new]
+            s["img"] = new[0]
+            s["weak_photo"] = score < 4
+            done += 1
+    return done
+
+
 def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
                 only_missing: bool = True, source: str = "ai") -> int:
     """หาภาพทุกฉาก (AI วาด หรือภาพถ่ายจริง) คืนจำนวนฉากที่ได้ภาพจริง (ไม่ใช่ภาพไล่สี)"""
@@ -339,6 +413,7 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
     if source == "ai" and not imagegen.available():  # ไม่มีการ์ดจอ → ใช้ภาพถ่ายจริงแทน
         source = "photo"
         plan["note"] = f"เครื่องนี้ไม่มีการ์ดจอ จึงใช้ภาพถ่ายจริงจาก {imagegen.photo_source()} แทนการวาดด้วย AI"
+    photo_scenes: list[dict] = []
     for i, s in enumerate(plan["scenes"]):
         if only_missing and s.get("img") and (scene_dir / s["img"]).exists():
             continue
@@ -346,9 +421,10 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         if (source == "photo" or s.get("generic")) and not photo_err:
             progress(i / n * 100, f"หาภาพถ่ายฉากที่ {i + 1}/{n}")
             try:
-                names = photo_options(s, i, scene_dir)
+                names = photo_options(s, i, scene_dir, 6 if vision_ready() else 4)
                 if names:
                     s["options"], s["img"] = names, names[0]
+                    photo_scenes.append(s)
                     if s.pop("generic", False):
                         s["auto_photo"] = True
                     ok += 1
@@ -360,17 +436,24 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         names, ai = ai_variants(s, i, scene_dir, style, 1, lambda m: progress(i / n * 100, f"ฉากที่ {i + 1}/{n}: {m}"))
         if not ai and not photo_err:  # วาดไม่ได้ (ได้แค่ภาพไล่สี) → ลองภาพถ่ายฟรีแทน
             try:
-                got = photo_options(s, i, scene_dir)
+                got = photo_options(s, i, scene_dir, 6 if vision_ready() else 4)
                 if got:
                     names, ai = got, True
+                    photo_scenes.append(s)
             except Exception as e:
                 photo_err = P.error_text(e)
         s["options"], s["img"] = names, names[0]
         ok += 1 if ai else 0
+    if photo_scenes and vision_ready():
+        rank_photos(photo_scenes, scene_dir, plan.get("title") or "", lambda m: progress(99, m))
     auto = sum(1 for s in plan["scenes"] if s.get("auto_photo"))
     if auto:
         plan["note"] = (f"AI คิดภาพไม่ได้ {auto} ฉาก จึงใช้ภาพถ่ายฟรีที่ค้นจากคำสำคัญในบทแทน — "
                         "ภาพไหนไม่ตรง กด 📷 ภาพถ่ายจริง เพื่อดูภาพอื่น หรือพิมพ์คำค้นเอง")
+    weak = [str(k + 1) for k, s in enumerate(plan["scenes"]) if s.get("weak_photo")]
+    if weak:
+        plan["note"] = ((plan.get("note") or "") + f" · AI ดูแล้วว่าฉาก {', '.join(weak)} ยังไม่มีภาพที่ตรงบทนัก "
+                        "ลองพิมพ์คำค้นเอง หรือใช้ 📁 รูปของฉัน").strip(" ·")
     return ok
 
 
