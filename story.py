@@ -287,15 +287,37 @@ def search_terms(s: dict) -> str:
     return " ".join([w for w in words if w.lower() not in STOP][:4]) or "abstract background"
 
 
-def next_names(scene_dir: Path, i: int, n: int) -> list[Path]:
-    """ชื่อไฟล์ภาพใหม่ของฉากที่ i (scene_03_v2.png, _v3 …) ไม่ทับของเดิม"""
+def next_names(scene_dir: Path, i: int, n: int, ext: str = ".png") -> list[Path]:
+    """ชื่อไฟล์ภาพ/วิดีโอใหม่ของฉากที่ i (scene_03_v2.png, _v3.mp4 …) ไม่ทับของเดิม"""
     out, v = [], 2
     while len(out) < n:
-        p = scene_dir / f"scene_{i + 1:02}_v{v}.png"
-        if not p.exists() and p not in out:
+        p = scene_dir / f"scene_{i + 1:02}_v{v}{ext}"
+        if not p.with_suffix(".png").exists() and not p.with_suffix(".mp4").exists() and p not in out:
             out.append(p)
         v += 1
     return out
+
+
+def is_video(name: str) -> bool:
+    return str(name).lower().endswith(".mp4")
+
+
+def poster(name: str) -> str:
+    """ภาพตัวอย่างของวิดีโอ (ชื่อเดียวกัน .png) — ภาพนิ่งคืนชื่อเดิม"""
+    return str(name)[:-4] + ".png" if is_video(name) else str(name)
+
+
+def video_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "") -> list[str]:
+    """วิดีโอฟรีให้เลือก (Pixabay/Pexels) ค้นแบบเดียวกับภาพถ่าย"""
+    if query:
+        lang = "th" if re.search(r"[ก-๙]", query) else "en"
+        if lang == "th":
+            query = imagegen.translate_th_en(query) or query
+            lang = "th" if re.search(r"[ก-๙]", query) else "en"
+    else:
+        query, lang = scene_query(s)
+    got = imagegen.search_videos(query, next_names(scene_dir, i, n, ".mp4"), lang)
+    return [p.name for p in got]
 
 
 def ai_variants(s: dict, i: int, scene_dir: Path, style: str, n: int, progress=None) -> tuple[list[str], bool]:
@@ -414,7 +436,7 @@ def rank_photos(scenes: list[dict], scene_dir: Path, topic: str = "", progress=N
             cands.append(opts)
             parts.append({"text": f"Scene {k} narration (Thai): {s.get('narration', '')}"})
             for m, o in enumerate(opts, 1):
-                img = _thumb_part(scene_dir / o)
+                img = _thumb_part(scene_dir / poster(o))  # วิดีโอ → ดูจากภาพตัวอย่าง
                 if img:
                     parts += [{"text": f"Scene {k} - photo {m}:"}, img]
         try:
@@ -439,6 +461,40 @@ def rank_photos(scenes: list[dict], scene_dir: Path, topic: str = "", progress=N
             s["weak_photo"] = score < 4
             done += 1
     return done
+
+
+def video_scenes(scenes: list[dict]) -> list[int]:
+    """เลือกฉากที่จะแทรกวิดีโอ: ราว 1 ใน 3 กระจายทั้งเรื่อง (ฉากแรกด้วย = เปิดคลิปให้มีชีวิต)"""
+    n = len(scenes)
+    if n == 0:
+        return []
+    want = max(1, round(n / 3))
+    step = n / want
+    return sorted({min(n - 1, int(k * step)) for k in range(want)})
+
+
+def add_videos(plan: dict, scene_dir: Path, progress, idxs: list[int] | None = None) -> int:
+    """แทรกวิดีโอฟรีในบางฉาก (ภาพเดิมยังอยู่ในตัวเลือก) คืนจำนวนฉากที่ได้วิดีโอ"""
+    scenes = plan["scenes"]
+    idxs = video_scenes(scenes) if idxs is None else idxs
+    done: list[dict] = []
+    for k, i in enumerate(idxs):
+        s = scenes[i]
+        progress(k / max(1, len(idxs)) * 100, f"หาวิดีโอฟรีฉากที่ {i + 1} ({k + 1}/{len(idxs)})")
+        try:
+            vids = video_options(s, i, scene_dir, 4 if vision_ready() else 3)
+        except Exception as e:
+            plan["note"] = ((plan.get("note") or "") + f" · หาวิดีโอไม่ได้ ({P.error_text(e)})").strip(" ·")
+            break  # คีย์ผิด/โควตา → ไม่ต้องลองฉากอื่น
+        if not vids:
+            continue
+        tmp = {"narration": s.get("narration", ""), "options": vids}
+        if len(vids) > 1 and vision_ready():
+            rank_photos([tmp], scene_dir, plan.get("title") or "")
+        s["options"] = tmp["options"] + [o for o in s.get("options") or [] if o not in tmp["options"]]
+        s["img"] = tmp["options"][0]
+        done.append(s)
+    return len(done)
 
 
 def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
@@ -522,13 +578,34 @@ def _motion(kind: str, W: int, H: int, D: float) -> str:
     return f"[0:v]split[b0][f0];{bg};[f0]{fg}[fg];[bg][fg]overlay=(W-w)/2:{y}[mv]"
 
 
+def _video_layout(video: Path, W: int, H: int) -> str:
+    """วิดีโอแทรก: แนวเดียวกับจอ → เต็มจอ · คนละแนว → วิดีโอสี่เหลี่ยมกลางจอบนพื้นหลังเบลอ (เหมือนฉากภาพนิ่ง)"""
+    try:
+        info = P.probe(video)
+        vw, vh = int(info.get("width") or 0), int(info.get("height") or 0)
+    except Exception:
+        vw = vh = 0
+    same = vw and vh and ((vh > vw) == (H > W)) and abs(vw / vh - W / H) < 0.35
+    if same:
+        return (f"[0:v]setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
+                f"crop={W}:{H},setsar=1[mv]")
+    S = min(W, H)
+    y = (H - S) // 2 - (60 if H > W else 0)
+    return (f"[0:v]setpts=PTS-STARTPTS,split[b0][f0];"
+            f"[b0]scale=270:-2,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+            f"boxblur=10:2,eq=brightness=-0.18:saturation=1.2,setsar=1[bg];"
+            f"[f0]scale={S}:{S}:force_original_aspect_ratio=increase,crop={S}:{S},setsar=1[fg];"
+            f"[bg][fg]overlay=(W-w)/2:{y}[mv]")
+
+
 def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, workdir: Path,
                  layout: str, subtitles: bool, extras: bool, brand: dict | None, sfx: bool = True) -> float:
     W, H = size_for(layout)
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
     D = max(2.5, nd + LEAD + TAIL)
-    motion = _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
+    video = is_video(img.name)
+    motion = _video_layout(img, W, H) if video else _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
     vf = ["fps=30"]
 
     # ข้อความไทยทั้งหมด (หัวข้อ, ชื่อช่อง, ซับ) วาดด้วย libass ให้สระ/วรรณยุกต์ถูกตำแหน่ง
@@ -550,7 +627,8 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     if ass.write(workdir / f"text_{i}.ass"):
         vf.append(P.ass_filter(f"text_{i}.ass"))
 
-    inputs = ["-loop", "1", "-framerate", "30", "-t", f"{D:.3f}", "-i", str(img)]
+    inputs = (["-stream_loop", "-1", "-t", f"{D:.3f}", "-i", str(img)] if video  # วิดีโอสั้นกว่าฉาก → วนซ้ำ
+              else ["-loop", "1", "-framerate", "30", "-t", f"{D:.3f}", "-i", str(img)])
     parts, n_in = [], 1
     if narr:
         inputs += ["-i", str(narr)]; ia = n_in; n_in += 1

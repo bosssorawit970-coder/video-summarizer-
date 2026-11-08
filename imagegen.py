@@ -253,6 +253,115 @@ def search_photos(query: str, outs: list[Path], lang: str = "en") -> list[Path]:
     return []
 
 
+# ───────────────────────── วิดีโอฟรี (แทรกบางฉาก) ─────────────────────────
+
+def videos_available() -> bool:
+    """วิดีโอฟรีต้องมีคีย์ Pixabay หรือ Pexels (Openverse ไม่มีวิดีโอ)"""
+    pex, pix = _keys()
+    return bool(pex or pix)
+
+
+def _pixabay_video_urls(query: str, n: int, lang: str = "en") -> list[str]:
+    params = {"key": _keys()[1], "q": query[:100], "per_page": max(3, n * 2), "safesearch": "true",
+              "order": "popular", "lang": lang}
+    hits = _get_json("https://pixabay.com/api/videos/?" + urllib.parse.urlencode(params)).get("hits", [])
+    out = []
+    for h in hits:
+        v = h.get("videos") or {}
+        pick = next((v[k] for k in ("medium", "small", "large") if (v.get(k) or {}).get("url")), None)
+        if pick and float(h.get("duration") or 0) >= 3:
+            out.append(pick["url"])
+    return out
+
+
+def _pexels_video_urls(query: str, n: int, lang: str = "en") -> list[str]:
+    out = []
+    for ori in ("portrait", None):
+        params = {"query": query, "per_page": n * 2, "size": "medium", **({"orientation": ori} if ori else {}),
+                  **({"locale": "th-TH"} if lang == "th" else {})}
+        vids = _get_json("https://api.pexels.com/videos/search?" + urllib.parse.urlencode(params),
+                         {"Authorization": _keys()[0]}).get("videos", [])
+        for v in vids:
+            files = [f for f in v.get("video_files") or [] if f.get("file_type") == "video/mp4" and f.get("link")]
+            files.sort(key=lambda f: abs(max(f.get("width") or 0, f.get("height") or 0) - 1280))
+            if files:
+                out.append(files[0]["link"])
+        if out:
+            break
+    return out
+
+
+def search_videos(query: str, outs: list[Path], lang: str = "en") -> list[Path]:
+    """ค้นวิดีโอฟรีแล้วแปลงเป็นคลิปสั้นมาตรฐาน (≤ 20 วิ, ไม่เกิน 1280px, ไม่มีเสียง) + ภาพตัวอย่าง .png
+    outs = ชื่อไฟล์ .mp4 ปลายทาง คืนไฟล์ที่ได้จริง"""
+    import subprocess
+    words = query.split()
+    query = " ".join(words[:5]) or "nature"
+    pex, pix = _keys()
+    sources = ([_pexels_video_urls] if pex else []) + ([_pixabay_video_urls] if pix else [])
+    if not sources:
+        raise RuntimeError("วิดีโอฟรีต้องมีคีย์ Pixabay (ใส่ในช่อง PEXELS_API_KEY ของโน้ตบุ๊ก)")
+    errors = []
+    for fn in sources:
+        urls = []
+        for q in dict.fromkeys([query, " ".join(words[:2])]):
+            try:
+                urls = fn(q, len(outs), lang)
+            except urllib.error.HTTPError as e:
+                errors.append("คีย์ไม่ถูกต้อง" if e.code in (401, 403) else "ค้นบ่อยเกินโควตา" if e.code == 429
+                              else f"HTTP {e.code}")
+                break
+            except Exception as e:
+                errors.append(str(e))
+                break
+            if urls:
+                break
+        got = []
+        for url in urls:
+            if len(got) >= len(outs):
+                break
+            out = outs[len(got)]
+            tmp = out.with_suffix(".dl")
+            try:
+                req = urllib.request.Request(url, headers=UA)
+                with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        if f.tell() > 80 * 1024 * 1024:
+                            raise ValueError("ไฟล์ใหญ่เกิน")
+                normalize_video(tmp, out)
+                got.append(out)
+            except Exception as e:
+                print("โหลดวิดีโอไม่ได้:", str(e)[-200:])
+                out.unlink(missing_ok=True)
+            finally:
+                tmp.unlink(missing_ok=True)
+        if got:
+            return got
+    if errors:
+        raise RuntimeError("หาวิดีโอไม่ได้ — " + "; ".join(errors))
+    return []
+
+
+def normalize_video(src: Path, out: Path, max_len: float = 20) -> None:
+    """แปลงวิดีโอเป็นคลิปมาตรฐานสำหรับแทรกในฉาก + ภาพตัวอย่าง (ชื่อเดียวกัน .png)"""
+    import subprocess
+    r = subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-t", f"{max_len}",
+                        "-an", "-vf", "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))',fps=30,"
+                                      "format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                        "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+    if r.returncode != 0 or not out.exists():
+        raise RuntimeError("แปลงวิดีโอไม่ได้: " + (r.stderr or "")[-200:])
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", "1", "-i", str(out),
+                    "-frames:v", "1", "-vf", "scale='min(1024,iw)':-2", str(out.with_suffix(".png"))])
+    if not out.with_suffix(".png").exists():  # คลิปสั้นกว่า 1 วิ
+        subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(out),
+                        "-frames:v", "1", str(out.with_suffix(".png"))])
+
+
 def placeholder(out: Path, width: int, height: int, seed: int = 0) -> None:
     """ภาพพื้นหลังไล่สีสวยๆ (ใช้เมื่อวาดด้วย AI ไม่ได้)"""
     from PIL import Image, ImageDraw, ImageFilter

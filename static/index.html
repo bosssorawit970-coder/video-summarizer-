@@ -106,6 +106,9 @@ video{width:100%;border-radius:10px;background:#000;display:block}
 .scene .thumbs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px}
 .scene .thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:pointer;opacity:.6;border:3px solid transparent;flex:none}
 .scene .thumbs img.on{opacity:1;border-color:var(--accent)}
+.scene .thumbs .tw{position:relative;flex:none;display:block}
+.scene .thumbs .tw b{position:absolute;left:4px;bottom:4px;background:#000a;color:#fff;font-size:11px;border-radius:5px;padding:0 5px;pointer-events:none}
+.scene .pic video{width:100%;display:block;border-radius:12px;background:#000}
 .scene .imgbtns{gap:6px;margin-bottom:6px}
 .scene .imgbtns button{padding:7px 10px;font-size:13px}
 .scene .pic img{width:96px;height:96px;object-fit:cover}
@@ -176,6 +179,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       </div>
       <label class="f">โมชันกราฟิก</label>
       <div class="seg"><label><input type="checkbox" id="graphics" checked> 📊 ใส่กราฟิกช่วยให้เข้าใจ (ตัวเลขนับขึ้น · แท่งเปรียบเทียบ · หัวข้อย่อย · คำสำคัญ)</label></div>
+      <div class="seg" id="vidSeg" style="margin-top:6px"><label><input type="checkbox" id="videos" checked> 📹 แทรกวิดีโอฟรีบางฉาก (ราว 1 ใน 3 ฉาก)</label></div>
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
       <div class="hint" style="margin-top:6px">💡 ใช้ Gemini (ฟรี) หรือ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
@@ -494,6 +498,8 @@ async function init() {
   modeChanged();
   $("#styleSeg").innerHTML = Object.entries(cfg.styles || {}).map(([k, v], i) => `<label><input type="radio" name="style" value="${k}" ${i ? "" : "checked"}> ${esc(v)}</label>`).join("");
   const pin = $("#srcPhoto input");
+  if (!cfg.videos) { $("#videos").checked = false; $("#videos").disabled = true;
+    $("#vidSeg").querySelector("label").insertAdjacentHTML("beforeend", ' <span class="tag">ต้องมีคีย์ Pixabay</span>'); }
   pin.disabled = !cfg.pexels; $("#pexTag").textContent = cfg.photo_source || "พร้อม";
   $("#pexTag").classList.toggle("ok", !!cfg.pexels); $("#srcPhoto").classList.toggle("dis", !cfg.pexels);
   $("#srcSeg").onchange = () => $("#styleBox").classList.toggle("hidden", document.querySelector("input[name=image_source]:checked").value !== "ai");
@@ -689,6 +695,7 @@ $("#go").onclick = async () => {
       fd.append("script_mode", document.querySelector("input[name=script_mode]:checked").value);
       fd.append("image_source", document.querySelector("input[name=image_source]:checked").value);
       fd.append("graphics", $("#graphics").checked ? "1" : "0");
+      fd.append("videos", cfg.videos && $("#videos").checked ? "1" : "0");
       const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
     }
     if (n > 1) {  // หลายคลิป → ชุดงาน
@@ -844,7 +851,9 @@ function drawScenes() {
     const opts = [...new Set([...(c.options || []), ...(c.img ? [c.img] : [])])];
     return `
     <div class="scene" data-i="${i}">
-      <div class="pic">${c.img ? `<img src="${src(c.img)}" alt="" onerror="imgRetry(this)">` : `<div class="hint" style="padding:30px 8px;text-align:center">ยังไม่มีภาพ<br>กด 📷 หรือ 📁 ด้านล่าง</div>`}</div>
+      <div class="pic">${!c.img ? `<div class="hint" style="padding:30px 8px;text-align:center">ยังไม่มีภาพ<br>กด 📷 หรือ 📁 ด้านล่าง</div>`
+        : isVid(c.img) ? `<video src="${src(c.img)}" poster="${src(posterOf(c.img))}" preload="none" muted loop playsinline controls></video>`
+        : `<img src="${src(c.img)}" alt="" onerror="imgRetry(this)">`}</div>
       ${c.weak || c.weak_photo ? `<p class="hint" style="color:#b45309;margin:4px 0">⚠️ AI ดูแล้วว่าภาพยังไม่ค่อยตรงบท — ลองพิมพ์คำค้นเองแล้วกด 📷</p>` : ""}
       <div>
         <div class="head"><span class="num">${String(i + 1).padStart(2, "0")}</span><span class="spacer"></span>
@@ -858,10 +867,11 @@ function drawScenes() {
       </div>
       <div class="opts-row">
         ${c.generic ? `<div class="warn" style="margin-bottom:6px">⚠️ AI คิดภาพให้ฉากนี้ไม่ได้ ภาพอาจไม่เกี่ยวกับบท — เปิด "คำบรรยายภาพ" ด้านล่าง พิมพ์ภาพที่อยากได้ (อังกฤษ) แล้วกด 🎲</div>` : ""}
-        ${opts.length > 1 ? `<div class="thumbs">${opts.map(n => `<img data-pick="${esc(n)}" src="${src(n)}" class="${n === c.img ? "on" : ""}" alt="">`).join("")}</div>` : ""}
+        ${opts.length > 1 ? `<div class="thumbs">${opts.map(n => `<span class="tw"><img data-pick="${esc(n)}" src="${src(posterOf(n))}" class="${n === c.img ? "on" : ""}" alt="">${isVid(n) ? "<b>▶</b>" : ""}</span>`).join("")}</div>` : ""}
         <div class="row imgbtns">
           <button data-a="regen">🎲 AI วาด 3 ภาพ</button>
           ${cfg.pexels ? `<button data-a="photo">📷 ภาพถ่ายจริง</button>` : ""}
+          ${cfg.videos ? `<button data-a="video">📹 วิดีโอ</button>` : ""}
           <button data-a="mine">📁 รูปของฉัน</button>
         </div>
         <details><summary>คำบรรยายภาพ / คำค้น (ไทยหรืออังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
@@ -872,6 +882,8 @@ function drawScenes() {
     </div>`; }).join("");
   $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(2.5, (c.narration || "").replace(/\s/g, "").length / 11 + 0.7), 0).toFixed(0);
 }
+const isVid = n => /\.mp4$/i.test(n || "");
+const posterOf = n => isVid(n) ? n.replace(/\.mp4$/i, ".png") : n;
 // ภาพโหลดไม่ขึ้น (เน็ตสะดุด) → ลองใหม่ 2 ครั้ง แล้วบอกให้แตะโหลดใหม่
 function imgRetry(el) {
   const n = +(el.dataset.retry || 0);
@@ -956,18 +968,18 @@ $("#clips").addEventListener("click", async e => {
     const i = +e.target.closest(".scene").dataset.i; clips[i].img = e.target.dataset.pick; clips[i].weak = clips[i].weak_photo = false; return drawScenes();
   }
   const a = e.target.dataset.a, i = +e.target.closest(isStory() ? ".scene" : ".clip")?.dataset.i; if (!a) return;
-  if (isStory() && (a === "regen" || a === "photo")) {
+  if (isStory() && (a === "regen" || a === "photo" || a === "video")) {
     const card = e.target.closest(".scene"), b = e.target, label = b.textContent;
     card.querySelectorAll(".imgbtns button").forEach(x => x.disabled = true);
-    b.textContent = a === "regen" ? "กำลังวาด 3 ภาพ…" : "กำลังค้นหา…"; card.querySelector(".pic img").classList.add("busy");
+    b.textContent = a === "regen" ? "กำลังวาด 3 ภาพ…" : a === "video" ? "กำลังหาวิดีโอ…" : "กำลังค้นหา…"; card.querySelector(".pic img, .pic video")?.classList.add("busy");
     try {
       const c = clips[i];
       const r = a === "regen"
         ? await api(`/api/jobs/${job.id}/scenes/${i}/regen`, {method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({prompt: c.image || c.headline || c.narration, n: 3})})
-        : await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
+        : await api(`/api/jobs/${job.id}/scenes/${i}/${a === "video" ? "videos" : "photos"}`, {method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || ""})});
-      c.options = [...new Set([...(c.options || []), ...(c.img ? [c.img] : []), ...r.imgs])];
+      c.options = [...new Set([...r.imgs, ...(c.options || []), ...(c.img ? [c.img] : [])])];
       c.img = r.imgs[0]; c.generic = false; c.weak = !!r.weak; c.weak_photo = false;
       if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
     } catch (err) { alert(err.message); }
@@ -975,11 +987,12 @@ $("#clips").addEventListener("click", async e => {
     return drawScenes();
   }
   if (isStory() && a === "mine") {
-    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,video/*";
     inp.onchange = async () => {
       const f = inp.files[0]; if (!f) return;
       const b = e.target; b.disabled = true; b.textContent = "กำลังอัปโหลด…";
       try {
+        b.textContent = f.type.startsWith("video/") ? "กำลังอัปโหลดวิดีโอ…" : "กำลังอัปโหลด…";
         const fd = new FormData(); fd.append("file", await shrinkImage(f));
         const r = await api(`/api/jobs/${job.id}/scenes/${i}/upload`, {method: "POST", body: fd});
         clips[i].options = [...new Set([...(clips[i].options || []), ...(clips[i].img ? [clips[i].img] : []), r.img])];

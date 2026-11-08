@@ -171,6 +171,11 @@ def analyze_story(jid: str) -> dict:
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                         lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.78, message=msg),
                         source=o.get("image_source", "ai"))
+    if o.get("videos"):  # แทรกวิดีโอฟรีบางฉาก
+        nv = ST.add_videos(plan, d / "scenes",
+                           lambda pct, msg: save(jid, step="images", progress=97, message=msg))
+        if nv:
+            plan["note"] = ((plan.get("note") or "") + f" · แทรกวิดีโอฟรีแล้ว {nv} ฉาก (▶) — ภาพนิ่งเดิมยังเลือกกลับได้").strip(" ·")
     if ok == 0 and not plan.get("note"):
         plan["note"] = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน"
     return plan
@@ -412,6 +417,7 @@ async def config(_: Request):
         "ollama_model": P.DEFAULT_OLLAMA_MODEL,
         "gpu": P.has_gpu(),
         "vision": ST.vision_ready(),
+        "videos": imagegen.videos_available(),
     })
 
 
@@ -457,6 +463,7 @@ def job_opts(form) -> dict:
         opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" else "verbatim"
         opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
         opts["graphics"] = _bool(form.get("graphics"), True)
+        opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
     opts["render"] = _render_opts(form, opts["mode"])
     return opts
 
@@ -719,11 +726,11 @@ async def render_job(req: Request):
         scenes = []
         for s in body.get("scenes", []):
             img = str(s.get("img") or "")
-            if not re.fullmatch(r"scene_\d+(_v\d+)?\.png", img) or not (job_dir(jid) / "scenes" / img).exists():
+            if not re.fullmatch(r"scene_\d+(_v\d+)?\.(png|mp4)", img) or not (job_dir(jid) / "scenes" / img).exists():
                 img = ""
             narr = str(s.get("narration") or "").strip()
             opts_ = [o for o in (s.get("options") or [])[:24]
-                     if isinstance(o, str) and re.fullmatch(r"scene_\d+(_v\d+)?\.png", o)
+                     if isinstance(o, str) and re.fullmatch(r"scene_\d+(_v\d+)?\.(png|mp4)", o)
                      and (job_dir(jid) / "scenes" / o).exists()]
             if narr or img:
                 scenes.append({"narration": narr[:300], "headline": str(s.get("headline") or "")[:40],
@@ -1003,7 +1010,7 @@ async def scene_image(req: Request):
         return err
     name = req.path_params["name"]
     f = job_dir(j["id"]) / "scenes" / name
-    if not re.fullmatch(r"scene_\d+(_v\d+)?\.png", name) or not f.exists():
+    if not re.fullmatch(r"scene_\d+(_v\d+)?\.(png|mp4)", name) or not f.exists():
         return JSONResponse({"error": "ไม่พบภาพ"}, status_code=404)
     return FileResponse(f)
 
@@ -1057,6 +1064,35 @@ async def photo_scene(req: Request):
     return JSONResponse({"imgs": names, "weak": weak})
 
 
+async def video_scene(req: Request):
+    """ค้นวิดีโอฟรีให้ฉากนี้ (Pixabay/Pexels) แล้วให้ AI เลือกตัวที่ตรงบทขึ้นก่อน"""
+    from starlette.concurrency import run_in_threadpool
+    j, err = _get(req.path_params["jid"])
+    if err:
+        return err
+    body = await req.json()
+    i = int(_num(req.path_params["i"], 0))
+    d = job_dir(j["id"]) / "scenes"
+    d.mkdir(parents=True, exist_ok=True)
+    scenes = (j.get("plan") or {}).get("scenes") or []
+    scene = dict(scenes[i]) if 0 <= i < len(scenes) else {}
+    if body.get("narration"):
+        scene["narration"] = str(body["narration"])
+    if body.get("prompt") and not scene.get("generic"):
+        scene["image"] = str(body["prompt"])
+    try:
+        names = await run_in_threadpool(ST.video_options, scene, i, d, 4, str(body.get("query") or "").strip()[:80])
+    except Exception as e:
+        return JSONResponse({"error": P.error_text(e)}, status_code=400)
+    if not names:
+        return JSONResponse({"error": "ไม่เจอวิดีโอที่ตรงคำค้น ลองพิมพ์คำค้นใหม่"}, status_code=404)
+    if len(names) > 1 and ST.vision_ready():
+        sc = {"narration": scene.get("narration", ""), "options": list(names)}
+        if await run_in_threadpool(ST.rank_photos, [sc], d, (j.get("plan") or {}).get("title", "")):
+            names = sc["options"]
+    return JSONResponse({"imgs": names})
+
+
 async def rank_scenes(req: Request):
     """ให้ AI เลือกภาพที่ตรงบทที่สุดของหลายฉากพร้อมกัน (ใช้หลังกดเปลี่ยนเป็นภาพถ่ายทุกฉาก)"""
     from starlette.concurrency import run_in_threadpool
@@ -1080,7 +1116,7 @@ async def upload_scene(req: Request):
     j, err = _get(req.path_params["jid"])
     if err:
         return err
-    form = await req.form(max_part_size=40 * 1024 ** 2)
+    form = await req.form(max_part_size=300 * 1024 ** 2)
     up = form.get("file")
     if up is None or not getattr(up, "filename", ""):
         return JSONResponse({"error": "เลือกรูปก่อน"}, status_code=400)
@@ -1088,12 +1124,25 @@ async def upload_scene(req: Request):
     d = job_dir(j["id"]) / "scenes"
     d.mkdir(parents=True, exist_ok=True)
     v = 2
-    while (d / f"scene_{i + 1:02}_v{v}.png").exists():
+    while (d / f"scene_{i + 1:02}_v{v}.png").exists() or (d / f"scene_{i + 1:02}_v{v}.mp4").exists():
         v += 1
     name = f"scene_{i + 1:02}_v{v}.png"
-    raw = d / f"upload_{uuid.uuid4().hex}{Path(up.filename).suffix.lower()[:6]}"
+    ext = Path(up.filename).suffix.lower()[:6]
+    raw = d / f"upload_{uuid.uuid4().hex}{ext}"
     with open(raw, "wb") as f:
         shutil.copyfileobj(up.file, f, 1024 * 1024)
+    is_vid = ext in (".mp4", ".mov", ".webm", ".m4v", ".3gp", ".mkv") or \
+        str(getattr(up, "content_type", "") or "").startswith("video/")
+    if is_vid:  # วิดีโอของตัวเอง → แปลงเป็นคลิปแทรกฉาก (ไม่เกิน 20 วิแรก)
+        from starlette.concurrency import run_in_threadpool
+        vname = name[:-4] + ".mp4"
+        try:
+            await run_in_threadpool(imagegen.normalize_video, raw, d / vname)
+        except Exception:
+            return JSONResponse({"error": "เปิดวิดีโอนี้ไม่ได้ ลองไฟล์ MP4"}, status_code=400)
+        finally:
+            raw.unlink(missing_ok=True)
+        return JSONResponse({"img": vname})
     try:  # ย่อให้ด้านยาวไม่เกิน 2048 + แปลงเป็น PNG
         P.run(["ffmpeg", "-y", "-hide_banner", "-i", str(raw), "-frames:v", "1",
                "-vf", "scale='min(2048,iw)':-2", str(d / name)])
@@ -1229,6 +1278,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/upload", upload_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/photos", photo_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes-rank", rank_scenes, methods=["POST"]),
+    Route("/api/jobs/{jid}/scenes/{i}/videos", video_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
     Route("/api/voices", upload_voice, methods=["POST"]),
     Route("/api/voices/{name}", delete_voice, methods=["DELETE"]),
