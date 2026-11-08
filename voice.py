@@ -30,14 +30,33 @@ GEMINI_VOICES = [
     ("Fenrir", "ชาย ตื่นเต้น"),
 ]
 
+# (ชื่อไทย, สไตล์การพูด) — สไตล์เป็น "คำกำกับ" ห้ามให้โมเดลอ่านออกเสียง (ดู _tts_prompt)
 TONES = {
-    "natural": ("เป็นธรรมชาติ", "Read this Thai text naturally and clearly, like a friendly Thai TikTok narrator"),
-    "caster": ("แคสเตอร์เกม ตื่นเต้น", "Read this Thai text like a hyped, energetic Thai esports caster"),
-    "story": ("เล่าเรื่อง น่าติดตาม", "Read this Thai text like an engaging Thai storyteller, with natural pauses"),
-    "horror": ("เรื่องผี หลอนๆ", "Read this Thai text slowly in a low, eerie, suspenseful whisper-like voice"),
-    "bright": ("สดใส ร่าเริง", "Read this Thai text in a bright, cheerful and upbeat voice"),
-    "calm": ("สุภาพ นุ่มนวล", "Read this Thai text calmly and warmly, like a gentle documentary narrator"),
+    "natural": ("เป็นธรรมชาติ", ""),
+    "caster": ("แคสเตอร์เกม ตื่นเต้น", "Hyped, energetic Thai esports caster. Fast, punchy, rising excitement."),
+    "story": ("เล่าเรื่อง น่าติดตาม", "Engaging Thai storyteller, warm and expressive, natural pauses between ideas."),
+    "horror": ("เรื่องผี หลอนๆ", "Eerie Thai ghost-story narrator, low and suspenseful, slow with tense pauses."),
+    "bright": ("สดใส ร่าเริง", "Bright, cheerful, upbeat Thai presenter with a smile in the voice."),
+    "calm": ("สุภาพ นุ่มนวล", "Warm, gentle Thai documentary narrator, smooth and sincere."),
 }
+
+
+def _tts_prompt(text: str, tone: str) -> str:
+    """สไตล์ใส่เป็นหัวข้อกำกับ + บอกชัดว่าพูดเฉพาะใต้ TRANSCRIPT
+    (เดิมเขียนคำสั่งต่อหน้าบท → โมเดลอ่านคำสั่งภาษาอังกฤษออกเสียงไปด้วย)"""
+    style = TONES.get(tone, TONES["natural"])[1]
+    if not style:
+        return text  # ไม่มีสไตล์ = ส่งบทล้วนๆ ปลอดภัยที่สุด
+    return ("Synthesize speech for the performance below. Everything above the transcript is direction only, "
+            "do NOT speak it. Speak ONLY the Thai lines under #### TRANSCRIPT, word for word.\n\n"
+            f"### PERFORMANCE\nStyle: {style}\nLanguage: Thai (th-TH), native Thai pronunciation.\n\n"
+            f"#### TRANSCRIPT\n{text}")
+
+
+def _too_long(seconds: float, text: str) -> bool:
+    """เสียงยาวผิดปกติเทียบกับความยาวบท = โมเดลน่าจะอ่านคำกำกับออกมาด้วย"""
+    chars = len("".join(text.split()))
+    return seconds > chars / 9 + 2.5
 
 GEMINI_TTS_MODELS = [m for m in [os.environ.get("GEMINI_TTS_MODEL"), "gemini-3.8-flash-tts",
                                  "gemini-2.5-flash-preview-tts"] if m]
@@ -72,9 +91,32 @@ def gemini_tts(text: str, out: Path, voice: str, tone: str = "natural", rate: in
     key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not key:
         raise RuntimeError("ยังไม่ได้ใส่คีย์ Gemini")
-    instruction = TONES.get(tone, TONES["natural"])[1]
+    if TONES.get(tone, TONES["natural"])[1]:
+        try:
+            _gemini_call(_tts_prompt(text, tone), out, voice, rate, key)
+            dur = _duration(out)
+            if not _too_long(dur, text):
+                return
+            print(f"เสียง Gemini ยาวผิดปกติ ({dur:.1f} วิ) อาจอ่านคำกำกับออกมา → สร้างใหม่แบบบทล้วน")
+        except RuntimeError:
+            if _gemini_off:
+                raise
+    _gemini_call(text, out, voice, rate, key)
+
+
+def _duration(f: Path) -> float:
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)],
+                       capture_output=True, text=True)
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> None:
+    global _gemini_off
     body = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": f"{instruction}:\n{text}"}]}],
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["AUDIO"],
                              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}},
     }).encode()
