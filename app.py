@@ -182,11 +182,21 @@ def analyze_product(jid: str) -> dict:
         card = d / "scenes" / "prodcard.png"
         pb = plan.get("product_box")
         if o["product_info"].get("use_img", "1") != "0":  # รูปสินค้าลอยในแอนิเมชัน (ไฟล์ที่ผู้ใช้ให้ หรือ AI ตัดจากภาพหน้าจอ)
-            if pimg and PR.product_card(pimg, card):
-                pass
-            elif pb and shots and 1 <= pb["shot"] <= len(shots) and PR.product_card(shots[pb["shot"] - 1], card, pb["box"]):
-                plan["note"] = ((plan.get("note") or "") + " · AI ตัดรูปสินค้าจากภาพหน้าจอมาใส่ให้ ถ้าตัดเพี้ยน "
-                                "ใส่ไฟล์ \"รูปสินค้า\" เองแล้วสร้างใหม่").strip(" ·")
+            style = o["product_info"].get("img_style") or "sticker"
+            save(jid, step="images", progress=55,
+                 message="AI กำลังจัดฉากถ่ายสินค้าใหม่" if style == "restage" else "กำลังตัดพื้นหลังรูปสินค้า")
+            got = ""
+            if pimg:
+                got = PR.product_card(pimg, card, None, style)
+            elif pb and shots and 1 <= pb["shot"] <= len(shots):
+                got = PR.product_card(shots[pb["shot"] - 1], card, pb["box"], style)
+            if got:
+                msg = {"sticker": "ตัดพื้นหลังรูปสินค้าเป็นสติกเกอร์แล้ว",
+                       "restage": "AI จัดฉากถ่ายสินค้าใหม่แล้ว — ตรวจดูว่าฉลาก/ตัวหนังสือบนสินค้ายังตรงของจริง ถ้าเพี้ยนให้เปลี่ยนเป็นแบบสติกเกอร์",
+                       "card": "ใช้รูปสินค้าแบบกรอบ (ตัดพื้นหลังไม่ได้)"}[got]
+                if style == "restage" and got != "restage":
+                    msg = "AI จัดฉากใหม่ไม่ได้ (คีย์ฟรีอาจไม่มีรุ่นทำภาพ) จึง" + msg
+                plan["note"] = ((plan.get("note") or "") + f" · {msg}").strip(" ·")
         PR.add_animation(plan, d / "scenes", o["render"].get("layout", "vertical_crop"))
         plan["note"] = ((plan.get("note") or "") + " · ทำเป็นแอนิเมชันกราฟิกทั้งคลิป — แก้ \"ข้อความบนจอ\" ได้ทุกฉาก "
                         "(ข้อความนี้จะเด้งตัวใหญ่กลางจอ) หรือกด 📷/📹 เปลี่ยนเป็นภาพฟรีเฉพาะบางฉาก").strip(" ·")
@@ -519,7 +529,7 @@ def job_opts(form) -> dict:
     if form.get("mode") == "product":  # 🛒 โหมดสินค้า = งานแบบข้อความ→คลิป ที่ใช้บทป้ายยา
         opts["mode"] = "story"
         opts["product_info"] = {k: str(form.get(f"p_{k}") or "")[:3000]
-                                for k in ("name", "price", "full", "points", "cta", "visual", "use_img")}
+                                for k in ("name", "price", "full", "points", "cta", "visual", "use_img", "img_style")}
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["image_source"], opts["videos"], opts["script_mode"] = "photo", False, "rewrite"
         opts["text"] = opts["product_info"]["name"]

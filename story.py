@@ -727,9 +727,11 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
         cy = H * (0.40 if has_g else 0.52)
         parts[parts.index(motion)] = motion.replace("[mv]", "[mv0]")
         parts.insert(parts.index(motion.replace("[mv]", "[mv0]")) + 1,
-                     f"[{ip}:v]scale={cw}:-1,format=rgba,rotate='0.035*sin(t*1.7)':c=none:ow=rotw(0.05):oh=roth(0.05),"
+                     f"[{ip}:v]scale={cw}:-1,format=rgba,"
+                     f"rotate='{(-1) ** i * 0.05:.3f}+0.035*sin(t*1.7)':c=none:ow=rotw(0.09):oh=roth(0.09),"
                      f"fade=in:st=0.1:d=0.35:alpha=1[pc];"
-                     f"[mv0][pc]overlay=x=(W-w)/2:y='{cy:.0f}-h/2+14*sin(t*2.1)+max(0,0.45-t)*500':"
+                     f"[mv0][pc]overlay=x='(W-w)/2+{0 if has_g else ((i % 3) - 1) * W * 0.08:.0f}+10*cos(t*1.3)':"
+                     f"y='{cy:.0f}-h/2+14*sin(t*2.1)+max(0,0.45-t)*500':"
                      f"eof_action=pass:format=auto[mv]")
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
     d = int(LEAD * 1000)

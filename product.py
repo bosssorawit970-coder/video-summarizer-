@@ -243,29 +243,91 @@ def move_uploads(src_dir: Path, dest: Path) -> tuple[list[Path], list[Path], Pat
     return media, shots, pimg
 
 
-def product_card(src: Path, out: Path, box: list[float] | None = None) -> bool:
-    """รูปสินค้า → การ์ดมุมมน ขอบขาว เงานุ่ม (PNG โปร่งใส) ไว้ลอยในฉากแอนิเมชัน
-    box = [ymin, xmin, ymax, xmax] 0-1000 (กรอบรูปสินค้าในภาพหน้าจอที่ AI หาให้)"""
-    from PIL import Image, ImageDraw, ImageFilter, ImageOps
+def _load_crop(src: Path, box: list[float] | None):
+    from PIL import Image, ImageOps
     try:
         im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
     except Exception as e:
         print("เปิดรูปสินค้าไม่ได้:", e)
-        return False
+        return None
     if box:
         y0, x0, y1, x1 = [max(0.0, min(1000.0, v)) / 1000 for v in box]
         if x1 - x0 < 0.08 or y1 - y0 < 0.05:
-            return False
+            return None
         W, H = im.size
         im = im.crop((int(x0 * W), int(y0 * H), int(x1 * W), int(y1 * H)))
+    im.thumbnail((1000, 1000))
+    return im
+
+
+_rembg = None
+
+
+def cutout(im):
+    """ตัดพื้นหลังรูปสินค้า (rembg/U²-Net บน CPU — ติดตั้ง+โหลดโมเดลครั้งแรก ~1 นาที) คืน RGBA หรือ None"""
+    global _rembg
+    import subprocess
+    import sys
+    try:
+        if _rembg is None:
+            try:
+                import rembg  # noqa: F401
+            except ImportError:
+                print("กำลังติดตั้งตัวตัดพื้นหลัง (rembg)…")
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rembg", "onnxruntime"],
+                               check=True, capture_output=True)
+            from rembg import new_session
+            _rembg = new_session("isnet-general-use")
+        from rembg import remove
+        out = remove(im, session=_rembg, post_process_mask=True)
+        bbox = out.getchannel("A").point(lambda a: 255 if a > 40 else 0).getbbox()
+        if not bbox:
+            return None
+        out = out.crop(bbox)
+        # ตัดได้น้อยเกินไป (เหลือแต่เศษ) = ไม่น่าเชื่อถือ
+        if out.width * out.height < im.width * im.height * 0.06:
+            return None
+        return out
+    except Exception as e:
+        print("ตัดพื้นหลังไม่ได้ (ใช้แบบการ์ดแทน):", str(e)[-200:])
+        return None
+
+
+def _sticker(rgba, out: Path, glow: bool = True) -> None:
+    """สินค้าที่ตัดพื้นหลังแล้ว → สติกเกอร์ขอบขาว + แสงฟุ้งด้านหลัง + เงาตกพื้น"""
+    from PIL import Image, ImageFilter
+    rgba.thumbnail((900, 900))
+    stroke, pad = 16, 90
+    a = rgba.getchannel("A")
+    W, H = rgba.width + pad * 2, rgba.height + pad * 2
+    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    if glow:  # แสงฟุ้งสีขาวด้านหลัง
+        g = Image.new("L", (W, H), 0)
+        g.paste(a, (pad, pad))
+        g = g.filter(ImageFilter.MaxFilter(31)).filter(ImageFilter.GaussianBlur(40)).point(lambda v: int(v * 0.75))
+        canvas.alpha_composite(Image.merge("RGBA", (*[Image.new("L", (W, H), 255)] * 3, g)))
+    sh = Image.new("L", (W, H), 0)  # เงาตกพื้น
+    sh.paste(a, (pad + 10, pad + 26))
+    sh = sh.filter(ImageFilter.GaussianBlur(22)).point(lambda v: int(v * 0.45))
+    canvas.alpha_composite(Image.merge("RGBA", (*[Image.new("L", (W, H), 0)] * 3, sh)))
+    st = Image.new("L", (W, H), 0)  # ขอบขาวแบบสติกเกอร์
+    st.paste(a, (pad, pad))
+    st = st.filter(ImageFilter.MaxFilter(stroke * 2 + 1)).point(lambda v: 255 if v > 60 else 0)
+    canvas.alpha_composite(Image.merge("RGBA", (*[Image.new("L", (W, H), 255)] * 3, st)))
+    canvas.alpha_composite(rgba, (pad, pad))
+    canvas.crop(canvas.getbbox()).save(out)
+
+
+def _card(im, out: Path) -> None:
+    """แบบเดิม: การ์ดมุมมน ขอบขาว เงานุ่ม"""
+    from PIL import Image, ImageDraw, ImageFilter
     im.thumbnail((900, 900))
     w, h = im.size
     r, border, pad = int(min(w, h) * 0.07), 14, 40
     card = Image.new("RGBA", (w + border * 2, h + border * 2), (0, 0, 0, 0))
     mask = Image.new("L", card.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, card.width - 1, card.height - 1], r + border, fill=255)
-    white = Image.new("RGBA", card.size, (255, 255, 255, 255))
-    card.paste(white, (0, 0), mask)
+    card.paste(Image.new("RGBA", card.size, (255, 255, 255, 255)), (0, 0), mask)
     inner = Image.new("L", (w, h), 0)
     ImageDraw.Draw(inner).rounded_rectangle([0, 0, w - 1, h - 1], r, fill=255)
     card.paste(im, (border, border), inner)
@@ -275,4 +337,66 @@ def product_card(src: Path, out: Path, box: list[float] | None = None) -> bool:
     shadow.putalpha(sm.filter(ImageFilter.GaussianBlur(18)))
     shadow.alpha_composite(card, (pad, pad))
     shadow.save(out)
-    return True
+
+
+RESTAGE_PROMPT = """Product photography edit. Take the product shown in this image and place it in a brand-new,
+eye-catching studio scene for a vertical social-media ad: {scene}.
+STRICT RULES: keep the product itself exactly identical — same shape, colors, packaging, logo and every printed word/number.
+Do not add or change any text on the product. Remove all original background, banners, badges, stickers and text that are
+not printed on the product itself. Do not add any new text, prices or logos. Photorealistic, sharp, soft natural shadow."""
+SCENES = ["on a clean pastel podium with soft gradient backdrop and gentle rim light",
+          "on a marble tabletop with soft morning window light and a few out-of-focus leaves",
+          "floating above a glossy surface with colorful bokeh lights behind"]
+
+
+def restage(im, out: Path, k: int = 0) -> bool:
+    """ให้ Gemini (รุ่นทำภาพ) จัดฉากถ่ายสินค้าใหม่ — ทดลอง: ใช้ได้เฉพาะคีย์ที่มีรุ่นทำภาพ/โควตาเหลือ"""
+    import json as _json
+    import os
+    import urllib.request
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    models = P.gemini_models("image")
+    if not key or not models:
+        return False
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=90)
+    body = _json.dumps({"contents": [{"role": "user", "parts": [
+        {"text": RESTAGE_PROMPT.format(scene=SCENES[k % len(SCENES)])},
+        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}}]}],
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}}).encode()
+    for model in models[:3]:
+        try:
+            data = P._gemini_post(model, body, key)
+        except Exception as e:
+            print(f"Gemini จัดฉากสินค้าไม่ได้ ({model}):", getattr(e, "_msg_text", "") or e)
+            continue
+        for part in ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []:
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and inline.get("data"):
+                from PIL import Image
+                Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB").save(out)
+                return True
+    return False
+
+
+def product_card(src: Path, out: Path, box: list[float] | None = None, style: str = "sticker") -> str:
+    """รูปสินค้า → ภาพลอยในฉากแอนิเมชัน (PNG โปร่งใส) คืนแบบที่ทำได้จริง ("" = ไม่สำเร็จ)
+    style: "sticker" ตัดพื้นหลังเป็นสติกเกอร์ · "restage" ให้ AI จัดฉากถ่ายใหม่ · "card" รูปเดิมในกรอบ
+    box = [ymin, xmin, ymax, xmax] 0-1000 (กรอบรูปสินค้าในภาพหน้าจอที่ AI หาให้)"""
+    im = _load_crop(src, box)
+    if im is None:
+        return ""
+    if style == "restage":
+        tmp = out.with_name("restaged.jpg")
+        if restage(im, tmp):
+            from PIL import Image
+            _card(Image.open(tmp).convert("RGB"), out)
+            return "restage"
+        style = "sticker"  # ทำภาพไม่ได้ → ตัดพื้นหลังแทน
+    if style == "sticker":
+        cut = cutout(im)
+        if cut is not None:
+            _sticker(cut, out)
+            return "sticker"
+    _card(im, out)
+    return "card"

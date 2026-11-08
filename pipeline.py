@@ -369,8 +369,15 @@ def gemini_models(kind: str = "text") -> list[str]:
         if kind == "tts":
             if "tts" in name:
                 names.append(name)
+        elif kind == "image":
+            if "image" in name and "flash" in name:
+                names.append(name)
         elif "flash" in name and not re.search(r"tts|image|live|audio|embed|thinking|exp|robotics|computer", name):
             names.append(name)
+    if kind == "image":
+        names.sort(key=lambda n: (-_gem_version(n), "preview" in n, n))
+        return [m for m in dict.fromkeys(([os.environ["GEMINI_IMAGE_MODEL"]] if os.environ.get("GEMINI_IMAGE_MODEL")
+                                          else []) + names[:3]) if m not in _gemini_dead]
     if kind == "tts":
         names.sort(key=lambda n: (-_gem_version(n), "preview" in n, n))
         env = os.environ.get("GEMINI_TTS_MODEL")

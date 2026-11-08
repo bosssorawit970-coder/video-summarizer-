@@ -210,6 +210,13 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <label style="display:block;margin-top:10px"><input type="checkbox" id="pUseImg" checked> 🖼️ ใส่รูปสินค้าลอยในแอนิเมชัน</label>
         <div class="hint">AI ตัดรูปสินค้าจากภาพหน้าจอร้านให้เอง — หรือเลือกไฟล์รูปสินค้าเอง (เช่น บันทึกรูปจากแอป Shopee):</div>
         <input type="file" id="pImg" accept="image/*" style="margin-top:4px">
+        <label class="f">ทำรูปสินค้าให้ไม่ซ้ำร้าน</label>
+        <div class="seg" id="pImgStyle">
+          <label><input type="radio" name="pimgstyle" value="sticker" checked> ✂️ ตัดพื้นหลัง → สติกเกอร์ลอย</label>
+          <label><input type="radio" name="pimgstyle" value="restage"> 🎨 AI จัดฉากถ่ายใหม่ (ทดลอง)</label>
+          <label><input type="radio" name="pimgstyle" value="card"> 🖼️ รูปเดิมในกรอบ</label>
+        </div>
+        <div class="hint">สติกเกอร์: เอาแบนเนอร์/พื้นหลังของร้านออก เหลือแต่ตัวสินค้า ขอบขาว+แสงฟุ้ง วางบนฉากของเราเอง (ฟรี ทำในเครื่อง) · จัดฉากใหม่: ให้ Gemini วางสินค้าบนฉากใหม่ (คีย์ฟรีอาจทำไม่ได้ → ใช้สติกเกอร์แทนอัตโนมัติ)</div>
         <div class="hint" style="color:#b45309">⚠️ รูปสินค้าเป็นลิขสิทธิ์ของร้าน/แบรนด์ — เช็กเงื่อนไขโปรแกรม Shopee Affiliate ว่าใช้รูปสินค้าโปรโมตได้แค่ไหน ถ้าโดนแจ้งให้ลบคลิปหรือปิดตัวเลือกนี้</div>
       </div>
       <div id="pMediaBox" class="hidden">
@@ -782,7 +789,7 @@ $("#go").onclick = async () => {
       for (const k of ["Name", "Price", "Full", "Points"]) fd.append("p_" + k.toLowerCase(), $("#p" + k).value.trim());
       const pimg = document.querySelector("input[name=pvis]:checked").value === "anim" && $("#pUseImg").checked && $("#pImg").files[0];
       if (pimg) fd.append("pimg_id", (await up([pimg], "รูปสินค้า"))[0]);
-      fd.append("p_use_img", $("#pUseImg").checked ? "1" : "0");
+      fd.append("p_use_img", $("#pUseImg").checked ? "1" : "0"); fd.append("p_img_style", document.querySelector("input[name=pimgstyle]:checked").value);
       fd.append("p_cta", $("#pCta").value); fd.append("p_visual", document.querySelector("input[name=pvis]:checked").value); fd.append("graphics", $("#pGraphics").checked ? "1" : "0");
       fd.append("media_ids", mids.join(",")); fd.append("shot_ids", sids.join(","));
       fd.append("media_names", media.map(f => f.type.startsWith("video/") ? (f.name || "v.mp4") : "img.jpg").join("\n"));
