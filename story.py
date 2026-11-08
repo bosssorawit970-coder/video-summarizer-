@@ -18,6 +18,8 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 - ฉากแรกต้องเปิดแรง ดึงความสนใจทันที (ตั้งคำถาม/ประโยคน่าตกใจ/สัญญาว่าจะได้อะไร)
 - เล่าต่อเนื่อง ภาษาพูดเป็นกันเอง กระชับ ฉากสุดท้ายสรุปและชวนกดติดตาม/คอมเมนต์
 - ยึดตามข้อมูลที่ให้มา ห้ามแต่งข้อเท็จจริง ตัวเลข หรือชื่อที่ไม่มีในข้อมูล
+- ถ้าข้อมูลเป็นภาษาอื่น (เช่น อังกฤษ) ให้แปลและเล่าเป็นภาษาไทยที่เป็นธรรมชาติ ไม่แข็งแบบแปลตรงตัว ชื่อคน/สถานที่/แบรนด์ให้ทับศัพท์
+{extra}
 - เก็บใจความสำคัญจากข้อมูลให้ครบ ไม่ตัดประเด็นทิ้ง
 - บทพากย์แต่ละฉาก (narration) 1-2 ประโยค ยาว 50-110 ตัวอักษร ห้ามมีอีโมจิ
 - headline: ข้อความสั้นบนจอ 2-6 คำ สรุปฉากนั้น (ไม่ต้องซ้ำบทพากย์) เว้นว่างได้
@@ -162,7 +164,7 @@ def split_script(text: str, max_len: int = 110) -> list[str]:
 
 
 def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim",
-                    graphics: bool = True) -> dict:
+                    graphics: bool = True, extra: str = "") -> dict:
     """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่"""
     global GRAPHICS_ON
     GRAPHICS_ON = graphics
@@ -170,7 +172,7 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     if len(text) < 10:
         raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
     if mode == "rewrite":
-        plan = _rewrite_plan(text, provider, target)
+        plan = _rewrite_plan(text, provider, target, extra)
         if plan:
             return plan
     narrs = split_script(text)
@@ -240,12 +242,13 @@ def fill_visuals(plan: dict, provider: str) -> None:
         plan["characters"] = characters
 
 
-def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
+def _rewrite_plan(text: str, provider: str, target: float, extra: str = "") -> dict | None:
     if provider == "none":
         return None
     n = max(3, min(15, round(target / 7)))
     try:
-        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000], graphic_rules=_graphic_rules())
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000], graphic_rules=_graphic_rules(),
+                                     extra=extra)
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
         scenes = []

@@ -8,3 +8,4 @@ anthropic>=0.40
 yt-dlp[default]
 pythainlp
 # โหมดข้อความ → คลิป (วาดภาพด้วย AI) ต้องมีการ์ดจอ NVIDIA: pip install torch diffusers transformers accelerate
+trafilatura

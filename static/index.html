@@ -164,9 +164,9 @@ video{width:100%;border-radius:10px;background:#000;display:block}
     <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
     <div class="storyOnly hidden">
       <h2>1. ใส่ข้อความ / ข้อมูล</h2>
-      <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ หรือโน้ตสั้นๆ — AI จะเรียบเรียงเป็นบทคลิป แบ่งฉาก วาดภาพ และพากย์ให้"></textarea>
+      <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
       <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
-      <label class="f">ใช้ข้อความยังไง</label>
+      <label class="f" id="scriptLbl">ใช้ข้อความยังไง</label>
       <div class="seg" id="scriptSeg">
         <label><input type="radio" name="script_mode" value="verbatim" checked> 📜 พากย์ตามบทที่ใส่ทุกคำ</label>
         <label><input type="radio" name="script_mode" value="rewrite"> ✨ ให้ AI เรียบเรียง/สรุปให้</label>
@@ -567,8 +567,12 @@ const DROP_TXT = () => matchMedia("(pointer:coarse)").matches ? "แตะเพ
 const links = () => [...new Set($("#url").value.match(URLS_RE) || [])];
 function refreshItems() {
   if (mode() === "story") {
-    const len = $("#storyText").value.trim().length;
-    $("#go").disabled = len < 10; $("#go").textContent = "สร้างคลิปจากข้อความ";
+    const len = $("#storyText").value.trim().length, link = URL_RE.test($("#storyText").value);
+    $("#go").disabled = len < 10; $("#go").textContent = link ? "อ่านลิงก์ แปล แล้วสร้างคลิป" : "สร้างคลิปจากข้อความ";
+    $("#scriptSeg").classList.toggle("hidden", link); $("#scriptHint").classList.toggle("hidden", link); $("#scriptLbl").classList.toggle("hidden", link);
+    $("#storyHint").textContent = link
+      ? "🔗 เจอลิงก์ — ระบบจะไปอ่านโพสต์/ข่าว (รวมคอมเมนต์เด่นของ Reddit) แปลเป็นไทยและเรียบเรียงเป็นบทคลิป · พิมพ์คำสั่งเพิ่มต่อท้ายได้ เช่น \"เล่าแบบตลก\" · ต้องเลือก AI เป็น Gemini หรือ Claude"
+      : "AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม";
     $("#batchBox").classList.add("hidden"); $("#storyCount").textContent = `${len}/8000`;
     return;
   }

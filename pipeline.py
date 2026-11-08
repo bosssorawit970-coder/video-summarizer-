@@ -377,6 +377,19 @@ POST_TAGS = {
 
 def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
     """แคปชัน + แฮชแท็กสำหรับโพสต์ TikTok/Reels"""
+    post = _make_post(plan, mode, provider, note)
+    src = plan.get("source") or {}
+    if src.get("site"):  # ให้เครดิตต้นทาง (เนื้อหาแปล/เรียบเรียงจากโพสต์/ข่าว)
+        post["caption"] = post["caption"].rstrip() + f"\n📌 ที่มา: {src['site']}"
+        if post.get("youtube"):
+            yt = post["youtube"]
+            body, _, tags = yt["description"].rpartition("\n\n")
+            yt["description"] = f"{body or yt['description']}\n📌 ที่มา: {src['site']} {src.get('url', '')}".strip() + \
+                (f"\n\n{tags}" if body else "")
+    return post
+
+
+def _make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
     title = (plan.get("title") or "").strip()
     summary = (plan.get("summary") or "").strip()
     items = plan.get("clips") or plan.get("scenes") or []

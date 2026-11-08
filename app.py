@@ -14,6 +14,7 @@ import shutil
 import threading
 import time
 import traceback
+import urllib.parse
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -40,6 +41,7 @@ import imagegen  # noqa: E402
 import story as ST  # noqa: E402
 import voice as V  # noqa: E402
 import graphics as G2  # noqa: E402
+import source as SRC  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -163,10 +165,24 @@ def analyze_story(jid: str) -> dict:
     d, j = job_dir(jid), jobs[jid]
     o = j["opts"]
     rewrite = o.get("script_mode") == "rewrite"
-    save(jid, status="analyzing", step="plan", progress=5,
-         message="AI กำลังเรียบเรียงบทและแบ่งฉาก" if rewrite else "แบ่งฉากตามบท + คิดภาพประกอบ")
-    plan = ST.make_story_plan(o.get("text", ""), o["provider"], o["target_seconds"],
-                              "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True))
+    text, extra, source = o.get("text", ""), "", None
+    if o.get("source_url"):
+        if o["provider"] == "none" or not provider_available(o["provider"]):
+            raise RuntimeError("โหมดลิงก์โพสต์/ข่าวต้องใช้ AI ช่วยแปลและเรียบเรียง — เลือก Gemini (ฟรี) หรือ Claude แล้วลองใหม่")
+        save(jid, status="analyzing", step="plan", progress=3, message="กำลังอ่านโพสต์/ข่าวจากลิงก์…")
+        source = SRC.fetch_source(o["source_url"])
+        text = source["text"]
+        if o.get("source_note"):
+            extra = f"- คำสั่งเพิ่มจากผู้ใช้ (ทำตามนี้): {o['source_note']}"
+        save(jid, name=(source.get("title") or source["site"])[:60], source=source,
+             message=f"อ่านจาก {source['site']} แล้ว — AI กำลังแปลและเรียบเรียงเป็นบทไทย")
+    else:
+        save(jid, status="analyzing", step="plan", progress=5,
+             message="AI กำลังเรียบเรียงบทและแบ่งฉาก" if rewrite else "แบ่งฉากตามบท + คิดภาพประกอบ")
+    plan = ST.make_story_plan(text, o["provider"], o["target_seconds"],
+                              "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True), extra=extra)
+    if source:
+        plan["source"] = {k: source[k] for k in ("site", "url", "title")}
     save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                         lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.78, message=msg),
@@ -459,8 +475,13 @@ def job_opts(form) -> dict:
     if form.get("mode") == "story":
         opts["mode"] = "story"
         opts["text"] = str(form.get("text") or "")[:8000]
+        src_url = SRC.find_url(opts["text"])
+        if src_url:  # วางลิงก์โพสต์/ข่าว → อ่าน แปล เรียบเรียงเป็นคลิปไทย (ข้อความอื่นที่พิมพ์มา = คำสั่งเพิ่ม)
+            opts["source_url"] = src_url
+            opts["source_note"] = re.sub(r"https?://\S+", " ", opts["text"]).strip()[:500]
         opts["style"] = str(form.get("style") or "") if form.get("style") in imagegen.STYLES else "cinematic"
-        opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" else "verbatim"
+        opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" or opts.get("source_url") \
+            else "verbatim"
         opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
@@ -500,6 +521,8 @@ async def create_job(req: Request):
         if len(text) < 10:
             return JSONResponse({"error": "ใส่ข้อความอย่างน้อย 1-2 ประโยค"}, status_code=400)
         name = re.sub(r"\s+", " ", text)[:40] + ("…" if len(text) > 40 else "")
+        if SRC.find_url(text):
+            name = "🔗 " + urllib.parse.urlparse(SRC.find_url(text)).netloc.replace("www.", "")
         return JSONResponse({"id": new_job(name, "", None, job_opts(form))})
     if url:
         m = re.search(r"https?://\S+", url)  # รองรับข้อความที่แชร์มาแล้วมีลิงก์ปนอยู่
