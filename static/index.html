@@ -431,7 +431,43 @@ let cfg = null, job = null, file = null, poll = null, clips = [], stopAt = null;
 const fmt = t => { t = Math.max(0, +t || 0); const m = Math.floor(t/60), s = t - m*60; return `${m}:${s.toFixed(1).padStart(4,"0")}`; };
 const parseT = v => { v = String(v).trim(); if (!v.includes(":")) return parseFloat(v) || 0; const [m, s] = v.split(":"); return (parseInt(m)||0)*60 + (parseFloat(s)||0); };
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-async function api(path, opt) { const r = await fetch(path, opt); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; }
+const HTTP_TH = {401: "ต้องใส่ PIN ใหม่ (รีเฟรชหน้า)", 404: "ไม่พบ — โปรแกรมใน Colab อาจถูกปิด/เริ่มใหม่แล้ว",
+  413: "ไฟล์ใหญ่เกินไป", 500: "โปรแกรมทำงานผิดพลาด", 502: "เชื่อมต่อ Colab ไม่ได้ (โปรแกรมอาจหยุดทำงาน)",
+  503: "Colab ไม่ตอบ (อาจหลุดหรือถูกปิด)", 504: "Colab ตอบช้าเกินไป ลองใหม่อีกครั้ง"};
+async function api(path, opt) {
+  let r;
+  try { r = await fetch(path, opt); }
+  catch { netDown(true); throw new Error("เชื่อมต่อโปรแกรมไม่ได้ — Colab อาจหลุดหรือถูกปิดไปแล้ว ลองเปิดหน้า Colab ดูว่ายังรันอยู่ไหม"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || HTTP_TH[r.status] || `เกิดข้อผิดพลาด (รหัส ${r.status}) ลองใหม่อีกครั้ง`);
+  netDown(false); return j;
+}
+// ── แจ้งเตือนเมื่อการเชื่อมต่อกับ Colab หลุด ──
+let netFails = 0;
+function netDown(down) {
+  netFails = down ? netFails + 1 : 0;
+  let bar = document.getElementById("netBar");
+  if (!bar) { bar = document.createElement("div"); bar.id = "netBar";
+    bar.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99;background:#b91c1c;color:#fff;padding:10px 14px;font-size:14px;text-align:center;display:none";
+    bar.textContent = "⚠️ เชื่อมต่อโปรแกรมใน Colab ไม่ได้ — Colab อาจหลุด/หมดเวลา/ถูกปิด · เปิดหน้า Colab ดูว่ายังรันอยู่ไหม ถ้าหยุดแล้วให้กด Run all ใหม่ (งานที่บันทึกลง Drive ไว้ไม่หาย)";
+    document.body.appendChild(bar); }
+  bar.style.display = netFails >= 2 ? "block" : "none";
+}
+setInterval(async () => {
+  try { const r = await fetch("/api/idle", {cache: "no-store"}); netDown(!r.ok); } catch { netDown(true); }
+}, 20000);
+// ── ย่อรูปในเครื่องก่อนอัปโหลด (รูปมือถือ 5-15 MB → ~1 MB อัปเร็ว ไม่ติดขนาด) ──
+async function shrinkImage(f, max = 2048) {
+  if (!f.type.startsWith("image/") || f.size < 1.5e6) return f;
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.9));
+    return blob ? new File([blob], (f.name || "image").replace(/\.\w+$/, "") + ".jpg", {type: "image/jpeg"}) : f;
+  } catch { return f; }
+}
 
 // ── ตั้งค่า ──
 async function init() {
@@ -590,7 +626,7 @@ $("#assetFile").onchange = async e => {
   const btn = document.querySelector(`[data-up=${upKind}]`), label = btn.textContent;
   btn.textContent = "กำลังอัปโหลด…"; btn.disabled = true;
   try {
-    const fd = new FormData(); fd.append("kind", upKind); fd.append("file", f);
+    const fd = new FormData(); fd.append("kind", upKind); fd.append("file", upKind === "logo" ? await shrinkImage(f, 1024) : f);
     const r = await api("/api/assets", {method: "POST", body: fd});
     await loadAssets(); $("#" + upKind + "0").value = r.name; $("#decor").dispatchEvent(new Event("change"));
   } catch (err) { alert(err.message); }
@@ -801,7 +837,7 @@ function drawScenes() {
     const opts = [...new Set([...(c.options || []), ...(c.img ? [c.img] : [])])];
     return `
     <div class="scene" data-i="${i}">
-      <div class="pic"><img src="${c.img ? src(c.img) : ""}" alt=""></div>
+      <div class="pic">${c.img ? `<img src="${src(c.img)}" alt="" onerror="imgRetry(this)">` : `<div class="hint" style="padding:30px 8px;text-align:center">ยังไม่มีภาพ<br>กด 📷 หรือ 📁 ด้านล่าง</div>`}</div>
       ${c.weak || c.weak_photo ? `<p class="hint" style="color:#b45309;margin:4px 0">⚠️ AI ดูแล้วว่าภาพยังไม่ค่อยตรงบท — ลองพิมพ์คำค้นเองแล้วกด 📷</p>` : ""}
       <div>
         <div class="head"><span class="num">${String(i + 1).padStart(2, "0")}</span><span class="spacer"></span>
@@ -829,6 +865,14 @@ function drawScenes() {
     </div>`; }).join("");
   $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(2.5, (c.narration || "").replace(/\s/g, "").length / 11 + 0.7), 0).toFixed(0);
 }
+// ภาพโหลดไม่ขึ้น (เน็ตสะดุด) → ลองใหม่ 2 ครั้ง แล้วบอกให้แตะโหลดใหม่
+function imgRetry(el) {
+  const n = +(el.dataset.retry || 0);
+  if (n < 2) { el.dataset.retry = n + 1; setTimeout(() => { el.src = el.src.split("?")[0] + "?r=" + Date.now(); }, 1500 * (n + 1)); return; }
+  el.onerror = null; el.alt = "โหลดภาพไม่ได้ — แตะเพื่อลองใหม่"; el.style.minHeight = "80px";
+  el.onclick = () => { el.dataset.retry = 0; el.onerror = () => imgRetry(el); el.src = el.src.split("?")[0] + "?r=" + Date.now(); };
+}
+
 // ── โมชันกราฟิกต่อฉาก: แก้เป็นข้อความบรรทัดเดียว ──
 const GFX = {
   "": ["📊 ไม่มีกราฟิก", ""],
@@ -929,7 +973,7 @@ $("#clips").addEventListener("click", async e => {
       const f = inp.files[0]; if (!f) return;
       const b = e.target; b.disabled = true; b.textContent = "กำลังอัปโหลด…";
       try {
-        const fd = new FormData(); fd.append("file", f);
+        const fd = new FormData(); fd.append("file", await shrinkImage(f));
         const r = await api(`/api/jobs/${job.id}/scenes/${i}/upload`, {method: "POST", body: fd});
         clips[i].options = [...new Set([...(clips[i].options || []), ...(clips[i].img ? [clips[i].img] : []), r.img])];
         clips[i].img = r.img;
