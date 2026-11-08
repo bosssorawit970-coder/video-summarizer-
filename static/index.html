@@ -173,7 +173,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       </div>
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
-      <div class="hint" style="margin-top:6px">💡 ใช้ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
+      <div class="hint" style="margin-top:6px">💡 ใช้ Gemini (ฟรี) หรือ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
     </div>
     <div class="mediaOnly">
     <h2>1. ใส่ลิงก์คลิป</h2>
@@ -391,7 +391,7 @@ async function api(path, opt) { const r = await fetch(path, opt); const j = awai
 // ── ตั้งค่า ──
 async function init() {
   cfg = await api("/api/config");
-  const names = {claude: ["Claude AI", "สรุปดีที่สุด (ต้องมี API key)"], ollama: ["Ollama", "ฟรี รันในเครื่อง"], none: ["ไม่ใช้ AI", "เลือกช่วงอัตโนมัติ แล้วเขียนบทเอง"]};
+  const names = {claude: ["Claude AI", "สรุปดีที่สุด (ต้องมี API key)"], gemini: ["Gemini", "ฟรี (มีโควตา) เข้าใจภาษาไทยดี ไม่ใช้การ์ดจอ"], ollama: ["Ollama", "ฟรี รันในเครื่อง"], none: ["ไม่ใช้ AI", "เลือกช่วงอัตโนมัติ แล้วเขียนบทเอง"]};
   let first = null;
   $("#providers").innerHTML = Object.entries(names).map(([k, [n]]) => {
     const ok = cfg.providers[k]; if (ok && !first) first = k;

@@ -152,7 +152,7 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
 
 
 def _ask(provider: str, prompt: str) -> dict:
-    raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+    raw = P.ask_ai(provider, prompt)
     return P._parse_json(raw)
 
 
@@ -201,7 +201,7 @@ def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
     n = max(3, min(15, round(target / 7)))
     try:
         prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000])
-        raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+        raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
         scenes = []
         for s in data.get("scenes", []):

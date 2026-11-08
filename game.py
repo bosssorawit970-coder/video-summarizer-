@@ -193,7 +193,7 @@ def make_game_plan(clips: list[dict], provider: str, note: str) -> dict:
         prompt = GAME_PROMPT.format(
             note=f"ข้อมูลจากผู้เล่น: {note}" if note.strip() else "", n=len(clips), shots=shots)
         try:
-            raw = P._ask_claude(prompt) if provider == "claude" else P._ask_ollama(prompt)
+            raw = P.ask_ai(provider, prompt)
             data = P._parse_json(raw)
             narr = [P.clean_text(str(x)) for x in data.get("narrations", [])]
             if len(narr) >= len(clips):

@@ -58,9 +58,21 @@ if not key:
         key = userdata.get("ANTHROPIC_API_KEY") or ""
     except Exception:
         key = ""
+# คีย์ Gemini (ฟรี): วางในช่อง ANTHROPIC_API_KEY ได้เลย (ขึ้นต้นด้วย AIza) หรือเก็บใน Secrets ชื่อ GEMINI_API_KEY
+gem = ""
+if key.startswith("AIza"):
+    gem, key = key, ""
+try:
+    from google.colab import userdata
+    gem = gem or userdata.get("GEMINI_API_KEY") or ""
+except Exception:
+    pass
+if gem:
+    env["GEMINI_API_KEY"] = gem
+    step("   ใช้ Gemini ได้ ✓ (เลือก \"Gemini\" ในหน้าโปรแกรม)")
 if key:
     env["ANTHROPIC_API_KEY"] = key
-elif AI == "claude":
+elif AI == "claude" and not gem:
     step("   ⚠️ ยังไม่ได้ใส่คีย์ Claude — จะใช้โหมดเขียนบทเอง")
 
 pex = PEXELS_API_KEY.strip()
@@ -95,7 +107,9 @@ if SAVE_TO_DRIVE:
         step(f"   ⚠️ เชื่อม Google Drive ไม่สำเร็จ ({e}) — ทำงานต่อโดยเก็บไฟล์ในเครื่อง Colab ชั่วคราวแทน")
         step("      (ถ้าอยากเก็บใน Drive: กดอนุญาตตอนมีหน้าต่างเด้งขึ้น หรือใช้บนคอมพิวเตอร์)")
 
-if AI == "ollama":
+if AI == "ollama" and gem:
+    step("2/4 มีคีย์ Gemini แล้ว — ข้ามการโหลด Ollama (ประหยัดเวลาและการ์ดจอ)")
+elif AI == "ollama":
     step("2/4 ติดตั้ง Ollama และโหลดโมเดล AI (ครั้งแรก 2–5 นาที)…")
     if subprocess.run("which ollama", shell=True, capture_output=True).returncode != 0:
         subprocess.run("apt-get install -y -qq zstd > /dev/null; curl -fsSL https://ollama.com/install.sh | sh > /dev/null",

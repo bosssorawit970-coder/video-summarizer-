@@ -322,6 +322,51 @@ def _parse_json(text: str) -> dict:
     return json.loads(text[a:b + 1])
 
 
+GEMINI_MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.5-flash-lite"] if m]
+
+
+def _ask_gemini(prompt: str) -> str:
+    """Google Gemini (มีโควตาฟรี) — ขอคีย์ได้ที่ aistudio.google.com"""
+    import urllib.error
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                       "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}).encode()
+    last = None
+    for model in GEMINI_MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
+                                                              "x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", "replace")[:300]
+            if e.code == 404:  # รุ่นนี้ไม่มี/เลิกใช้ → ลองรุ่นถัดไป
+                last = f"ไม่พบรุ่น {model}"
+                continue
+            if e.code == 429:
+                last = "โควตา Gemini ฟรีเต็มแล้ว ลองใหม่ภายหลัง (หรือใช้ Ollama แทน)"
+                continue  # รุ่นเล็กกว่าอาจยังมีโควตา
+            if e.code in (400, 401, 403) and ("API key" in msg or "API_KEY" in msg or e.code != 400):
+                raise RuntimeError("คีย์ Gemini ไม่ถูกต้อง หรือยังใช้ในพื้นที่นี้ไม่ได้") from e
+            raise RuntimeError(f"Gemini ตอบกลับผิดพลาด ({e.code}): {msg}") from e
+        parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts)
+        if text:
+            return text
+        last = "Gemini ไม่ตอบ (อาจถูกระบบกรองเนื้อหา)"
+    raise RuntimeError(last or "เรียก Gemini ไม่สำเร็จ")
+
+
+def ask_ai(provider: str, prompt: str) -> str:
+    """ส่งคำสั่งให้ AI ที่เลือก: claude / gemini / ollama"""
+    if provider == "claude":
+        return _ask_claude(prompt)
+    if provider == "gemini":
+        return _ask_gemini(prompt)
+    return _ask_ollama(prompt)
+
+
 def _ask_claude(prompt: str) -> str:
     import anthropic
     client = anthropic.Anthropic()  # อ่าน ANTHROPIC_API_KEY จาก environment
@@ -372,7 +417,7 @@ def make_plan(segs: list[dict], provider: str, target: float,
 
     segs = merge_segments(segs, 350)
     prompt = PLAN_PROMPT.format(target=int(target), transcript=_transcript_block(segs))
-    raw = _ask_claude(prompt) if provider == "claude" else _ask_ollama(prompt)
+    raw = ask_ai(provider, prompt)
     data = _parse_json(raw)
 
     clips = []

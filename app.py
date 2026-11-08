@@ -87,6 +87,8 @@ def load_existing() -> None:
 def provider_available(p: str) -> bool:
     if p == "claude":
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if p == "gemini":
+        return bool(os.environ.get("GEMINI_API_KEY"))
     if p == "ollama":
         try:
             import urllib.request
@@ -381,7 +383,7 @@ async def config(_: Request):
         "imagegen": imagegen.available(),
         "pexels": True,  # ภาพถ่ายจริงใช้ได้เสมอ (Openverse ไม่ต้องมีคีย์)
         "photo_source": imagegen.photo_source(),
-        "providers": {p: provider_available(p) for p in ("claude", "ollama", "none")},
+        "providers": {p: provider_available(p) for p in ("claude", "gemini", "ollama", "none")},
         "claude_model": P.DEFAULT_CLAUDE_MODEL,
         "ollama_model": P.DEFAULT_OLLAMA_MODEL,
         "gpu": P.has_gpu(),
