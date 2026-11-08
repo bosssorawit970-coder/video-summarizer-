@@ -670,18 +670,27 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     nd = P.probe(narr)["duration"] if narr else 0.0
     D = max(2.5, nd + LEAD + TAIL)
     video = is_video(img.name)
-    motion = _video_layout(img, W, H) if video else _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
+    anim = img.name.startswith("anim_")  # ฉากแอนิเมชันกราฟิก (ไม่มีภาพจริง): พื้นหลังเต็มจอลอยช้าๆ
+    if anim:
+        motion = (f"[0:v]crop={W}:{H}:x='(iw-{W})/2+(iw-{W})/2*sin(t*0.5)':"
+                  f"y='(ih-{H})/2+(ih-{H})/2*cos(t*0.4)',setsar=1[mv]")
+    else:
+        motion = _video_layout(img, W, H) if video else _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
     vf = ["fps=30"]
 
     # ข้อความไทยทั้งหมด (หัวข้อ, ชื่อช่อง, ซับ) วาดด้วย libass ให้สระ/วรรณยุกต์ถูกตำแหน่ง
     ass = P.Ass(W, H)
     head = (scene.get("headline") or "").strip() if extras else ""
-    if head:
+    kin_cues = []
+    if head and anim:  # ตัวหนังสือใหญ่เด้งกลางจอ + รูปทรงลอย
+        kin_cues = G.kinetic(ass, head, 0, D, i)
+    elif head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
     if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
-        cues = G.render(ass, scene["graphic"], min(0.4, D / 4), D - 0.2)
+        cues = G.render(ass, scene["graphic"], min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2)
     else:
         cues = []
+    cues = sorted(kin_cues + cues)
     brand = brand or {}
     text = (brand.get("text") or "").strip() if extras else ""
     logo = brand.get("logo") if extras else None

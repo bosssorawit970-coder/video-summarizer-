@@ -293,3 +293,94 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> list[tuple[flo
                                f"\\frz-3{fade}", P.ass_text(g["text"]), style="GBox")
         cues.append((t0 + 0.25, "pop"))
     return [(round(max(0.0, c), 3), n) for c, n in cues if c < t1 - 0.1]
+
+
+# ───────────────────────── แอนิเมชันตัวหนังสือ (โหมดไม่มีภาพจริง) ─────────────────────────
+
+PALETTES = [  # (บน, ล่าง, สีเน้น) — สดใสแบบคลิปป้ายยา
+    ("FF7A59", "FFB547", "FFF3B0"), ("7B5CFF", "FF6FB5", "FFE66D"), ("00B4D8", "48E5C2", "FFF3B0"),
+    ("FF4E8B", "FF9A62", "FFFFFF"), ("2B2D6E", "6C4BD8", "FFD43B"), ("10B981", "84CC16", "FFFFFF"),
+]
+
+
+def anim_background(out, W: int, H: int, k: int = 0) -> None:
+    """พื้นหลังแอนิเมชันแบบแฟลต: ไล่สี + วงกลมจางๆ + จุดลาย (ขยับด้วยกล้องตอนเรนเดอร์)"""
+    import random
+    from PIL import Image, ImageDraw, ImageFilter
+    top, bot, acc = PALETTES[k % len(PALETTES)]
+    c1, c2 = [tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) for h in (top, bot)]
+    w, h = int(W * 1.15), int(H * 1.15)
+    im = Image.new("RGB", (w, h))
+    px = ImageDraw.Draw(im)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        px.line([(0, y), (w, y)], fill=tuple(int(a + (b - a) * t) for a, b in zip(c1, c2)))
+    rnd = random.Random(k * 7 + 3)
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    for _ in range(7):  # วงกลมใหญ่จางๆ
+        r = rnd.randint(int(w * 0.12), int(w * 0.45))
+        x, y = rnd.randint(-r // 2, w), rnd.randint(-r // 2, h)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, rnd.randint(18, 40)))
+    layer = layer.filter(ImageFilter.GaussianBlur(18))
+    dots = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(dots)
+    step = int(w / 14)
+    for yy in range(0, h, step):  # จุดลายเบาๆ
+        for xx in range((yy // step % 2) * step // 2, w, step):
+            dd.ellipse([xx - 4, yy - 4, xx + 4, yy + 4], fill=(255, 255, 255, 34))
+    im = Image.alpha_composite(Image.alpha_composite(im.convert("RGBA"), layer), dots).convert("RGB")
+    im.save(out)
+
+
+def kinetic(ass: "P.Ass", text: str, t0: float, t1: float, k: int = 0) -> list[tuple[float, str]]:
+    """ข้อความตัวใหญ่กลางจอ เด้งทีละคำ + รูปทรงตกแต่งลอยไปมา + วงแหวนระเบิดตอนขึ้น คืนจังหวะเสียงเอฟเฟกต์"""
+    d = _Draw(ass, t0, t1)
+    s, W, H = d.s, d.W, d.H
+    acc = PALETTES[k % len(PALETTES)][2]
+    cues: list[tuple[float, str]] = []
+    cx, cy = W / 2, H * (0.33 if d.vertical else 0.4)
+    # รูปทรงตกแต่ง: วงกลม/วงแหวน/สี่เหลี่ยมหมุน ลอยช้าๆ ทั้งฉาก
+    import random
+    rnd = random.Random(k * 13 + 1)
+    for m in range(5):
+        x1, y1 = rnd.uniform(0.05, 0.95) * W, rnd.uniform(0.08, 0.92) * H
+        x2, y2 = x1 + rnd.uniform(-120, 120) * s, y1 + rnd.uniform(-160, 160) * s
+        size = rnd.uniform(40, 110) * s
+        shape = _rect(size, size, size / 2) if m % 3 == 0 else _rect(size, size, size * 0.18)
+        rot = f"\\frz{rnd.randint(0, 40)}\\t(\\frz{rnd.randint(120, 300)})" if m % 3 else ""
+        d.ev(0, t0, t1, f"\\an5\\move({int(x1)},{int(y1)},{int(x2)},{int(y2)})\\bord0\\shad0"
+                        f"\\1c{_c('FFFFFF')}\\1a&H{rnd.choice([0xB0, 0xC8, 0xD8]):02X}&{rot}\\fad(300,300)\\p1",
+             shape + "{\\p0}")
+    # วงแหวนระเบิดหลังตัวหนังสือตอนเริ่ม
+    ring = 360 * s
+    d.ev(1, t0 + 0.1, t0 + 0.8, f"\\an5\\pos({int(cx)},{int(cy)})\\bord{int(10 * s)}\\shad0\\1a&HFF&"
+                                f"\\3c{_c(acc)}\\fscx20\\fscy20\\t(0,600,\\fscx160\\fscy160\\3a&HFF&)\\p1",
+         _rect(ring, ring, ring / 2) + "{\\p0}")
+    # คำทีละคำ (ช่องว่างในหัวข้อ = แบ่งคำ) — คำสุดท้ายเป็นสีเน้น
+    words = [w for w in re.split(r"\s+", text.strip()) if w][:6] or [text]
+    lines, cur = [], ""
+    for w in words:  # ห่อบรรทัด ~10 ตัวอักษร
+        if cur and len(cur) + len(w) > (10 if d.vertical else 22):
+            lines.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    lines.append(cur)
+    size = 165 if max(len(x) for x in lines) <= 7 else 140 if max(len(x) for x in lines) <= 10 else 118
+    gap = size * 1.12 * s
+    y0 = cy - gap * (len(lines) - 1) / 2
+    n = 0
+    for li, line in enumerate(lines):
+        for wi, w in enumerate(line.split(" ")):
+            n += 1
+        a = t0 + 0.15 + 0.22 * li
+        last = li == len(lines) - 1
+        d.text(3, a, t1, cx, y0 + gap * li, line, size, acc if last else WHITE, 5,
+               f"\\bord{int(9 * s)}\\shad{int(6 * s)}\\4c{_c('000000')}\\4a&H70&"
+               f"\\fscx30\\fscy30\\frz{-4 if li % 2 else 4}"
+               f"\\t(0,170,\\fscx118\\fscy118\\frz0)\\t(170,300,\\fscx100\\fscy100)"
+               f"\\t(300,{int((t1 - a) * 1000)},\\fscx106\\fscy106)\\fad(0,220)")
+        cues.append((a, "pop"))
+    cues.insert(0, (t0 + 0.05, "whoosh"))
+    return cues

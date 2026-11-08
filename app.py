@@ -171,8 +171,17 @@ def analyze_product(jid: str) -> dict:
     plan = PR.make_product_plan(o["product_info"], o["provider"], o["target_seconds"], shots,
                                 graphics=o.get("graphics", True))
     save(jid, plan=plan, step="images", progress=30, message=f"ได้บท {len(plan['scenes'])} ฉาก — ใส่รูป/วิดีโอสินค้า")
-    used = PR.add_media(plan, media, d / "scenes", lambda m: save(jid, step="images", progress=40, message=m))
-    if not used:  # ไม่มีรูปสินค้า → ใช้ภาพ/วิดีโอฟรีประกอบ (ไม่ใช่ตัวสินค้าจริง)
+    visual = o["product_info"].get("visual") or ("media" if media else "anim")
+    if visual == "shots" and shots:  # ผู้ใช้เลือกใช้ภาพหน้าจอร้านในคลิปเอง (ภาพของร้านค้า)
+        media = media + shots
+    used = PR.add_media(plan, media, d / "scenes", lambda m: save(jid, step="images", progress=40, message=m)) \
+        if visual != "anim" else 0
+    if not used and visual in ("anim", "media", "shots"):  # ไม่มีสินค้าจริง → แอนิเมชันกราฟิกทั้งคลิป
+        save(jid, step="images", progress=60, message="สร้างฉากแอนิเมชัน")
+        PR.add_animation(plan, d / "scenes", o["render"].get("layout", "vertical_crop"))
+        plan["note"] = ((plan.get("note") or "") + " · ทำเป็นแอนิเมชันกราฟิกทั้งคลิป — แก้ \"ข้อความบนจอ\" ได้ทุกฉาก "
+                        "(ข้อความนี้จะเด้งตัวใหญ่กลางจอ) หรือกด 📷/📹 เปลี่ยนเป็นภาพฟรีเฉพาะบางฉาก").strip(" ·")
+    elif not used:  # visual == "photo" → ภาพ/วิดีโอฟรีประกอบ (ไม่ใช่ตัวสินค้าจริง)
         ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), "cinematic",
                        lambda pct, msg: save(jid, step="images", progress=40 + pct * 0.58, message=msg), source="photo")
         plan["note"] = ((plan.get("note") or "") + " · ยังไม่มีรูป/วิดีโอสินค้าจริง จึงใช้ภาพฟรีประกอบไปก่อน — "
@@ -500,7 +509,8 @@ def job_opts(form) -> dict:
     }
     if form.get("mode") == "product":  # 🛒 โหมดสินค้า = งานแบบข้อความ→คลิป ที่ใช้บทป้ายยา
         opts["mode"] = "story"
-        opts["product_info"] = {k: str(form.get(f"p_{k}") or "")[:3000] for k in ("name", "price", "full", "points", "cta")}
+        opts["product_info"] = {k: str(form.get(f"p_{k}") or "")[:3000]
+                                for k in ("name", "price", "full", "points", "cta", "visual")}
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["image_source"], opts["videos"], opts["script_mode"] = "photo", False, "rewrite"
         opts["text"] = opts["product_info"]["name"]

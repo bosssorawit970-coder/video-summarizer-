@@ -198,9 +198,19 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <label class="f">📸 ภาพหน้าจอหน้าร้าน (ให้ AI อ่านข้อมูล — ไม่เอาไปใส่ในคลิป)</label>
       <input type="file" id="pShots" accept="image/*" multiple>
       <div class="hint" id="pShotsHint">แคปหน้าสินค้าใน Shopee (ชื่อ ราคา รายละเอียด) ได้สูงสุด 4 ภาพ · ต้องใช้ AI Gemini</div>
+      <label class="f">ภาพในคลิป</label>
+      <div class="seg" id="pVisSeg">
+        <label><input type="radio" name="pvis" value="anim" checked> ✨ แอนิเมชันกราฟิก (ไม่ต้องมีสินค้า)</label>
+        <label><input type="radio" name="pvis" value="media"> 🎬 รูป/วิดีโอที่ถ่ายเอง</label>
+        <label><input type="radio" name="pvis" value="photo"> 📷 ภาพ/วิดีโอฟรีประกอบ</label>
+        <label><input type="radio" name="pvis" value="shots"> 📸 ใช้ภาพหน้าจอร้าน</label>
+      </div>
+      <div class="hint" id="pVisHint" style="margin:6px 2px 0"></div>
+      <div id="pMediaBox" class="hidden">
       <label class="f">🎬 รูป/วิดีโอสินค้าที่ถ่ายเอง (ใส่ในคลิป)</label>
       <input type="file" id="pMedia" accept="image/*,video/*" multiple>
       <div class="hint" id="pMediaHint">แนะนำมาก — คลิปจากของจริงคนดูเชื่อกว่า และไม่ติดลิขสิทธิ์รูปของร้าน (สูงสุด 12 ไฟล์)</div>
+      </div>
       <label class="f">ปิดท้ายชวนซื้อ</label>
       <select id="pCta">
         <option value="cart">กดตะกร้าเหลือง (TikTok Shop / Shopee Video)</option>
@@ -209,7 +219,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <option value="desc">ลิงก์ใต้คลิป (YouTube)</option>
       </select>
       <div class="seg" style="margin-top:10px"><label><input type="checkbox" id="pGraphics" checked> 📊 กราฟิกราคา/จุดเด่น</label></div>
-      <div class="hint" style="margin-top:8px;background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px">✅ AI เขียนจากข้อมูลจริงเท่านั้น ไม่แต่งรีวิว/ประสบการณ์ใช้ · แคปชันบอกว่าเป็นลิงก์ affiliate ให้ · งานขายของใช้เสียงโคลนไม่ได้ (สัญญาอนุญาตห้ามเชิงพาณิชย์) — แนะนำเสียง ✨ Gemini</div>
+      <div class="hint" style="margin-top:8px;background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px">✅ คลิปแอนิเมชันไม่มีภาพสินค้าจริง — คนดูจะกดลิงก์ไปดูของจริงเอง · AI เขียนจากข้อมูลจริงเท่านั้น ไม่แต่งรีวิว/ประสบการณ์ใช้ · แคปชันบอกว่าเป็นลิงก์ affiliate ให้ · งานขายของใช้เสียงโคลนไม่ได้ (สัญญาอนุญาตห้ามเชิงพาณิชย์) — แนะนำเสียง ✨ Gemini</div>
     </div>
     <div class="mediaOnly">
     <h2>1. ใส่ลิงก์คลิป</h2>
@@ -599,7 +609,16 @@ const links = () => [...new Set($("#url").value.match(URLS_RE) || [])];
 function refreshItems() {
   if (mode() === "product") {
     const ok = $("#pName").value.trim() || $("#pPoints").value.trim() || $("#pShots").files.length;
-    $("#go").disabled = !ok; $("#go").textContent = "สร้างคลิปป้ายยา";
+    const vis = document.querySelector("input[name=pvis]:checked").value;
+    $("#pMediaBox").classList.toggle("hidden", vis !== "media");
+    $("#pVisHint").textContent = {
+      anim: "พื้นหลังสีสด + ข้อความตัวใหญ่เด้งกลางจอ + กราฟิกราคา + รูปทรงลอยไปมา — ไม่ต้องมีรูปสินค้า ไม่ติดลิขสิทธิ์",
+      media: "ใช้รูป/วิดีโอที่บอสถ่ายเองวนทุกฉาก (น่าเชื่อที่สุด)",
+      photo: "ภาพ/วิดีโอฟรีที่เข้ากับแต่ละฉาก (ไม่ใช่ตัวสินค้าจริง)",
+      shots: "⚠️ ภาพหน้าจอเป็นรูปของร้านค้า อาจโดนแจ้งลิขสิทธิ์ได้ — ใช้เมื่อแน่ใจว่าร้าน/Shopee อนุญาต",
+    }[vis];
+    $("#go").disabled = !ok || (vis === "media" && !$("#pMedia").files.length) || (vis === "shots" && !$("#pShots").files.length);
+    $("#go").textContent = "สร้างคลิปป้ายยา";
     $("#pMediaHint").textContent = $("#pMedia").files.length ? `เลือกแล้ว ${$("#pMedia").files.length} ไฟล์ — จะวนใส่ทุกฉาก` : "แนะนำมาก — คลิปจากของจริงคนดูเชื่อกว่า และไม่ติดลิขสิทธิ์รูปของร้าน (สูงสุด 12 ไฟล์)";
     $("#batchBox").classList.add("hidden"); return;
   }
@@ -628,7 +647,7 @@ function urlChanged() {
 $("#url").oninput = urlChanged;
 $("#storyText").oninput = () => refreshItems();
 for (const id of ["pName", "pPoints"]) $("#" + id).oninput = () => refreshItems();
-for (const id of ["pShots", "pMedia"]) $("#" + id).onchange = () => refreshItems();
+for (const id of ["pShots", "pMedia", "pVisSeg"]) $("#" + id).onchange = () => refreshItems();
 function scriptModeChanged() {
   const rw = document.querySelector("input[name=script_mode]:checked").value === "rewrite";
   $("#scriptHint").textContent = rw ? "AI จะเรียบเรียงใหม่ให้กระชับ ตามความยาวคลิปที่ตั้งไว้ด้านล่าง" : "ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ";
@@ -750,11 +769,11 @@ $("#go").onclick = async () => {
           const f = await shrinkImage(f0);
           ids.push(await uploadFile(f, pct => { msg.textContent = `อัปโหลด${tag} ${k + 1}/${list.length} — ${pct.toFixed(0)}%`; bar.style.width = pct + "%"; }));
         } return ids; };
-      const media = [...$("#pMedia").files].slice(0, 12), shots = [...$("#pShots").files].slice(0, 4);
+      const media = document.querySelector("input[name=pvis]:checked").value === "media" ? [...$("#pMedia").files].slice(0, 12) : [], shots = [...$("#pShots").files].slice(0, 4);
       const mids = await up(media, "รูป/วิดีโอสินค้า"), sids = await up(shots, "ภาพหน้าจอ");
       const fd = commonFields(new FormData());
       for (const k of ["Name", "Price", "Full", "Points"]) fd.append("p_" + k.toLowerCase(), $("#p" + k).value.trim());
-      fd.append("p_cta", $("#pCta").value); fd.append("graphics", $("#pGraphics").checked ? "1" : "0");
+      fd.append("p_cta", $("#pCta").value); fd.append("p_visual", document.querySelector("input[name=pvis]:checked").value); fd.append("graphics", $("#pGraphics").checked ? "1" : "0");
       fd.append("media_ids", mids.join(",")); fd.append("shot_ids", sids.join(","));
       fd.append("media_names", media.map(f => f.type.startsWith("video/") ? (f.name || "v.mp4") : "img.jpg").join("\n"));
       const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);

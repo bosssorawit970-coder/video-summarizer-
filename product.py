@@ -44,7 +44,7 @@ PRODUCT_PROMPT = """คุณเป็นครีเอเตอร์คลิ
 - บทพากย์ทุกฉากรวมกันไม่เกิน {budget} ตัวอักษร ฉากละ 1-2 ประโยคสั้น ภาษาพูดเป็นกันเอง กระชับ มีพลัง ห้ามอีโมจิ
 - ห้ามแต่งประสบการณ์ใช้จริง ("ใช้มา 3 เดือน", "ลองแล้วดีมาก") ห้ามแต่งรีวิว/ยอดขาย/คะแนน/ตัวเลขที่ไม่มีในข้อมูล
 - ห้ามอ้างสรรพคุณเกินจริง รักษาโรค หรือรับประกันผล ห้ามใช้ "ดีที่สุด" "อันดับ 1" ถ้าข้อมูลไม่ได้บอก
-- headline: ข้อความบนจอ 2-6 คำ ตัวใหญ่ เช่น "ลด 50%" "กันน้ำได้" (เว้นว่างได้)
+- headline: ข้อความตัวใหญ่บนจอทุกฉาก 2-5 คำ สั้นและโดน เว้นวรรคระหว่างคำ เช่น "ลด 50%" "กันน้ำ ได้จริง" "ร้อน จนทนไม่ไหว"
 - image: คำบรรยายภาพประกอบภาษาอังกฤษ (ใช้เมื่อไม่มีรูปสินค้าจริง)
 - search: คำค้นภาพ/วิดีโอฟรีภาษาอังกฤษ 2-4 คำ ที่เข้ากับฉาก (เช่น "woman applying skincare")
 {graphic_rules}
@@ -178,6 +178,21 @@ def add_media(plan: dict, media: list[Path], scene_dir: Path, progress=None) -> 
         s["options"] = [mine] + [x for x in names if x != mine]
         s["generic"] = False
     return len(names)
+
+
+def add_animation(plan: dict, scene_dir: Path, layout: str = "vertical_crop") -> int:
+    """ไม่มีสินค้าจริง → ทุกฉากเป็นแอนิเมชันกราฟิก: พื้นหลังสีสด + ข้อความใหญ่เด้งกลางจอ + รูปทรงลอย"""
+    W, H = ST.size_for(layout)
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    for i, s in enumerate(plan["scenes"]):
+        name = f"anim_{i + 1:02}.png"
+        G.anim_background(scene_dir / name, W, H, i)
+        if not (s.get("headline") or "").strip():  # แอนิเมชันต้องมีข้อความกลางจอ
+            s["headline"] = ST.thai_keywords(s.get("narration", ""), 2)[:24]
+        s["img"] = name
+        s["options"] = [name] + [o for o in s.get("options") or [] if o != name]
+        s["generic"] = False
+    return len(plan["scenes"])
 
 
 def move_uploads(src_dir: Path, dest: Path) -> tuple[list[Path], list[Path]]:
