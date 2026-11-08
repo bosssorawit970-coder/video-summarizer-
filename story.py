@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import graphics as G
 import imagegen
 import pipeline as P
 
@@ -23,10 +24,11 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 - image: คำบรรยายภาพประกอบเป็นภาษาอังกฤษ 10-25 คำ บรรยายสิ่งที่เห็นชัดๆ (คน สถานที่ สิ่งของ แสง มุมกล้อง)
   ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ — ให้บรรยายแบบทั่วไปแทน และห้ามให้มีตัวหนังสือในภาพ
 - search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ (เช่น "black coffee cup", "woman jogging park")
+{graphic_rules}
 
 ตอบเป็น JSON อย่างเดียว:
 {{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
- "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "..."}}]}}
+ "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null}}]}}
 
 ข้อมูล:
 {text}"""
@@ -44,11 +46,12 @@ Step 2 — for EACH scene write:
   If the scene states a fact, number or idea, show a concrete visual of it (never an unrelated generic scene).
   No text or letters in the image. No real people's names, celebrities, brands or copyrighted characters — describe them generically.
 - "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
+{graphic_rules}
 
 Reply with JSON only:
 {{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty",
  "title": "catchy Thai title (1-2 emoji ok)", "summary": "Thai caption 1-2 sentences + 3-5 hashtags",
- "scenes": [{{"headline": "...", "image": "...", "search": "..."}}]}}
+ "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null}}]}}
 "scenes" must contain exactly {n} items, in order.
 
 Script:
@@ -73,6 +76,33 @@ GENERIC_IMAGES = [
     "city street at night with neon reflections",
     "a cup of coffee on a wooden table, sunlight",
 ]
+
+
+GRAPHICS_ON = True  # ปิดได้จากหน้าเว็บ (opts["graphics"])
+
+
+def _graphic_rules() -> str:
+    return G.GRAPHIC_RULES if GRAPHICS_ON else '- "graphic": always null'
+
+
+def finish_graphics(scenes: list[dict]) -> None:
+    """ไม่ให้กราฟิกรกเกินไป (ไม่เกินครึ่งหนึ่งของฉาก ไม่ซ้ำแบบติดกัน) + ฉากไม่มี AI → เดาจากตัวเลขในบท"""
+    if not GRAPHICS_ON:
+        for s in scenes:
+            s["graphic"] = None
+        return
+    for s in scenes:
+        if "graphic" not in s:
+            s["graphic"] = G.guess(s.get("narration", ""))
+    limit, used, prev = max(1, (len(scenes) + 1) // 2), 0, None
+    for s in scenes:
+        g = s.get("graphic")
+        if g and (used >= limit or (prev and g["type"] == prev == "keyword")):
+            s["graphic"] = None
+            g = None
+        if g:
+            used += 1
+        prev = g["type"] if g else None
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -131,8 +161,11 @@ def split_script(text: str, max_len: int = 110) -> list[str]:
     return merged[:40]
 
 
-def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim") -> dict:
+def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim",
+                    graphics: bool = True) -> dict:
     """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่"""
+    global GRAPHICS_ON
+    GRAPHICS_ON = graphics
     text = text.strip()
     if len(text) < 10:
         raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
@@ -148,6 +181,7 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     for i, s in enumerate(scenes):  # AI คิดภาพให้ไม่ได้จริงๆ → ใช้ภาพทั่วไป แต่ทำเครื่องหมายเตือนไว้
         if not s["image"]:
             s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
+    finish_graphics(scenes)
     bad = sum(1 for s in scenes if s.get("generic"))
     if bad:
         why = "ยังไม่ได้เลือก AI" if provider == "none" else (plan.pop("ai_error", "") or "AI ตอบไม่ได้")
@@ -168,7 +202,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
     scenes = plan["scenes"]
     topic = characters = ""
     try:
-        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), scenes="\n".join(
+        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), graphic_rules=_graphic_rules(), scenes="\n".join(
             f"Scene {i + 1}: {s['narration']}" for i, s in enumerate(scenes))))
         topic = str(data.get("topic") or "")[:300]
         characters = str(data.get("characters") or "")[:300]
@@ -178,6 +212,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
                 s["headline"] = P.clean_text(str(v.get("headline", "")))[:40]
                 s["image"] = str(v.get("image", "")).strip()[:400]
                 s["search"] = str(v.get("search", "")).strip()[:60]
+                s["graphic"] = G.clean(v.get("graphic"), s["narration"])
         plan["title"] = str(data.get("title") or plan["title"])
         plan["summary"] = str(data.get("summary") or "")
     except Exception as e:
@@ -210,7 +245,7 @@ def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
         return None
     n = max(3, min(15, round(target / 7)))
     try:
-        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000])
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000], graphic_rules=_graphic_rules())
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
         scenes = []
@@ -219,7 +254,8 @@ def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
             if narr:
                 scenes.append({"narration": narr, "headline": P.clean_text(str(s.get("headline", "")))[:40],
                                "image": str(s.get("image", "")).strip()[:300] or GENERIC_IMAGES[0], "img": "",
-                               "search": str(s.get("search", "")).strip()[:60]})
+                               "search": str(s.get("search", "")).strip()[:60],
+                               "graphic": G.clean(s.get("graphic"), narr)})
         if scenes:
             plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
             for s in scenes:
@@ -230,6 +266,7 @@ def _rewrite_plan(text: str, provider: str, target: float) -> dict | None:
             for i, s in enumerate(scenes):
                 if not s["image"]:
                     s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
+            finish_graphics(scenes)
             return plan
     except Exception as e:
         print("AI เรียบเรียงบทไม่สำเร็จ ใช้บทเดิมแทน:", e)
@@ -499,6 +536,8 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     head = (scene.get("headline") or "").strip() if extras else ""
     if head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
+    if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
+        G.render(ass, scene["graphic"], min(0.4, D / 4), D - 0.2)
     brand = brand or {}
     text = (brand.get("text") or "").strip() if extras else ""
     logo = brand.get("logo") if extras else None

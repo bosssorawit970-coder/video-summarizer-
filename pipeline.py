@@ -719,6 +719,9 @@ class Ass:
                    40, 40, int(H * (0.065 if vertical else 0.035)))
         self.style("Pop", f, u * (0.052 if vertical else 0.046), white, black, _ass_color("000000", 0x60), 1, 1, 7, 3, 2,
                    50, 50, int(H * (0.24 if vertical else 0.09)))
+        # กล่องสีพอดีข้อความ (BorderStyle 3) สำหรับโมชันกราฟิก "คำสำคัญ"
+        self.style("GBox", f, u * 0.04, _ass_color("1A1A1A"), _ass_color("FFD43B"), _ass_color("FFD43B"), 1, 3, 18, 0, 5,
+                   40, 40, 0)
         self.style("Title", f, u * 0.05, white, black, _ass_color("000000", 0x70), 1, 3, 22, 0, 2,
                    50, 50, int(H * (0.2 if vertical else 0.12)))
 

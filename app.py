@@ -39,6 +39,7 @@ import game as G  # noqa: E402
 import imagegen  # noqa: E402
 import story as ST  # noqa: E402
 import voice as V  # noqa: E402
+import graphics as G2  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -165,7 +166,7 @@ def analyze_story(jid: str) -> dict:
     save(jid, status="analyzing", step="plan", progress=5,
          message="AI กำลังเรียบเรียงบทและแบ่งฉาก" if rewrite else "แบ่งฉากตามบท + คิดภาพประกอบ")
     plan = ST.make_story_plan(o.get("text", ""), o["provider"], o["target_seconds"],
-                              "rewrite" if rewrite else "verbatim")
+                              "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True))
     save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                         lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.78, message=msg),
@@ -454,6 +455,7 @@ def job_opts(form) -> dict:
         opts["style"] = str(form.get("style") or "") if form.get("style") in imagegen.STYLES else "cinematic"
         opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" else "verbatim"
         opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
+        opts["graphics"] = _bool(form.get("graphics"), True)
     opts["render"] = _render_opts(form, opts["mode"])
     return opts
 
@@ -724,7 +726,9 @@ async def render_job(req: Request):
             if narr or img:
                 scenes.append({"narration": narr[:300], "headline": str(s.get("headline") or "")[:40],
                                "image": str(s.get("image") or "")[:300], "img": img,
-                               "search": str(s.get("search") or "")[:60], "options": opts_})
+                               "search": str(s.get("search") or "")[:60], "options": opts_,
+                               "graphic": G2.clean(s.get("graphic"), "", strict=False) if isinstance(s.get("graphic"), dict)
+                               and not s["graphic"].get("off") else None})
         if not scenes:
             return JSONResponse({"error": "ต้องมีอย่างน้อย 1 ฉาก"}, status_code=400)
         plan = {**(j.get("plan") or {}), "scenes": scenes,

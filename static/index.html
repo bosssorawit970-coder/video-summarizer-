@@ -174,6 +174,8 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <label><input type="radio" name="image_source" value="ai" checked> 🎨 AI วาดภาพ</label>
         <label id="srcPhoto"><input type="radio" name="image_source" value="photo"> 📷 ภาพถ่ายจริง (คลังภาพฟรี) <span class="tag" id="pexTag"></span></label>
       </div>
+      <label class="f">โมชันกราฟิก</label>
+      <div class="seg"><label><input type="checkbox" id="graphics" checked> 📊 ใส่กราฟิกช่วยให้เข้าใจ (ตัวเลขนับขึ้น · แท่งเปรียบเทียบ · หัวข้อย่อย · คำสำคัญ)</label></div>
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
       <div class="hint" style="margin-top:6px">💡 ใช้ Gemini (ฟรี) หรือ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
@@ -644,6 +646,7 @@ $("#go").onclick = async () => {
       fd.append("style", (document.querySelector("input[name=style]:checked") || {}).value || "cinematic");
       fd.append("script_mode", document.querySelector("input[name=script_mode]:checked").value);
       fd.append("image_source", document.querySelector("input[name=image_source]:checked").value);
+      fd.append("graphics", $("#graphics").checked ? "1" : "0");
       const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
     }
     if (n > 1) {  // หลายคลิป → ชุดงาน
@@ -805,6 +808,10 @@ function drawScenes() {
           <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del">ลบ</button></div>
         <input type="text" data-k="headline" maxlength="40" placeholder="ข้อความบนจอ (เว้นว่างได้)" value="${esc(c.headline || "")}">
         <textarea data-k="narration" rows="3" placeholder="บทพากย์ฉากนี้">${esc(c.narration || "")}</textarea>
+        <div class="row gfx" style="gap:6px;margin-top:6px;flex-wrap:nowrap">
+          <select data-g="type" style="width:auto;flex:none">${Object.entries(GFX).map(([k, v]) => `<option value="${k}" ${(c.graphic?.type || "") === k ? "selected" : ""}>${v[0]}</option>`).join("")}</select>
+          <input type="text" data-g="text" style="flex:1;min-width:0" placeholder="${esc((GFX[c.graphic?.type || ""] || GFX[""])[1])}" value="${esc(gfxText(c.graphic))}" ${c.graphic ? "" : "disabled"}>
+        </div>
       </div>
       <div class="opts-row">
         ${c.generic ? `<div class="warn" style="margin-bottom:6px">⚠️ AI คิดภาพให้ฉากนี้ไม่ได้ ภาพอาจไม่เกี่ยวกับบท — เปิด "คำบรรยายภาพ" ด้านล่าง พิมพ์ภาพที่อยากได้ (อังกฤษ) แล้วกด 🎲</div>` : ""}
@@ -822,6 +829,41 @@ function drawScenes() {
     </div>`; }).join("");
   $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(2.5, (c.narration || "").replace(/\s/g, "").length / 11 + 0.7), 0).toFixed(0);
 }
+// ── โมชันกราฟิกต่อฉาก: แก้เป็นข้อความบรรทัดเดียว ──
+const GFX = {
+  "": ["📊 ไม่มีกราฟิก", ""],
+  stat: ["🔢 ตัวเลขเด่น", "ตัวเลข หน่วย | คำอธิบาย เช่น 1 มม./ปี | ฝนเฉลี่ยต่อปี"],
+  compare: ["📊 เปรียบเทียบ", "ชื่อ ตัวเลข, ชื่อ ตัวเลข | หน่วย เช่น อาตากามา 1, กรุงเทพฯ 1500 | มม."],
+  list: ["✅ หัวข้อย่อย", "คั่นด้วยจุลภาค เช่น ไม่มีฝน, ไม่มีพืช, คล้ายดาวอังคาร"],
+  keyword: ["💬 คำสำคัญ", "เช่น แห้งแล้งที่สุดในโลก"],
+};
+function gfxText(g) {
+  if (!g) return "";
+  if (g.type === "stat") return `${g.value} ${g.unit || ""}`.trim() + (g.label ? ` | ${g.label}` : "");
+  if (g.type === "compare") return (g.items || []).map(x => `${x.label} ${x.value}`).join(", ") + (g.unit ? ` | ${g.unit}` : "");
+  if (g.type === "list") return (g.items || []).join(", ");
+  return g.text || "";
+}
+function gfxParse(type, t) {
+  t = (t || "").trim(); const [a, b = ""] = t.split("|").map(x => x.trim());
+  if (!type) return null;
+  if (type === "stat") { const m = a.match(/^([\d.,]+)\s*(.*)$/); return m ? {type, value: m[1], unit: m[2], label: b} : {type, value: a, unit: "", label: b}; }
+  if (type === "compare") return {type, unit: b, items: a.split(",").map(x => { const m = x.trim().match(/^(.*?)\s*([\d.,]+)$/); return m ? {label: m[1], value: +m[2].replace(/,/g, "")} : null; }).filter(Boolean)};
+  if (type === "list") return {type, items: a.split(",").map(x => x.trim()).filter(Boolean)};
+  return {type, text: a};
+}
+$("#clips").addEventListener("change", e => {
+  const el = e.target; if (!el.dataset.g || !isStory()) return;
+  e.stopImmediatePropagation();
+  const card = el.closest(".scene"), i = +card.dataset.i, c = clips[i];
+  const type = card.querySelector("[data-g=type]").value;
+  if (el.dataset.g === "type") {
+    const keep = c.graphic && c.graphic.type === type;
+    c.graphic = type ? (keep ? c.graphic : gfxParse(type, type === "keyword" ? (c.headline || "") : "")) : null;
+  } else c.graphic = gfxParse(type, el.value);
+  drawScenes();
+}, true);
+
 $("#addScene").onclick = () => { clips.push({narration: "", headline: "", image: "", img: ""}); drawScenes(); };
 
 function drawClips() {
