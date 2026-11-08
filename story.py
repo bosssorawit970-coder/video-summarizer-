@@ -490,14 +490,11 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
     if missing:  # ฉากที่เพิ่มใหม่/ภาพหาย → วาดก่อน
         draw_images(plan, scene_dir, layout, style, lambda p, m: progress(0, m))
     n, files, durs = len(scenes), [], []
+    texts = [P.clean_text(s.get("narration", "")) for s in scenes]
+    narrs = P.tts_all(texts, workdir, voice, rate, tone, progress, total=30)
     for i, s in enumerate(scenes):
-        text = P.clean_text(s.get("narration", ""))
-        narr = None
-        if text:
-            progress(i / n * 95, f"สร้างเสียงพากย์ฉากที่ {i + 1}/{n}")
-            narr = workdir / f"narr_{i:03}.mp3"
-            P.tts(text, narr, voice, rate, tone, note=lambda m, i=i: progress(i / n * 95, m))
-        progress((i + 0.5) / n * 95, f"ทำแอนิเมชันฉากที่ {i + 1}/{n}")
+        text, narr = texts[i], narrs[i]
+        progress(30 + (i + 0.5) / n * 65, f"ทำแอนิเมชันฉากที่ {i + 1}/{n}")
         f = workdir / f"scene_{i:03}.mp4"
         sc = {**s, "narration": text}
         try:

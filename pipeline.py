@@ -554,9 +554,43 @@ def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
 
 
 def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
-        note: Callable[[str], None] | None = None) -> None:
-    _tts_raw(text, out_mp3, voice, rate, tone, note)
+        note: Callable[[str], None] | None = None) -> str:
+    """สร้างเสียงพากย์ 1 ท่อน คืนชื่อเสียงที่ใช้จริง (อาจเป็นเสียงสำรอง)"""
+    used = _tts_raw(text, out_mp3, voice, rate, tone, note) or voice
     _tidy_voice(out_mp3)
+    return used
+
+
+VOICE_NAMES = {"th-TH-PremwadeeNeural": "เปรมวดี", "th-TH-NiwatNeural": "นิวัฒน์", "th-TH-AcharaNeural": "อัจฉรา"}
+
+
+def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
+            progress: Progress, total: float = 100) -> list[Path | None]:
+    """สร้างเสียงพากย์ทุกท่อนก่อนตัดต่อ — ถ้าเสียง Gemini/โคลนใช้ไม่ได้กลางทาง (โควตาหมด)
+    จะสร้างท่อนก่อนหน้าใหม่ด้วยเสียงสำรอง ให้ทั้งคลิปเป็นเสียงเดียวกัน ไม่สลับไปมา"""
+    n = max(1, len(texts))
+    outs: list[Path | None] = []
+    used: list[str] = []
+    for i, text in enumerate(texts):
+        if not text:
+            outs.append(None)
+            used.append("")
+            continue
+        progress(i / n * total, f"สร้างเสียงพากย์ท่อนที่ {i + 1}/{n}")
+        f = workdir / f"narr_{i:03}.mp3"
+        v = voice
+        if used and any(u and u != voice for u in used):  # สลับไปเสียงสำรองแล้ว → ใช้ต่อทั้งคลิป
+            v = next(u for u in used if u and u != voice)
+        used.append(tts(text, f, v, rate, tone, note=lambda m, i=i: progress(i / n * total, m)))
+        outs.append(f)
+    backup = next((u for u in used if u and u != voice), None)
+    redo = [k for k, u in enumerate(used) if u == voice]
+    if backup and redo:
+        for j, k in enumerate(redo):
+            progress(total, f"เสียงหลักใช้ไม่ได้กลางคลิป — ทำเสียงท่อนแรกๆ ใหม่ให้เป็นเสียงเดียวกัน ({j + 1}/{len(redo)})")
+            tts(texts[k], outs[k], backup, rate, tone)
+        _note(f"ทั้งคลิปใช้เสียง{VOICE_NAMES.get(backup, backup)}แทน เพื่อไม่ให้เสียงสลับกลางคลิป")
+    return outs
 
 
 def _tidy_voice(f: Path) -> None:
@@ -587,7 +621,8 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
         if name in ("Puck", "Charon", "Fenrir"):
             fallback = "th-TH-NiwatNeural"
         try:
-            return V.gemini_tts(text, out_mp3, name, tone, rate)
+            V.gemini_tts(text, out_mp3, name, tone, rate)
+            return voice
         except Exception as e:
             _note(f"ใช้เสียง Gemini ไม่ได้ ({e}) — ใช้เสียงเปรมวดี/นิวัฒน์แทน")
     elif voice.startswith("clone:"):
@@ -600,7 +635,7 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
             txt = ref.with_suffix(".txt")
             V.clone_tts(text, out_mp3, ref, txt.read_text("utf-8").strip() if txt.exists() else "", rate,
                         progress=note)
-            return
+            return voice
         except Exception as e:
             _note(f"โคลนเสียงไม่ได้ ({str(e)[:150]}) — ใช้เสียงนิวัฒน์แทน")
     elif voice not in {v["id"] for v in THAI_VOICES}:
@@ -608,6 +643,7 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
     else:
         fallback = voice
     _edge_tts(text, out_mp3, fallback, rate)
+    return fallback
 
 
 # ───────────────────────── 4) ตัดต่อ ─────────────────────────
@@ -1314,17 +1350,14 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
     if not clips:
         raise RuntimeError("ไม่มีช่วงคลิปให้ตัดต่อ")
     n, files = len(clips), []
+    texts = [clean_text(c.get("narration", "")) for c in clips]
+    narrs = tts_all(texts, workdir, voice, rate, tone, progress, total=30)
     for i, c in enumerate(clips):
         s_path = Path(src_resolver(c["src"])).resolve() if c.get("src") and src_resolver else src
         if s_path not in infos:
             infos[s_path] = probe(s_path)
-        text = clean_text(c.get("narration", ""))
-        narr = None
-        if text:
-            progress(i / n * 100, f"สร้างเสียงพากย์ช่วงที่ {i + 1}/{n}")
-            narr = workdir / f"narr_{i:03}.mp3"
-            tts(text, narr, voice, rate, tone, note=lambda m, i=i: progress(i / n * 100, m))
-        progress((i + 0.5) / n * 100, f"ตัดต่อช่วงที่ {i + 1}/{n}" + (" (สโลว์+เอฟเฟกต์)" if fx and not clean else ""))
+        text, narr = texts[i], narrs[i]
+        progress(30 + (i + 0.5) / n * 69, f"ตัดต่อช่วงที่ {i + 1}/{n}" + (" (สโลว์+เอฟเฟกต์)" if fx and not clean else ""))
         f = workdir / f"clip_{i:03}.mp4"
         render_clip(s_path, infos[s_path], {**c, "narration": text}, narr, f,
                     orig_volume, (subtitles if not clean else False), workdir, layout=layout,
