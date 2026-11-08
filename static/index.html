@@ -336,7 +336,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">เพลงประกอบ</label><select id="music"></select></div>
             <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
             <div><label class="f">ตกแต่ง</label>
-              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label></div></div>
+              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label></div></div>
             <div><label class="f">ซับไตเติล</label>
               <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div>
               <div class="seg" id="subStyle" style="margin-top:6px">
@@ -801,6 +801,7 @@ function enterReview() {
   $("#clipsTitle").textContent = isStory() ? "ฉากและบทพากย์" : "ช่วงไฮไลต์และบทพากย์";
   $("#addScene").classList.toggle("hidden", !isStory());
   document.querySelectorAll(".noStory").forEach(e => e.classList.toggle("hidden", isStory()));
+  document.querySelectorAll(".storyRv").forEach(e => e.classList.toggle("hidden", !isStory()));
   $("#title").value = p.title || ""; $("#summary").value = p.summary || "";
   if (!isStory()) {
     const v = $("#srcVid"); if (!v.src.includes(`/api/jobs/${job.id}/source`)) v.src = `/api/jobs/${job.id}/source`;
@@ -812,7 +813,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
-           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; }
+           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
@@ -1078,7 +1079,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked})});
+      music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };

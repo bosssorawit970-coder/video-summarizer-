@@ -319,6 +319,7 @@ def do_render_story(jid: str) -> None:
             except Exception as e:
                 print("ทำภาพปกไม่ได้:", e)
         ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
+                        sfx=r.get("gfx_sfx", True),
                         subtitles=_subs(r), brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
@@ -643,6 +644,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "sub_style": body.get("sub_style") if body.get("sub_style") in ("pop", "classic")
         else ("classic" if mode == "talk" and layout == "original" else "pop"),
         "fx": _bool(body.get("fx"), game),
+        "gfx_sfx": _bool(body.get("gfx_sfx"), True),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
         "music_volume": max(0.0, min(1.0, _num(body.get("music_volume"), 0.25))),
@@ -651,7 +653,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "fx", "cover", "music",
                "music_volume", "channel", "logo")
 
 

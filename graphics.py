@@ -4,6 +4,7 @@
   compare  แท่งเปรียบเทียบ ค่อยๆ ยืดออก                    {"type":"compare","unit":"มม.","items":[{"label":"อาตากามา","value":1},…]}
   list     หัวข้อย่อยทีละข้อ                               {"type":"list","items":["ไม่มีฝน","ไม่มีพืช"]}
   keyword  คำสำคัญในกล่องสีเด้งขึ้น                         {"type":"keyword","text":"แห้งแล้งที่สุดในโลก"}
+พร้อมเสียงเอฟเฟกต์เบาๆ (วูบ/ป๊อป/ติ๊ก/ติ๊ง) ที่สร้างด้วย ffmpeg — ปิดได้ในหน้าตรวจบท
 """
 from __future__ import annotations
 
@@ -187,16 +188,41 @@ class _Draw:
         return x0, y0, w, hh
 
 
-def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
-    """วาดกราฟิกลงไฟล์ซับ ตั้งแต่ t0 ถึง t1 (วินาทีในฉาก)"""
+# ───────────────────────── เสียงเอฟเฟกต์เบาๆ ตอนกราฟิกขึ้น ─────────────────────────
+# สร้างด้วย ffmpeg ทั้งหมด (ไม่ใช้ไฟล์จากเน็ต = ไม่ติดลิขสิทธิ์)  ชื่อ: (คำสั่ง lavfi, filter, ความดัง)
+SFX = {
+    "whoosh": ("anoisesrc=d=0.4:c=pink:a=0.6:r=44100",
+               "highpass=f=700,lowpass=f=6000,afade=t=in:st=0:d=0.22:curve=exp,afade=t=out:st=0.22:d=0.18", 0.9),
+    "pop": ("aevalsrc='sin(2*PI*(520*t+4200*t*t))*exp(-38*t)':d=0.12:s=44100", "lowpass=f=4000", 0.38),
+    "tick": ("aevalsrc='sin(2*PI*2300*t)*exp(-260*t)':d=0.03:s=44100", "highpass=f=900", 0.18),
+    "ding": ("aevalsrc='(0.6*sin(2*PI*1320*t)+0.4*sin(2*PI*1980*t))*exp(-5.5*t)':d=0.7:s=44100", "anull", 0.22),
+    "rise": ("aevalsrc='sin(2*PI*(260*t+700*t*t))*min(1,t*12)*exp(-2.6*t)':d=0.65:s=44100", "lowpass=f=2500", 0.25),
+}
+
+
+def make_sfx(workdir) -> dict:
+    """สร้างไฟล์เสียงเอฟเฟกต์ไว้ใน workdir (ครั้งเดียว) คืน {ชื่อ: (path, ความดัง)}"""
+    out = {}
+    for name, (src, af, vol) in SFX.items():
+        f = workdir / f"gsfx_{name}.wav"
+        if not f.exists():
+            P.run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i", src, "-af", af, "-ac", "2", str(f)])
+        out[name] = (f, vol)
+    return out
+
+
+def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> list[tuple[float, str]]:
+    """วาดกราฟิกลงไฟล์ซับ ตั้งแต่ t0 ถึง t1 (วินาทีในฉาก) คืนจังหวะเสียงเอฟเฟกต์ [(เวลา, ชื่อเสียง)]"""
     g = clean(g, "", strict=False)
     if not g or t1 - t0 < 1.2:
-        return
+        return []
+    cues: list[tuple[float, str]] = []
     d = _Draw(ass, t0, t1)
     s, fade = d.s, "\\fad(200,250)"
     t = g["type"]
     if t == "stat":
         x0, y0, w, h = d.card(330)
+        cues.append((t0, "whoosh"))
         cx = x0 + w / 2
         unit = g.get("unit") or ""
         val = _num(g["value"])
@@ -209,9 +235,13 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
                 b = t0 + 0.25 + dur * (k + 1) / steps if k < steps - 1 else t1
                 d.text(2, a, b, cx, y0 + 40 * s, P.ass_text(_fmt(val * p, g["value"])) + unit_tag, 150,
                        ACCENTS[0], 8, "\\fad(0,250)" if k == steps - 1 else "", raw=True)
+                if k % 3 == 0 and k < steps - 1:
+                    cues.append((a, "tick"))
+            cues.append((t0 + 0.25 + dur, "ding"))
         else:
             d.text(2, t0 + 0.25, t1, cx, y0 + 40 * s, P.ass_text(g["value"]) + unit_tag, 130, ACCENTS[0], 8,
                    "\\fscx70\\fscy70\\t(0,250,\\fscx100\\fscy100)" + fade, raw=True)
+            cues.append((t0 + 0.25, "pop"))
         if g.get("label"):
             d.text(2, t0 + 0.6, t1, cx, y0 + h - 40 * s, g["label"], 58, WHITE, 2,
                    f"\\move({int(cx)},{int(y0 + h - 10 * s)},{int(cx)},{int(y0 + h - 40 * s)},0,300){fade}")
@@ -219,6 +249,7 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
         items = g["items"][:4]
         row = 128
         x0, y0, w, h = d.card(60 + row * len(items))
+        cues.append((t0, "whoosh"))
         top = max(i["value"] for i in items) or 1
         maxw = w - 120 * s
         unit = g.get("unit") or ""
@@ -226,6 +257,7 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
             a = t0 + 0.3 + 0.35 * k
             y = y0 + (34 + row * k) * s
             color = ACCENTS[k % len(ACCENTS)]
+            cues.append((a, "rise"))
             d.text(2, a, t1, x0 + 50 * s, y - 4 * s, it["label"], 50, WHITE, 7, fade)
             bw = max(14 * s, maxw * it["value"] / top)
             d.shape(2, a, t1, x0 + 50 * s, y + 58 * s, _rect(bw, 38 * s, 10 * s), color, 0,
@@ -240,8 +272,10 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
         items = g["items"][:4]
         row = 96
         x0, y0, w, h = d.card(50 + row * len(items))
+        cues.append((t0, "whoosh"))
         for k, item in enumerate(items):
             a = t0 + 0.3 + 0.45 * k
+            cues.append((a, "pop"))
             y = y0 + (30 + row * k) * s
             x = x0 + 60 * s
             tx = x + 50 * s
@@ -257,3 +291,5 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> None:
         d.ev(2, t0 + 0.25, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\fs{int(size * s)}\\bord{int(18 * s)}"
                                f"\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)"
                                f"\\frz-3{fade}", P.ass_text(g["text"]), style="GBox")
+        cues.append((t0 + 0.25, "pop"))
+    return [(round(max(0.0, c), 3), n) for c, n in cues if c < t1 - 0.1]

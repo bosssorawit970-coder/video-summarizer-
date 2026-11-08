@@ -523,7 +523,7 @@ def _motion(kind: str, W: int, H: int, D: float) -> str:
 
 
 def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, workdir: Path,
-                 layout: str, subtitles: bool, extras: bool, brand: dict | None) -> float:
+                 layout: str, subtitles: bool, extras: bool, brand: dict | None, sfx: bool = True) -> float:
     W, H = size_for(layout)
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
@@ -537,7 +537,9 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     if head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
     if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
-        G.render(ass, scene["graphic"], min(0.4, D / 4), D - 0.2)
+        cues = G.render(ass, scene["graphic"], min(0.4, D / 4), D - 0.2)
+    else:
+        cues = []
     brand = brand or {}
     text = (brand.get("text") or "").strip() if extras else ""
     logo = brand.get("logo") if extras else None
@@ -566,7 +568,28 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
     d = int(LEAD * 1000)
     delay = f",adelay={d}|{d}" if narr else ""
-    parts.append(f"[{ia}:a]{norm}{delay},apad,atrim=0:{D:.3f}[a]")
+    sounds = {}
+    if sfx and cues:
+        try:
+            sounds = G.make_sfx(workdir)
+        except Exception as e:
+            print("ทำเสียงเอฟเฟกต์กราฟิกไม่ได้:", str(e)[-200:])
+    if sounds:
+        # เสียงเอฟเฟกต์เบาๆ ตามจังหวะกราฟิก — ทุกเส้น apad ยาวไม่จำกัด ให้ amix หารเท่ากันตลอด แล้วคูณกลับ
+        idx = {}
+        for name in dict.fromkeys(n for _, n in cues):
+            inputs += ["-i", str(sounds[name][0])]; idx[name] = n_in; n_in += 1
+        labels = []
+        for k, (t, name) in enumerate(cues):
+            ms = int(t * 1000)
+            parts.append(f"[{idx[name]}:a]{norm},volume={sounds[name][1]:.2f},adelay={ms}|{ms},apad[fx{k}]")
+            labels.append(f"[fx{k}]")
+        n = len(labels) + 1
+        parts.append(f"[{ia}:a]{norm}{delay},apad[nar]")
+        parts.append(f"[nar]{''.join(labels)}amix=inputs={n}:duration=first:dropout_transition=0,"
+                     f"volume={n},atrim=0:{D:.3f}[a]")
+    else:
+        parts.append(f"[{ia}:a]{norm}{delay},apad,atrim=0:{D:.3f}[a]")
     P.run(["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(parts),
            "-map", "[v]", "-map", "[a]", "-t", f"{D:.3f}", "-c:v", "libx264", "-preset", "veryfast",
            "-crf", "21", "-r", "30", "-video_track_timescale", "90000",
@@ -602,7 +625,7 @@ def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -
 def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
                  cover: Path | None = None, clean: bool = False, style: str = "cinematic",
-                 tone: str = "story") -> list[Path]:
+                 tone: str = "story", sfx: bool = True) -> list[Path]:
     scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     scenes = plan["scenes"]
@@ -621,7 +644,7 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         sc = {**s, "narration": text}
         try:
             d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, subtitles,
-                             not clean, None if clean else brand)
+                             not clean, None if clean else brand, sfx=sfx and not clean)
         except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
             print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
             d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, False, False, None)
