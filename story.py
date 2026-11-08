@@ -15,13 +15,15 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 
 ข้อกำหนด:
 - ความยาวรวมประมาณ {target} วินาที แบ่งเป็น {n} ฉาก (ฉากละ 4-9 วินาที)
+- สำคัญมาก: บทพากย์ทุกฉากรวมกันต้องไม่เกิน {budget} ตัวอักษร (ไม่นับช่องว่าง) เพื่อให้คลิปยาวไม่เกิน {target} วินาที
+  ถ้าข้อมูลยาว ให้สรุปเฉพาะประเด็นที่น่าสนใจที่สุด ไม่ต้องเล่าทุกรายละเอียด
 - ฉากแรกต้องเปิดแรง ดึงความสนใจทันที (ตั้งคำถาม/ประโยคน่าตกใจ/สัญญาว่าจะได้อะไร)
 - เล่าต่อเนื่อง ภาษาพูดเป็นกันเอง กระชับ ฉากสุดท้ายสรุปและชวนกดติดตาม/คอมเมนต์
 - ยึดตามข้อมูลที่ให้มา ห้ามแต่งข้อเท็จจริง ตัวเลข หรือชื่อที่ไม่มีในข้อมูล
 - ถ้าข้อมูลเป็นภาษาอื่น (เช่น อังกฤษ) ให้แปลและเล่าเป็นภาษาไทยที่เป็นธรรมชาติ ไม่แข็งแบบแปลตรงตัว ชื่อคน/สถานที่/แบรนด์ให้ทับศัพท์
 {extra}
 - เก็บใจความสำคัญจากข้อมูลให้ครบ ไม่ตัดประเด็นทิ้ง
-- บทพากย์แต่ละฉาก (narration) 1-2 ประโยค ยาว 50-110 ตัวอักษร ห้ามมีอีโมจิ
+- บทพากย์แต่ละฉาก (narration) 1-2 ประโยค ยาวประมาณ {per_scene} ตัวอักษร ห้ามมีอีโมจิ
 - headline: ข้อความสั้นบนจอ 2-6 คำ สรุปฉากนั้น (ไม่ต้องซ้ำบทพากย์) เว้นว่างได้
 - image: คำบรรยายภาพประกอบเป็นภาษาอังกฤษ 10-25 คำ บรรยายสิ่งที่เห็นชัดๆ (คน สถานที่ สิ่งของ แสง มุมกล้อง)
   ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ — ให้บรรยายแบบทั่วไปแทน และห้ามให้มีตัวหนังสือในภาพ
@@ -259,6 +261,27 @@ def fill_visuals(plan: dict, provider: str) -> None:
 
 
 LAST_AI_ERROR = ""
+SPEECH_CPS = 11.5  # เสียงพากย์ไทยพูดได้ราว 11-12 ตัวอักษร/วินาที (ไม่นับช่องว่าง) ที่ความเร็ว +10%
+
+
+def speech_budget(target: float) -> int:
+    """จำนวนตัวอักษรบทพากย์ที่พอดีความยาวคลิป (หักเวลาเว้นระหว่างฉาก/ภาพปก ~10%)"""
+    return int(target * 0.9 * SPEECH_CPS)
+
+
+def _chars(t: str) -> int:
+    return len(re.sub(r"\s", "", t or ""))
+
+
+def fit_length(scenes: list[dict], budget: int) -> int:
+    """AI เขียนยาวเกิน → ตัดฉากกลางเรื่องทีละฉาก (เก็บฉากเปิดและฉากปิดไว้) คืนจำนวนที่ตัด"""
+    cut = 0
+    while len(scenes) > 3 and sum(_chars(s["narration"]) for s in scenes) > budget * 1.15:
+        mid = scenes[1:-1]
+        drop = max(range(len(mid)), key=lambda k: (not mid[k].get("graphic"), _chars(mid[k]["narration"])))
+        scenes.pop(drop + 1)
+        cut += 1
+    return cut
 
 
 def _rewrite_plan(text: str, provider: str, target: float, extra: str = "") -> dict | None:
@@ -279,9 +302,10 @@ def _rewrite_plan(text: str, provider: str, target: float, extra: str = "") -> d
 def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> dict | None:
     global LAST_AI_ERROR
     n = max(3, min(15, round(target / 7)))
+    budget = speech_budget(target)
     try:
         prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(),
-                                     extra=extra)
+                                     extra=extra, budget=budget, per_scene=max(40, min(110, budget // n)))
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
         scenes = []
@@ -293,7 +317,10 @@ def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> d
                                "search": str(s.get("search", "")).strip()[:60],
                                "graphic": G.clean(s.get("graphic"), narr)})
         if scenes:
+            cut = fit_length(scenes, budget)
             plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
+            if cut:
+                plan["note"] = f"บทยาวเกิน {int(target)} วินาที จึงตัดฉากกลางเรื่องออก {cut} ฉาก (อยากได้ยาวกว่านี้ เลื่อนความยาวคลิปให้มากขึ้นแล้วสร้างใหม่)"
             for s in scenes:
                 if s["image"] == GENERIC_IMAGES[0]:
                     s["image"] = ""
@@ -579,8 +606,8 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         rank_photos(photo_scenes, scene_dir, plan.get("title") or "", lambda m: progress(99, m))
     auto = sum(1 for s in plan["scenes"] if s.get("auto_photo"))
     if auto:
-        plan["note"] = (f"AI คิดภาพไม่ได้ {auto} ฉาก จึงใช้ภาพถ่ายฟรีที่ค้นจากคำสำคัญในบทแทน — "
-                        "ภาพไหนไม่ตรง กด 📷 ภาพถ่ายจริง เพื่อดูภาพอื่น หรือพิมพ์คำค้นเอง")
+        plan["note"] = ((plan.get("note") or "") + f" · AI คิดภาพไม่ได้ {auto} ฉาก จึงใช้ภาพถ่ายฟรีที่ค้นจากคำสำคัญในบทแทน — "
+                        "ภาพไหนไม่ตรง กด 📷 ภาพถ่ายจริง เพื่อดูภาพอื่น หรือพิมพ์คำค้นเอง").strip(" ·")
     weak = [str(k + 1) for k, s in enumerate(plan["scenes"]) if s.get("weak_photo")]
     if weak:
         plan["note"] = ((plan.get("note") or "") + f" · AI ดูแล้วว่าฉาก {', '.join(weak)} ยังไม่มีภาพที่ตรงบทนัก "
