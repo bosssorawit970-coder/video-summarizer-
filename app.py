@@ -1030,11 +1030,17 @@ async def photo_scene(req: Request):
     d = job_dir(j["id"]) / "scenes"
     d.mkdir(parents=True, exist_ok=True)
     try:
-        names = await run_in_threadpool(ST.photo_options, {"image": str(body.get("prompt") or "")}, i, d, 4, query)
+        scenes = (j.get("plan") or {}).get("scenes") or []
+        scene = dict(scenes[i]) if 0 <= i < len(scenes) else {}
+        if body.get("narration"):
+            scene["narration"] = str(body["narration"])
+        if body.get("prompt") and not scene.get("generic"):
+            scene["image"] = str(body["prompt"])
+        names = await run_in_threadpool(ST.photo_options, scene, i, d, 4, query)
     except Exception as e:
         return JSONResponse({"error": P.error_text(e)}, status_code=400)
     if not names:
-        return JSONResponse({"error": "ไม่เจอภาพที่ตรงคำค้น ลองเปลี่ยนคำค้น (ภาษาอังกฤษ)"}, status_code=404)
+        return JSONResponse({"error": "ไม่เจอภาพที่ตรงคำค้น ลองพิมพ์คำค้นใหม่ (ไทยหรืออังกฤษก็ได้)"}, status_code=404)
     return JSONResponse({"imgs": names})
 
 

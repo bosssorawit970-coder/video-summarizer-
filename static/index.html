@@ -793,7 +793,8 @@ async function watchPreview(id) {
 
 function drawScenes() {
   const src = n => `/api/jobs/${job.id}/scenes/${n}`;
-  $("#clips").innerHTML = (job.plan?.note ? `<p class="hint" style="background:#fff4d6;color:#7a5200;padding:10px;border-radius:8px">⚠️ ${esc(job.plan.note)}</p>` : "") + clips.map((c, i) => {
+  $("#clips").innerHTML = (job.plan?.note ? `<p class="hint" style="background:#fff4d6;color:#7a5200;padding:10px;border-radius:8px">⚠️ ${esc(job.plan.note)}</p>` : "")
+    + (cfg.pexels ? `<button id="allPhotos" style="width:100%;margin-bottom:12px">📷 เปลี่ยนเป็นภาพถ่ายฟรีทุกฉาก (ใช้เมื่อภาพ AI ดูงงๆ)</button>` : "") + clips.map((c, i) => {
     const opts = [...new Set([...(c.options || []), ...(c.img ? [c.img] : [])])];
     return `
     <div class="scene" data-i="${i}">
@@ -812,9 +813,9 @@ function drawScenes() {
           ${cfg.pexels ? `<button data-a="photo">📷 ภาพถ่ายจริง</button>` : ""}
           <button data-a="mine">📁 รูปของฉัน</button>
         </div>
-        <details><summary>คำบรรยายภาพ / คำค้น (ภาษาอังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
+        <details><summary>คำบรรยายภาพ / คำค้น (ไทยหรืออังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
           <label class="hint">ให้ AI วาด:</label><input type="text" data-k="image" maxlength="300" value="${esc(c.image || "")}">
-          <label class="hint">คำค้นภาพถ่าย:</label><input type="text" data-k="search" maxlength="60" placeholder="เช่น dark hotel corridor" value="${esc(c.search || "")}">
+          <label class="hint">คำค้นภาพถ่าย:</label><input type="text" data-k="search" maxlength="60" placeholder="เช่น ทะเลทราย หรือ desert sunset" value="${esc(c.search || "")}">
         </details>
       </div>
     </div>`; }).join("");
@@ -871,7 +872,7 @@ $("#clips").addEventListener("click", async e => {
         ? await api(`/api/jobs/${job.id}/scenes/${i}/regen`, {method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({prompt: c.image || c.headline || c.narration, n: 3})})
         : await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({query: c.search || "", prompt: c.image || ""})});
+            body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || ""})});
       c.options = [...new Set([...(c.options || []), ...(c.img ? [c.img] : []), ...r.imgs])];
       c.img = r.imgs[0]; c.generic = false;
       if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
@@ -914,6 +915,23 @@ $("#clips").addEventListener("click", async e => {
   }
 });
 $("#srcVid").ontimeupdate = e => { if (stopAt != null && e.target.currentTime >= stopAt) { e.target.pause(); stopAt = null; document.querySelectorAll(".clip.playing").forEach(d => d.classList.remove("playing")); } };
+// ── เปลี่ยนเป็นภาพถ่ายฟรีทุกฉาก ──
+$("#clips").addEventListener("click", async e => {
+  if (e.target.id !== "allPhotos") return;
+  const b = e.target; b.disabled = true; let fail = 0;
+  for (let i = 0; i < clips.length; i++) {
+    b.textContent = `⏳ กำลังหาภาพถ่ายฉากที่ ${i + 1}/${clips.length}…`;
+    const c = clips[i];
+    try {
+      const r = await api(`/api/jobs/${job.id}/scenes/${i}/photos`, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({query: c.search || "", prompt: c.generic ? "" : (c.image || ""), narration: c.narration || ""})});
+      c.options = [...new Set([...r.imgs, ...(c.options || []), ...(c.img ? [c.img] : [])])]; c.img = r.imgs[0]; c.generic = false;
+    } catch { fail++; }
+  }
+  drawScenes();
+  if (fail) alert(`หาภาพไม่เจอ ${fail} ฉาก — ฉากนั้นยังใช้ภาพเดิม ลองพิมพ์คำค้นเองแล้วกด 📷`);
+});
+
 // ── ⭐ ช็อตเด็ด (โหมดเกม) ──
 const GAME_LINES = {
   "": ["จังหวะนี้ต้องดูช้าๆ สวยเกิน!", "ช็อตนี้แหละ ที่ทำให้เกมพลิก!", "ดูกันชัดๆ อีกรอบ จังหวะเด็ดมาก!"],

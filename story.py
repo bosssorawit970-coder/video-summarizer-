@@ -274,8 +274,59 @@ def ai_variants(s: dict, i: int, scene_dir: Path, style: str, n: int, progress=N
     return names, ai
 
 
+TH_STOP = set("""และ หรือ แต่ ที่ ซึ่ง ของ ใน บน จาก กับ ให้ ได้ ไป มา เป็น อยู่ คือ มี ว่า จะ ก็ แล้ว ยัง นี้ นั้น
+เรา เขา ผม ฉัน คุณ มัน พวก ทุก บาง หลาย มาก น้อย กว่า ที่สุด อย่าง เพราะ ถ้า เมื่อ โดย ตาม เพื่อ จึง ทั้ง
+ครับ ค่ะ นะ จ้า เลย ด้วย อีก แค่ เคย ต้อง ควร อาจ สามารถ การ ความ ไม่ ใช่ ไหม อะไร ทำไม อย่างไร ยังไง""".split())
+
+
+def thai_keywords(text: str, k: int = 3) -> str:
+    """ดึงคำนามสำคัญจากบทภาษาไทย (ใช้ค้นภาพเมื่อ AI คิดภาพไม่ได้)"""
+    words: list[str] = []
+    try:
+        from pythainlp.tokenize import word_tokenize
+        toks = [t for t in word_tokenize(text, engine="newmm") if t.strip()]
+        try:
+            from pythainlp.tag import pos_tag
+            tagged = pos_tag(toks, corpus="orchid_ud")
+            words = [w for w, t in tagged if t in ("NOUN", "PROPN") and len(w) >= 2 and w not in TH_STOP]
+        except Exception:
+            words = []
+        if not words:
+            words = [w for w in toks if len(w) >= 3 and w not in TH_STOP and re.search(r"[ก-๙A-Za-z]", w)]
+    except Exception:
+        words = [w for w in re.split(r"\s+", text) if len(w) >= 3]
+    seen: list[str] = []
+    for w in sorted(words, key=lambda w: -len(w)):  # คำยาว = มักเป็นคำเฉพาะ (ทะเลทราย, ดาวอังคาร)
+        if w not in seen and not any(w in x for x in seen):
+            seen.append(w)
+    order = [w for w in words if w in seen[:k]]
+    return " ".join(dict.fromkeys(order))
+
+
+def scene_query(s: dict) -> tuple[str, str]:
+    """คำค้นภาพของฉาก → (คำค้น, ภาษา) — ถ้า AI คิดภาพไม่ได้ (generic) ใช้คำสำคัญจากบทแทน"""
+    if not s.get("generic") and (s.get("search") or (s.get("image") and s["image"] not in GENERIC_IMAGES)):
+        return search_terms(s), "en"
+    th = thai_keywords(s.get("narration") or "")
+    if not th:
+        return search_terms(s), "en"
+    en = imagegen.translate_th_en(th)
+    return (en, "en") if en else (th, "th")
+
+
 def photo_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "") -> list[str]:
-    got = imagegen.search_photos(query or search_terms(s), next_names(scene_dir, i, n))
+    if query:
+        lang = "th" if re.search(r"[ก-๙]", query) else "en"
+        if lang == "th":
+            query = imagegen.translate_th_en(query) or query
+            lang = "th" if re.search(r"[ก-๙]", query) else "en"
+    else:
+        query, lang = scene_query(s)
+    got = imagegen.search_photos(query, next_names(scene_dir, i, n), lang)
+    if not got and lang == "en" and s.get("narration"):  # ภาษาอังกฤษไม่เจอ → ลองค้นภาษาไทยตรงๆ
+        th = thai_keywords(s["narration"])
+        if th:
+            got = imagegen.search_photos(th, next_names(scene_dir, i, n), "th")
     return [p.name for p in got]
 
 
@@ -291,12 +342,15 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
     for i, s in enumerate(plan["scenes"]):
         if only_missing and s.get("img") and (scene_dir / s["img"]).exists():
             continue
-        if source == "photo" and not photo_err:
+        # AI คิดภาพไม่ได้ (ภาพทั่วไปไม่เกี่ยวกับเรื่อง) → ใช้ภาพถ่ายฟรีจากคำสำคัญในบทแทนการวาด
+        if (source == "photo" or s.get("generic")) and not photo_err:
             progress(i / n * 100, f"หาภาพถ่ายฉากที่ {i + 1}/{n}")
             try:
                 names = photo_options(s, i, scene_dir)
                 if names:
                     s["options"], s["img"] = names, names[0]
+                    if s.pop("generic", False):
+                        s["auto_photo"] = True
                     ok += 1
                     continue
             except Exception as e:  # คีย์ผิด/เน็ตมีปัญหา → ใช้ AI วาดแทนทั้งหมด
@@ -304,8 +358,19 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
                 plan["note"] = f"หาภาพถ่ายไม่ได้ ({photo_err}) จึงให้ AI วาดแทน"
         progress(i / n * 100, f"วาดภาพฉากที่ {i + 1}/{n}")
         names, ai = ai_variants(s, i, scene_dir, style, 1, lambda m: progress(i / n * 100, f"ฉากที่ {i + 1}/{n}: {m}"))
+        if not ai and not photo_err:  # วาดไม่ได้ (ได้แค่ภาพไล่สี) → ลองภาพถ่ายฟรีแทน
+            try:
+                got = photo_options(s, i, scene_dir)
+                if got:
+                    names, ai = got, True
+            except Exception as e:
+                photo_err = P.error_text(e)
         s["options"], s["img"] = names, names[0]
         ok += 1 if ai else 0
+    auto = sum(1 for s in plan["scenes"] if s.get("auto_photo"))
+    if auto:
+        plan["note"] = (f"AI คิดภาพไม่ได้ {auto} ฉาก จึงใช้ภาพถ่ายฟรีที่ค้นจากคำสำคัญในบทแทน — "
+                        "ภาพไหนไม่ตรง กด 📷 ภาพถ่ายจริง เพื่อดูภาพอื่น หรือพิมพ์คำค้นเอง")
     return ok
 
 

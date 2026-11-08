@@ -162,9 +162,10 @@ def _get_json(url: str, headers: dict | None = None) -> dict:
         return json.loads(r.read())
 
 
-def _pexels_urls(query: str, n: int) -> list[str]:
+def _pexels_urls(query: str, n: int, lang: str = "en") -> list[str]:
     for q, ori in ((query, "square"), (query, None)):
-        params = {"query": q, "per_page": n, "size": "medium", **({"orientation": ori} if ori else {})}
+        params = {"query": q, "per_page": n, "size": "medium", **({"orientation": ori} if ori else {}),
+                  **({"locale": "th-TH"} if lang == "th" else {})}
         photos = _get_json("https://api.pexels.com/v1/search?" + urllib.parse.urlencode(params),
                            {"Authorization": _keys()[0]}).get("photos", [])
         if photos:
@@ -172,21 +173,38 @@ def _pexels_urls(query: str, n: int) -> list[str]:
     return []
 
 
-def _pixabay_urls(query: str, n: int) -> list[str]:
+def _pixabay_urls(query: str, n: int, lang: str = "en") -> list[str]:
     params = {"key": _keys()[1], "q": query[:100], "image_type": "photo", "per_page": max(3, n),
-              "safesearch": "true", "order": "popular"}
+              "safesearch": "true", "order": "popular", "lang": lang}
     hits = _get_json("https://pixabay.com/api/?" + urllib.parse.urlencode(params)).get("hits", [])
     return [h.get("largeImageURL") or h["webformatURL"] for h in hits[:n]]
 
 
-def _openverse_urls(query: str, n: int) -> list[str]:
+def _openverse_urls(query: str, n: int, lang: str = "en") -> list[str]:
     params = {"q": query, "license": "cc0,pdm", "page_size": n * 2, "mature": "false"}
     res = _get_json("https://api.openverse.org/v1/images/?" + urllib.parse.urlencode(params)).get("results", [])
     return [r["url"] for r in res if r.get("url")]
 
 
-def search_photos(query: str, outs: list[Path]) -> list[Path]:
-    """ค้นภาพถ่ายจริงแล้วบันทึกเป็น PNG ตามรายชื่อไฟล์ที่ให้ คืนไฟล์ที่ได้จริง"""
+def translate_th_en(text: str) -> str:
+    """แปลคำค้นไทยสั้นๆ เป็นอังกฤษ (MyMemory ฟรี ไม่ต้องมีคีย์) — คลังภาพส่วนใหญ่ค้นภาษาอังกฤษได้แม่นกว่า"""
+    text = text.strip()[:200]
+    if not text or not re.search(r"[ก-๙]", text):
+        return text
+    try:
+        data = _get_json("https://api.mymemory.translated.net/get?" +
+                         urllib.parse.urlencode({"q": text, "langpair": "th|en"}))
+        out = str((data.get("responseData") or {}).get("translatedText") or "").strip()
+        if out and not re.search(r"[ก-๙]", out) and "MYMEMORY" not in out.upper():
+            return re.sub(r"[^\w\s-]", " ", out).strip()
+    except Exception as e:
+        print("แปลคำค้นไม่ได้:", e)
+    return ""
+
+
+def search_photos(query: str, outs: list[Path], lang: str = "en") -> list[Path]:
+    """ค้นภาพถ่ายจริงแล้วบันทึกเป็น PNG ตามรายชื่อไฟล์ที่ให้ คืนไฟล์ที่ได้จริง
+    lang="th": คำค้นภาษาไทย (Pixabay/Pexels ค้นภาษาไทยได้ · Openverse ไม่ค่อยได้)"""
     from PIL import Image
     words = query.split()
     query = " ".join(words[:6]) or "nature"
@@ -198,7 +216,7 @@ def search_photos(query: str, outs: list[Path]) -> list[Path]:
         urls = []
         for q in dict.fromkeys([query, " ".join(words[:2])]):  # ไม่เจอ → ลองคำค้นสั้นลง
             try:
-                urls = fn(q, len(outs))
+                urls = fn(q, len(outs), lang)
             except urllib.error.HTTPError as e:
                 errors.append(f"{name}: " + ("คีย์ไม่ถูกต้อง" if e.code in (401, 403) else
                                             "ค้นบ่อยเกินโควตา ลองใหม่ภายหลัง" if e.code == 429 else f"HTTP {e.code}"))
