@@ -398,14 +398,14 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}).encode()
     last, tried = None, []
     for model in gemini_models() or GEMINI_FALLBACK:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
-                                                              "x-goog-api-key": key})
         try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                data = json.loads(r.read())
+            data = _gemini_post(model, body, key)
         except urllib.error.HTTPError as e:
-            msg = e.read().decode("utf-8", "replace")[:300]
+            msg = getattr(e, "_msg_text", "") or e.read().decode("utf-8", "replace")[:300]
+            if e.code in (500, 502, 503, 504):  # เซิร์ฟเวอร์ Google คนใช้เยอะชั่วคราว (ลองซ้ำแล้ว) → ลองรุ่นถัดไป
+                tried.append(f"{model}: คนใช้เยอะ")
+                last = "เซิร์ฟเวอร์ Gemini คนใช้เยอะชั่วคราว ลองใหม่อีกสักครู่ (" + ", ".join(tried[-3:]) + ")"
+                continue
             if e.code == 404:  # รุ่นนี้ไม่มี/เลิกใช้ → ลองรุ่นถัดไป
                 _gemini_dead.add(model)
                 tried.append(f"{model}: ไม่มีรุ่นนี้แล้ว")
@@ -425,6 +425,32 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
         last = "Gemini ไม่ตอบ (อาจถูกระบบกรองเนื้อหา)"
         tried.append(f"{model}: ไม่ตอบ")
     raise RuntimeError(last or "เรียก Gemini ไม่สำเร็จ")
+
+
+def _gemini_post(model: str, body: bytes, key: str) -> dict:
+    """เรียก Gemini 1 รุ่น — ถ้าเซิร์ฟเวอร์ยุ่ง (503/500) รอแล้วลองซ้ำ 3 ครั้ง (5, 12, 25 วิ)"""
+    import time as _t
+    import urllib.error
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    for wait in (5, 12, 25, None):
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
+                                                              "x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code in (500, 502, 503, 504) and wait:
+                print(f"Gemini {model} ยุ่ง ({e.code}) รอ {wait} วิแล้วลองใหม่")
+                _t.sleep(wait)
+                continue
+            text = e.read().decode("utf-8", "replace")
+            try:
+                text = json.loads(text)["error"]["message"]
+            except Exception:
+                pass
+            e._msg_text = text[:300]
+            raise
+    raise RuntimeError("unreachable")
 
 
 def ask_ai(provider: str, prompt: str) -> str:

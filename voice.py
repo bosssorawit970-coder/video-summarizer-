@@ -143,6 +143,10 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
                         time.sleep(min(65, int(m.group(1)) + 2 if m else 20 * tries))
                         continue
                     last = "โควตาเสียง Gemini ฟรีเต็ม"
+                elif e.code in (500, 502, 503, 504) and tries < 3:  # เซิร์ฟเวอร์ยุ่งชั่วคราว → รอแล้วลองซ้ำ
+                    tries += 1
+                    time.sleep(5 * tries)
+                    continue
                 elif e.code in (400, 404):  # รุ่นนี้ไม่มี/ไม่รองรับรูปแบบนี้ → ลองรุ่นถัดไป
                     last = f"Gemini เสียงรุ่น {model}: {msg}"
                 elif e.code in (401, 403):
