@@ -212,11 +212,12 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <input type="file" id="pImg" accept="image/*" style="margin-top:4px">
         <label class="f">ทำรูปสินค้าให้ไม่ซ้ำร้าน</label>
         <div class="seg" id="pImgStyle">
-          <label><input type="radio" name="pimgstyle" value="sticker" checked> ✂️ ตัดพื้นหลัง → สติกเกอร์ลอย</label>
+          <label><input type="radio" name="pimgstyle" value="studio" checked> 📸 ฉากสตูดิโอใหม่ (วางบนแท่น + แสงวิ้ง + กล้องซูม)</label>
+          <label><input type="radio" name="pimgstyle" value="sticker"> ✂️ ตัดพื้นหลัง → สติกเกอร์ลอย</label>
           <label><input type="radio" name="pimgstyle" value="restage"> 🎨 AI จัดฉากถ่ายใหม่ (ทดลอง)</label>
           <label><input type="radio" name="pimgstyle" value="card"> 🖼️ รูปเดิมในกรอบ</label>
         </div>
-        <div class="hint">สติกเกอร์: เอาแบนเนอร์/พื้นหลังของร้านออก เหลือแต่ตัวสินค้า ขอบขาว+แสงฟุ้ง วางบนฉากของเราเอง (ฟรี ทำในเครื่อง) · จัดฉากใหม่: ให้ Gemini วางสินค้าบนฉากใหม่ (คีย์ฟรีอาจทำไม่ได้ → ใช้สติกเกอร์แทนอัตโนมัติ)</div>
+        <div class="hint">ฉากสตูดิโอ: ตัดพื้นหลังร้านออก แล้ววางสินค้าบนแท่นในฉากถ่ายสินค้าที่วาดใหม่ทุกฉาก (สีต่างกัน) มีแสงเงาวิ่งผ่านตัวสินค้า ประกายวิ้ง และกล้องค่อยๆ ซูมเข้า — เหมือนวิดีโอโฆษณาสินค้า · สติกเกอร์: เอาแบนเนอร์/พื้นหลังของร้านออก เหลือแต่ตัวสินค้า ขอบขาว+แสงฟุ้ง วางบนฉากของเราเอง (ฟรี ทำในเครื่อง) · จัดฉากใหม่: ให้ Gemini วางสินค้าบนฉากใหม่ (คีย์ฟรีอาจทำไม่ได้ → ใช้สติกเกอร์แทนอัตโนมัติ)</div>
         <div class="hint" style="color:#b45309">⚠️ รูปสินค้าเป็นลิขสิทธิ์ของร้าน/แบรนด์ — เช็กเงื่อนไขโปรแกรม Shopee Affiliate ว่าใช้รูปสินค้าโปรโมตได้แค่ไหน ถ้าโดนแจ้งให้ลบคลิปหรือปิดตัวเลือกนี้</div>
       </div>
       <div id="pMediaBox" class="hidden">

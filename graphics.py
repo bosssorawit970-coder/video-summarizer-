@@ -154,6 +154,7 @@ class _Draw:
         self.vertical = ass.H > ass.W
         self.s = min(ass.W, ass.H) / 1080
         self.font = P.thai_font()
+        self.bottom = 0.69
 
     def ev(self, layer: int, a: float, b: float, tags: str, body: str, style: str = "Sub") -> None:
         a, b = max(self.t0, a), min(self.t1, b)
@@ -176,7 +177,7 @@ class _Draw:
         if self.vertical:
             w = 900 * s
             x0 = (self.W - w) / 2
-            y0 = self.H * 0.69 - h * s
+            y0 = self.H * self.bottom - h * s
         else:
             w = 760 * s
             x0 = self.W - w - 60 * s
@@ -211,13 +212,15 @@ def make_sfx(workdir) -> dict:
     return out
 
 
-def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> list[tuple[float, str]]:
-    """วาดกราฟิกลงไฟล์ซับ ตั้งแต่ t0 ถึง t1 (วินาทีในฉาก) คืนจังหวะเสียงเอฟเฟกต์ [(เวลา, ชื่อเสียง)]"""
+def render(ass: "P.Ass", g: dict | None, t0: float, t1: float, bottom: float = 0.69) -> list[tuple[float, str]]:
+    """วาดกราฟิกลงไฟล์ซับ ตั้งแต่ t0 ถึง t1 (วินาทีในฉาก) คืนจังหวะเสียงเอฟเฟกต์ [(เวลา, ชื่อเสียง)]
+    bottom = ขอบล่างของกรอบกราฟิก (สัดส่วนความสูงจอ แนวตั้ง)"""
     g = clean(g, "", strict=False)
     if not g or t1 - t0 < 1.2:
         return []
     cues: list[tuple[float, str]] = []
     d = _Draw(ass, t0, t1)
+    d.bottom = bottom
     s, fade = d.s, "\\fad(200,250)"
     t = g["type"]
     if t == "stat":
@@ -285,7 +288,7 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> list[tuple[flo
                    f"\\move({int(tx - 40 * s)},{int(y)},{int(tx)},{int(y)},0,260)" + fade)
     elif t == "keyword":
         cx = d.W / 2 if d.vertical else d.W - 440 * s
-        cy = d.H * (0.62 if d.vertical else 0.66)
+        cy = d.H * ((bottom - 0.07) if d.vertical else 0.66)
         size = 92 if len(g["text"]) <= 12 else 80 if len(g["text"]) <= 18 else 66
         # กล่องสีพอดีข้อความ (BorderStyle 3 = libass วาดกล่องรอบตัวหนังสือให้เอง)
         d.ev(2, t0 + 0.25, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\fs{int(size * s)}\\bord{int(18 * s)}"
@@ -333,8 +336,28 @@ def anim_background(out, W: int, H: int, k: int = 0) -> None:
     im.save(out)
 
 
+def sparkles(ass: "P.Ass", t0: float, t1: float, cx: float, cy: float, r: float, k: int = 0) -> None:
+    """ประกายรูปดาว 4 แฉก วิ้งๆ รอบสินค้า (แบบโฆษณาสินค้า)"""
+    import random
+    d = _Draw(ass, t0, t1)
+    rnd = random.Random(k * 31 + 7)
+    for m in range(7):
+        a = t0 + rnd.uniform(0, 1.6)
+        x, y = cx + rnd.uniform(-r, r), cy + rnd.uniform(-r * 1.1, r * 0.9)
+        z = rnd.uniform(28, 60) * d.s
+        q = z * 0.18
+        star = f"m 0 {-z:.0f} b {q:.0f} {-q:.0f} {q:.0f} {-q:.0f} {z:.0f} 0 b {q:.0f} {q:.0f} {q:.0f} {q:.0f} 0 {z:.0f} " \
+               f"b {-q:.0f} {q:.0f} {-q:.0f} {q:.0f} {-z:.0f} 0 b {-q:.0f} {-q:.0f} {-q:.0f} {-q:.0f} 0 {-z:.0f}"
+        period = rnd.randint(900, 1600)
+        tw = "".join(f"\\t({p},{p + period // 2},\\fscx100\\fscy100\\alpha&H00&)"
+                     f"\\t({p + period // 2},{p + period},\\fscx10\\fscy10\\alpha&HFF&)"
+                     for p in range(0, int((t1 - a) * 1000), period))
+        d.ev(4, a, t1, f"\\an7\\pos({int(x)},{int(y)})\\bord0\\shad0\\blur2\\1c{_c('FFFFFF')}"
+                       f"\\fscx10\\fscy10\\alpha&HFF&{tw}\\p1", star + "{\\p0}")
+
+
 def kinetic(ass: "P.Ass", text: str, t0: float, t1: float, k: int = 0,
-            cy: float | None = None) -> list[tuple[float, str]]:
+            cy: float | None = None, shapes: bool = True) -> list[tuple[float, str]]:
     """ข้อความตัวใหญ่กลางจอ เด้งทีละคำ + รูปทรงตกแต่งลอยไปมา + วงแหวนระเบิดตอนขึ้น คืนจังหวะเสียงเอฟเฟกต์"""
     d = _Draw(ass, t0, t1)
     s, W, H = d.s, d.W, d.H
@@ -344,7 +367,7 @@ def kinetic(ass: "P.Ass", text: str, t0: float, t1: float, k: int = 0,
     # รูปทรงตกแต่ง: วงกลม/วงแหวน/สี่เหลี่ยมหมุน ลอยช้าๆ ทั้งฉาก
     import random
     rnd = random.Random(k * 13 + 1)
-    for m in range(5):
+    for m in range(5 if shapes else 0):
         x1, y1 = rnd.uniform(0.05, 0.95) * W, rnd.uniform(0.08, 0.92) * H
         x2, y2 = x1 + rnd.uniform(-120, 120) * s, y1 + rnd.uniform(-160, 160) * s
         size = rnd.uniform(40, 110) * s

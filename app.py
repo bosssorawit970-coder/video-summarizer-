@@ -182,7 +182,8 @@ def analyze_product(jid: str) -> dict:
         card = d / "scenes" / "prodcard.png"
         pb = plan.get("product_box")
         if o["product_info"].get("use_img", "1") != "0":  # รูปสินค้าลอยในแอนิเมชัน (ไฟล์ที่ผู้ใช้ให้ หรือ AI ตัดจากภาพหน้าจอ)
-            style = o["product_info"].get("img_style") or "sticker"
+            want = o["product_info"].get("img_style") or "studio"
+            style = "sticker" if want == "studio" else want  # สตูดิโอ = ตัดพื้นหลังแล้ววางบนแท่น
             save(jid, step="images", progress=55,
                  message="AI กำลังจัดฉากถ่ายสินค้าใหม่" if style == "restage" else "กำลังตัดพื้นหลังรูปสินค้า")
             got = ""
@@ -191,13 +192,15 @@ def analyze_product(jid: str) -> dict:
             elif pb and shots and 1 <= pb["shot"] <= len(shots):
                 got = PR.product_card(shots[pb["shot"] - 1], card, pb["box"], style)
             if got:
-                msg = {"sticker": "ตัดพื้นหลังรูปสินค้าเป็นสติกเกอร์แล้ว",
+                msg = {"sticker": "ตัดพื้นหลังรูปสินค้าแล้ว — วางบนแท่นในฉากสตูดิโอ" if want == "studio"
+                       else "ตัดพื้นหลังรูปสินค้าเป็นสติกเกอร์แล้ว",
                        "restage": "AI จัดฉากถ่ายสินค้าใหม่แล้ว — ตรวจดูว่าฉลาก/ตัวหนังสือบนสินค้ายังตรงของจริง ถ้าเพี้ยนให้เปลี่ยนเป็นแบบสติกเกอร์",
                        "card": "ใช้รูปสินค้าแบบกรอบ (ตัดพื้นหลังไม่ได้)"}[got]
                 if style == "restage" and got != "restage":
                     msg = "AI จัดฉากใหม่ไม่ได้ (คีย์ฟรีอาจไม่มีรุ่นทำภาพ) จึง" + msg
                 plan["note"] = ((plan.get("note") or "") + f" · {msg}").strip(" ·")
-        PR.add_animation(plan, d / "scenes", o["render"].get("layout", "vertical_crop"))
+        PR.add_animation(plan, d / "scenes", o["render"].get("layout", "vertical_crop"),
+                         studio=(o["product_info"].get("img_style") or "studio") == "studio")
         plan["note"] = ((plan.get("note") or "") + " · ทำเป็นแอนิเมชันกราฟิกทั้งคลิป — แก้ \"ข้อความบนจอ\" ได้ทุกฉาก "
                         "(ข้อความนี้จะเด้งตัวใหญ่กลางจอ) หรือกด 📷/📹 เปลี่ยนเป็นภาพฟรีเฉพาะบางฉาก").strip(" ·")
     elif not used:  # visual == "photo" → ภาพ/วิดีโอฟรีประกอบ (ไม่ใช่ตัวสินค้าจริง)

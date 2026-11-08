@@ -686,12 +686,18 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     if pcard is not None and not pcard.exists():
         pcard = None
     has_g = bool(extras and scene.get("graphic") and not scene["graphic"].get("off"))
+    studio = bool(pcard is not None and scene.get("studio"))
     if head and anim:  # ตัวหนังสือใหญ่เด้งกลางจอ + รูปทรงลอย (มีรูปสินค้า → ย้ายข้อความขึ้นบน)
-        kin_cues = G.kinetic(ass, head, 0, D, i, cy=(0.17 if pcard is not None else None))
+        kin_cues = G.kinetic(ass, head, 0, D, i, cy=(0.15 if pcard is not None else None),
+                             shapes=not studio)
     elif head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
+    if studio and not has_g:  # ประกายวิ้งๆ รอบสินค้า
+        G.sparkles(ass, 0.6, D, W / 2, H * 0.47, W * 0.3, i)
     if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
-        cues = G.render(ass, scene["graphic"], min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2)
+        # ฉากสตูดิโอ: กรอบกราฟิกอยู่เหนือสินค้า (สินค้าวางบนแท่นด้านล่าง)
+        cues = G.render(ass, scene["graphic"], min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2,
+                        bottom=0.47 if studio and vertical else 0.69)
     else:
         cues = []
     cues = sorted(kin_cues + cues)
@@ -721,7 +727,27 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     else:
         parts.append(motion)
         parts.append(f"[mv]{','.join(vf)},format=yuv420p[v]")
-    if pcard is not None:  # รูปสินค้าลอยขึ้นมา โยกเบาๆ อยู่ใต้ตัวหนังสือ (ก่อนวาดซับ/กราฟิก)
+    if pcard is not None and studio:  # ฉากสตูดิโอ: สินค้าวางบนแท่น + แถบแสงวิ่งผ่าน + กล้องค่อยๆ ซูมเข้า
+        import product as PR
+        bw, bh = (int(W * 0.36), int(H * 0.17)) if has_g else (int(W * 0.58), int(H * 0.36))
+        band = workdir / "shine_band.png"
+        if not band.exists():
+            PR.shine_band(band)
+        inputs += ["-loop", "1", "-t", f"{D:.3f}", "-i", str(pcard)]; ip = n_in; n_in += 1
+        inputs += ["-loop", "1", "-t", f"{D:.3f}", "-i", str(band)]; ib = n_in; n_in += 1
+        floor_y = H * PR.STUDIO_TOP + H * 0.012
+        parts[parts.index(motion)] = motion.replace("[mv]", "[mv0]")
+        parts.insert(parts.index(motion.replace("[mv]", "[mv0]")) + 1,
+                     # แถบแสง: วางทับสินค้าแล้วใช้รูปร่างสินค้าเป็นหน้ากาก → แสงวิ่งผ่านเฉพาะตัวสินค้า (เร็วกว่า geq มาก)
+                     f"[{ip}:v]scale={bw}:{bh}:force_original_aspect_ratio=decrease,format=rgba,split[pa][pb];"
+                     f"[pb]alphaextract[pm];"
+                     f"[{ib}:v]format=rgba,scale=-1:{bh * 2}[bd];"
+                     f"[pa][bd]overlay=x='-overlay_w+mod(t+{i * 0.7:.1f},3.2)/1.3*(main_w+overlay_w)':y=-{bh // 2}:"
+                     f"format=auto[ps];[ps][pm]alphamerge,fade=in:st=0:d=0.3:alpha=1[pc];"
+                     f"[mv0][pc]overlay=x=(W-w)/2:y='{floor_y:.0f}-h+max(0,0.35-t)*260':format=auto,"
+                     f"zoompan=z='min(1+0.0011*on,1.14)':x='iw/2-(iw/zoom/2)':y='ih*0.45-(ih/zoom*0.45)':"
+                     f"d=1:s={W}x{H}:fps=30[mv]")
+    elif pcard is not None:  # รูปสินค้าลอยขึ้นมา โยกเบาๆ อยู่ใต้ตัวหนังสือ (ก่อนวาดซับ/กราฟิก)
         inputs += ["-loop", "1", "-t", f"{D:.3f}", "-i", str(pcard)]; ip = n_in; n_in += 1
         cw = int(W * (0.34 if has_g else 0.62))
         cy = H * (0.40 if has_g else 0.52)

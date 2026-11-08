@@ -207,13 +207,86 @@ def add_media(plan: dict, media: list[Path], scene_dir: Path, progress=None) -> 
     return len(names)
 
 
-def add_animation(plan: dict, scene_dir: Path, layout: str = "vertical_crop") -> int:
-    """ไม่มีสินค้าจริง → ทุกฉากเป็นแอนิเมชันกราฟิก: พื้นหลังสีสด + ข้อความใหญ่เด้งกลางจอ + รูปทรงลอย"""
+STUDIO = [  # (ฉากหลังบน, ฉากหลังล่าง, แท่นวาง) — สีพาสเทลแบบถ่ายสินค้าในสตูดิโอ
+    ("FDE2E4", "FAD2E1", "FFFFFF"), ("E2ECE9", "BEE1E6", "F8F9FA"), ("FFF1C1", "FFD6A5", "FFFDF7"),
+    ("E4DFFD", "CDB4DB", "FFFFFF"), ("D7F9F1", "A0E7E5", "FFFFFF"), ("2B2D42", "4A4E69", "8D99AE"),
+]
+STUDIO_TOP = 0.665  # ระดับผิวบนของแท่นวาง (สัดส่วนความสูงจอ) — ใช้วางสินค้าตอนเรนเดอร์
+
+
+def shine_band(out: Path) -> None:
+    """แถบแสงเฉียงสีขาวโปร่ง (วิ่งผ่านตัวสินค้าแบบโฆษณา)"""
+    from PIL import Image
+    w, h = 220, 900
+    band = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+    alpha = Image.new("L", (w, h))
+    alpha.putdata([int(150 * max(0.0, 1 - abs(x - w / 2) / (w / 2)) ** 1.6) for y in range(h) for x in range(w)])
+    band.putalpha(alpha)
+    band.rotate(-22, expand=True, resample=Image.BICUBIC).save(out)
+
+
+def studio_background(out: Path, W: int, H: int, k: int = 0) -> None:
+    """ฉากถ่ายสินค้าแบบสตูดิโอ (วาดเองทั้งหมด): ฉากหลังไล่สี + สปอตไลต์ + พื้น + แท่นทรงกระบอก + เงาตรงจุดวาง"""
+    from PIL import Image, ImageDraw, ImageFilter
+    top, bot, pod = STUDIO[k % len(STUDIO)]
+    rgb = lambda h: tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # noqa: E731
+    c1, c2, cp = rgb(top), rgb(bot), rgb(pod)
+    w, h = int(W * 1.15), int(H * 1.15)  # เผื่อขอบให้กล้องขยับ
+    im = Image.new("RGB", (w, h))
+    d = ImageDraw.Draw(im)
+    for y in range(h):
+        t = y / (h - 1)
+        d.line([(0, y), (w, y)], fill=tuple(int(a + (b - a) * t) for a, b in zip(c1, c2)))
+    floor = int(h * 0.74)  # พื้นเข้มขึ้นนิด
+    for y in range(floor, h):
+        t = (y - floor) / max(1, h - floor)
+        d.line([(0, y), (w, y)], fill=tuple(int(c * (0.93 - 0.08 * t)) for c in c2))
+    spot = Image.new("L", (w, h), 0)  # สปอตไลต์จากด้านบน
+    ImageDraw.Draw(spot).ellipse([w * 0.12, -h * 0.15, w * 0.88, h * 0.75], fill=120)
+    spot = spot.filter(ImageFilter.GaussianBlur(w * 0.12))
+    im = Image.composite(Image.new("RGB", (w, h), (255, 255, 255)), im, spot)
+    d = ImageDraw.Draw(im)
+    cx, rx = w / 2, w * 0.33
+    ty = h * STUDIO_TOP + (h - H) / 2 * 0  # ผิวบนแท่น
+    ty = (H * STUDIO_TOP) + (h - H) / 2
+    ry, body = rx * 0.17, h * 0.13
+    side = Image.new("RGB", (int(rx * 2), int(body)))
+    sd = ImageDraw.Draw(side)
+    for x in range(side.width):  # ด้านข้างแท่น: ไล่แสงซ้าย→ขวา ให้ดูเป็นทรงกระบอก
+        t = abs(x / side.width - 0.38) * 1.6
+        sd.line([(x, 0), (x, side.height)], fill=tuple(int(c * (1 - 0.22 * min(1, t))) for c in cp))
+    mask = Image.new("L", (w, h), 0)
+    md = ImageDraw.Draw(mask)
+    md.rectangle([cx - rx, ty, cx + rx, ty + body], fill=255)
+    md.ellipse([cx - rx, ty + body - ry, cx + rx, ty + body + ry], fill=255)
+    full = Image.new("RGB", (w, h))
+    full.paste(side.resize((int(rx * 2), int(body + ry * 2))), (int(cx - rx), int(ty)))
+    shadow = Image.new("L", (w, h), 0)  # เงาแท่นบนพื้น
+    ImageDraw.Draw(shadow).ellipse([cx - rx * 1.15, ty + body - ry * 0.4, cx + rx * 1.15, ty + body + ry * 1.8], fill=90)
+    im = Image.composite(Image.new("RGB", (w, h), (0, 0, 0)), im, shadow.filter(ImageFilter.GaussianBlur(30)))
+    im = Image.composite(full, im, mask)
+    d = ImageDraw.Draw(im)
+    d.ellipse([cx - rx, ty - ry, cx + rx, ty + ry], fill=tuple(min(255, c + 12) for c in cp))  # ผิวบน
+    d.ellipse([cx - rx, ty - ry, cx + rx, ty + ry], outline=tuple(int(c * 0.86) for c in cp), width=3)
+    contact = Image.new("L", (w, h), 0)  # เงาตรงจุดที่สินค้าวาง
+    ImageDraw.Draw(contact).ellipse([cx - rx * 0.62, ty - ry * 0.45, cx + rx * 0.62, ty + ry * 0.45], fill=85)
+    im = Image.composite(Image.new("RGB", (w, h), (0, 0, 0)), im, contact.filter(ImageFilter.GaussianBlur(16)))
+    im.save(out)
+
+
+def add_animation(plan: dict, scene_dir: Path, layout: str = "vertical_crop", studio: bool = False) -> int:
+    """ไม่มีสินค้าจริง → ทุกฉากเป็นแอนิเมชันกราฟิก: พื้นหลังสีสด + ข้อความใหญ่เด้งกลางจอ + รูปทรงลอย
+    studio=True (มีรูปสินค้าที่ตัดพื้นหลังแล้ว): ฉากสตูดิโอ สินค้าวางบนแท่น มีแสงวิ้งวิ่งผ่าน + กล้องค่อยๆ ซูม"""
     W, H = ST.size_for(layout)
     scene_dir.mkdir(parents=True, exist_ok=True)
+    studio = studio and (scene_dir / "prodcard.png").exists()
     for i, s in enumerate(plan["scenes"]):
-        name = f"anim_{i + 1:02}.png"
-        G.anim_background(scene_dir / name, W, H, i)
+        name = f"anim_{'studio_' if studio else ''}{i + 1:02}.png"
+        if studio:
+            studio_background(scene_dir / name, W, H, i)
+            s["studio"] = True
+        else:
+            G.anim_background(scene_dir / name, W, H, i)
         if not (s.get("headline") or "").strip():  # แอนิเมชันต้องมีข้อความกลางจอ
             s["headline"] = ST.thai_keywords(s.get("narration", ""), 2)[:24]
         s["img"] = name
