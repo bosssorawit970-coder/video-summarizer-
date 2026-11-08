@@ -163,18 +163,34 @@ def split_script(text: str, max_len: int = 110) -> list[str]:
     return merged[:40]
 
 
+def thai_ratio(text: str) -> float:
+    letters = re.findall(r"[A-Za-zก-๙]", text or "")
+    return sum(1 for c in letters if "ก" <= c <= "๙") / len(letters) if letters else 1.0
+
+
 def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim",
-                    graphics: bool = True, extra: str = "") -> dict:
-    """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่"""
-    global GRAPHICS_ON
+                    graphics: bool = True, extra: str = "", strict: bool = False) -> dict:
+    """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่
+    strict=True (ลิงก์โพสต์/ข่าว): AI แปลไม่สำเร็จ = แจ้งผิดพลาด ไม่เอาต้นฉบับภาษาอื่นมาพากย์ตรงๆ"""
+    global GRAPHICS_ON, LAST_AI_ERROR
     GRAPHICS_ON = graphics
+    LAST_AI_ERROR = ""
     text = text.strip()
     if len(text) < 10:
         raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
+    foreign = thai_ratio(text) < 0.3
+    if foreign and provider != "none":  # บทเป็นภาษาอื่น → ต้องแปลเป็นไทยก่อนพากย์
+        mode, strict = "rewrite", True
     if mode == "rewrite":
         plan = _rewrite_plan(text, provider, target, extra)
         if plan:
             return plan
+        if strict:
+            raise RuntimeError("AI แปล/เรียบเรียงเป็นภาษาไทยไม่สำเร็จ"
+                               + (f" ({LAST_AI_ERROR})" if LAST_AI_ERROR else "")
+                               + " — ลองกดสร้างใหม่อีกครั้ง หรือเปลี่ยน AI (ถ้าโควตา Gemini หมด รอสักพักหรือพรุ่งนี้)")
+    if foreign:
+        raise RuntimeError("ข้อความเป็นภาษาอื่น ต้องเลือก AI (Gemini ฟรี) เพื่อแปลเป็นไทยก่อน")
     narrs = split_script(text)
     scenes = [{"narration": n_, "headline": "", "img": "", "image": "", "search": ""} for n_ in narrs]
     plan = {"title": narrs[0][:40] if narrs else "", "summary": "", "scenes": scenes}
@@ -242,12 +258,29 @@ def fill_visuals(plan: dict, provider: str) -> None:
         plan["characters"] = characters
 
 
+LAST_AI_ERROR = ""
+
+
 def _rewrite_plan(text: str, provider: str, target: float, extra: str = "") -> dict | None:
+    """ลอง 2 รอบ (รอบสองตัดข้อมูลให้สั้นลง — กัน AI ตอบไม่จบ/JSON ขาด)"""
+    global LAST_AI_ERROR
     if provider == "none":
         return None
+    for limit in (8000, 3500):
+        plan = _rewrite_once(text[:limit], provider, target, extra)
+        if plan:
+            if thai_ratio(" ".join(s["narration"] for s in plan["scenes"])) < 0.5:
+                LAST_AI_ERROR = "AI ตอบกลับมาไม่ใช่ภาษาไทย"
+                continue
+            return plan
+    return None
+
+
+def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> dict | None:
+    global LAST_AI_ERROR
     n = max(3, min(15, round(target / 7)))
     try:
-        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text[:8000], graphic_rules=_graphic_rules(),
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(),
                                      extra=extra)
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
@@ -271,8 +304,10 @@ def _rewrite_plan(text: str, provider: str, target: float, extra: str = "") -> d
                     s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
             finish_graphics(scenes)
             return plan
+        LAST_AI_ERROR = "AI ไม่ได้ส่งฉากกลับมา"
     except Exception as e:
-        print("AI เรียบเรียงบทไม่สำเร็จ ใช้บทเดิมแทน:", e)
+        print("AI เรียบเรียงบทไม่สำเร็จ:", e)
+        LAST_AI_ERROR = P.error_text(e)[:160]
     return None
 
 

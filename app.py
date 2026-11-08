@@ -180,7 +180,8 @@ def analyze_story(jid: str) -> dict:
         save(jid, status="analyzing", step="plan", progress=5,
              message="AI กำลังเรียบเรียงบทและแบ่งฉาก" if rewrite else "แบ่งฉากตามบท + คิดภาพประกอบ")
     plan = ST.make_story_plan(text, o["provider"], o["target_seconds"],
-                              "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True), extra=extra)
+                              "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True), extra=extra,
+                              strict=bool(source))
     if source:
         plan["source"] = {k: source[k] for k in ("site", "url", "title")}
     save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
