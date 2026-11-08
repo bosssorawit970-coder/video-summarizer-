@@ -286,7 +286,7 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float) -> list[tuple[flo
     elif t == "keyword":
         cx = d.W / 2 if d.vertical else d.W - 440 * s
         cy = d.H * (0.62 if d.vertical else 0.66)
-        size = 74 if len(g["text"]) <= 16 else 60
+        size = 92 if len(g["text"]) <= 12 else 80 if len(g["text"]) <= 18 else 66
         # กล่องสีพอดีข้อความ (BorderStyle 3 = libass วาดกล่องรอบตัวหนังสือให้เอง)
         d.ev(2, t0 + 0.25, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\fs{int(size * s)}\\bord{int(18 * s)}"
                                f"\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)"
