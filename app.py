@@ -165,7 +165,7 @@ def finish_analyze(jid: str, plan: dict) -> None:
 def analyze_product(jid: str) -> dict:
     d, j = job_dir(jid), jobs[jid]
     o = j["opts"]
-    media, shots = PR.move_uploads(Path(o.get("upload_dir") or ""), d / "product_files")
+    media, shots, pimg = PR.move_uploads(Path(o.get("upload_dir") or ""), d / "product_files")
     save(jid, status="analyzing", step="plan", progress=5,
          message="AI กำลังเขียนบทป้ายยา" + (" (อ่านภาพหน้าจอสินค้าด้วย)" if shots else ""))
     plan = PR.make_product_plan(o["product_info"], o["provider"], o["target_seconds"], shots,
@@ -178,6 +178,15 @@ def analyze_product(jid: str) -> dict:
         if visual != "anim" else 0
     if not used and visual in ("anim", "media", "shots"):  # ไม่มีสินค้าจริง → แอนิเมชันกราฟิกทั้งคลิป
         save(jid, step="images", progress=60, message="สร้างฉากแอนิเมชัน")
+        (d / "scenes").mkdir(parents=True, exist_ok=True)
+        card = d / "scenes" / "prodcard.png"
+        pb = plan.get("product_box")
+        if o["product_info"].get("use_img", "1") != "0":  # รูปสินค้าลอยในแอนิเมชัน (ไฟล์ที่ผู้ใช้ให้ หรือ AI ตัดจากภาพหน้าจอ)
+            if pimg and PR.product_card(pimg, card):
+                pass
+            elif pb and shots and 1 <= pb["shot"] <= len(shots) and PR.product_card(shots[pb["shot"] - 1], card, pb["box"]):
+                plan["note"] = ((plan.get("note") or "") + " · AI ตัดรูปสินค้าจากภาพหน้าจอมาใส่ให้ ถ้าตัดเพี้ยน "
+                                "ใส่ไฟล์ \"รูปสินค้า\" เองแล้วสร้างใหม่").strip(" ·")
         PR.add_animation(plan, d / "scenes", o["render"].get("layout", "vertical_crop"))
         plan["note"] = ((plan.get("note") or "") + " · ทำเป็นแอนิเมชันกราฟิกทั้งคลิป — แก้ \"ข้อความบนจอ\" ได้ทุกฉาก "
                         "(ข้อความนี้จะเด้งตัวใหญ่กลางจอ) หรือกด 📷/📹 เปลี่ยนเป็นภาพฟรีเฉพาะบางฉาก").strip(" ·")
@@ -510,7 +519,7 @@ def job_opts(form) -> dict:
     if form.get("mode") == "product":  # 🛒 โหมดสินค้า = งานแบบข้อความ→คลิป ที่ใช้บทป้ายยา
         opts["mode"] = "story"
         opts["product_info"] = {k: str(form.get(f"p_{k}") or "")[:3000]
-                                for k in ("name", "price", "full", "points", "cta", "visual")}
+                                for k in ("name", "price", "full", "points", "cta", "visual", "use_img")}
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["image_source"], opts["videos"], opts["script_mode"] = "photo", False, "rewrite"
         opts["text"] = opts["product_info"]["name"]
@@ -578,6 +587,9 @@ async def create_job(req: Request):
             if part:
                 ext = Path(names[k] if k < len(names) else "").suffix.lower()[:6] or ".jpg"
                 shutil.move(str(part), up_dir / f"media_{k + 1:02}{ext}")
+        pid = str(form.get("pimg_id") or "")
+        if pid and _upload_part(pid):
+            shutil.move(str(_upload_part(pid)), up_dir / "pimg_01.jpg")
         for k, uid in enumerate(sids[:4]):
             part = _upload_part(uid)
             if part:

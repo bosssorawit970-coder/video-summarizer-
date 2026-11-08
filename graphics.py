@@ -333,13 +333,14 @@ def anim_background(out, W: int, H: int, k: int = 0) -> None:
     im.save(out)
 
 
-def kinetic(ass: "P.Ass", text: str, t0: float, t1: float, k: int = 0) -> list[tuple[float, str]]:
+def kinetic(ass: "P.Ass", text: str, t0: float, t1: float, k: int = 0,
+            cy: float | None = None) -> list[tuple[float, str]]:
     """ข้อความตัวใหญ่กลางจอ เด้งทีละคำ + รูปทรงตกแต่งลอยไปมา + วงแหวนระเบิดตอนขึ้น คืนจังหวะเสียงเอฟเฟกต์"""
     d = _Draw(ass, t0, t1)
     s, W, H = d.s, d.W, d.H
     acc = PALETTES[k % len(PALETTES)][2]
     cues: list[tuple[float, str]] = []
-    cx, cy = W / 2, H * (0.33 if d.vertical else 0.4)
+    cx, cy = W / 2, H * (cy if cy is not None else 0.33 if d.vertical else 0.4)
     # รูปทรงตกแต่ง: วงกลม/วงแหวน/สี่เหลี่ยมหมุน ลอยช้าๆ ทั้งฉาก
     import random
     rnd = random.Random(k * 13 + 1)

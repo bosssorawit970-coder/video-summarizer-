@@ -206,6 +206,12 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <label><input type="radio" name="pvis" value="shots"> 📸 ใช้ภาพหน้าจอร้าน</label>
       </div>
       <div class="hint" id="pVisHint" style="margin:6px 2px 0"></div>
+      <div id="pImgBox">
+        <label style="display:block;margin-top:10px"><input type="checkbox" id="pUseImg" checked> 🖼️ ใส่รูปสินค้าลอยในแอนิเมชัน</label>
+        <div class="hint">AI ตัดรูปสินค้าจากภาพหน้าจอร้านให้เอง — หรือเลือกไฟล์รูปสินค้าเอง (เช่น บันทึกรูปจากแอป Shopee):</div>
+        <input type="file" id="pImg" accept="image/*" style="margin-top:4px">
+        <div class="hint" style="color:#b45309">⚠️ รูปสินค้าเป็นลิขสิทธิ์ของร้าน/แบรนด์ — เช็กเงื่อนไขโปรแกรม Shopee Affiliate ว่าใช้รูปสินค้าโปรโมตได้แค่ไหน ถ้าโดนแจ้งให้ลบคลิปหรือปิดตัวเลือกนี้</div>
+      </div>
       <div id="pMediaBox" class="hidden">
       <label class="f">🎬 รูป/วิดีโอสินค้าที่ถ่ายเอง (ใส่ในคลิป)</label>
       <input type="file" id="pMedia" accept="image/*,video/*" multiple>
@@ -611,6 +617,7 @@ function refreshItems() {
     const ok = $("#pName").value.trim() || $("#pPoints").value.trim() || $("#pShots").files.length;
     const vis = document.querySelector("input[name=pvis]:checked").value;
     $("#pMediaBox").classList.toggle("hidden", vis !== "media");
+    $("#pImgBox").classList.toggle("hidden", vis !== "anim");
     $("#pVisHint").textContent = {
       anim: "พื้นหลังสีสด + ข้อความตัวใหญ่เด้งกลางจอ + กราฟิกราคา + รูปทรงลอยไปมา — ไม่ต้องมีรูปสินค้า ไม่ติดลิขสิทธิ์",
       media: "ใช้รูป/วิดีโอที่บอสถ่ายเองวนทุกฉาก (น่าเชื่อที่สุด)",
@@ -773,6 +780,9 @@ $("#go").onclick = async () => {
       const mids = await up(media, "รูป/วิดีโอสินค้า"), sids = await up(shots, "ภาพหน้าจอ");
       const fd = commonFields(new FormData());
       for (const k of ["Name", "Price", "Full", "Points"]) fd.append("p_" + k.toLowerCase(), $("#p" + k).value.trim());
+      const pimg = document.querySelector("input[name=pvis]:checked").value === "anim" && $("#pUseImg").checked && $("#pImg").files[0];
+      if (pimg) fd.append("pimg_id", (await up([pimg], "รูปสินค้า"))[0]);
+      fd.append("p_use_img", $("#pUseImg").checked ? "1" : "0");
       fd.append("p_cta", $("#pCta").value); fd.append("p_visual", document.querySelector("input[name=pvis]:checked").value); fd.append("graphics", $("#pGraphics").checked ? "1" : "0");
       fd.append("media_ids", mids.join(",")); fd.append("shot_ids", sids.join(","));
       fd.append("media_names", media.map(f => f.type.startsWith("video/") ? (f.name || "v.mp4") : "img.jpg").join("\n"));

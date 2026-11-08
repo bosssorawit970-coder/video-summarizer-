@@ -682,8 +682,12 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     ass = P.Ass(W, H)
     head = (scene.get("headline") or "").strip() if extras else ""
     kin_cues = []
-    if head and anim:  # ตัวหนังสือใหญ่เด้งกลางจอ + รูปทรงลอย
-        kin_cues = G.kinetic(ass, head, 0, D, i)
+    pcard = img.parent / scene["product_img"] if anim and extras and scene.get("product_img") else None
+    if pcard is not None and not pcard.exists():
+        pcard = None
+    has_g = bool(extras and scene.get("graphic") and not scene["graphic"].get("off"))
+    if head and anim:  # ตัวหนังสือใหญ่เด้งกลางจอ + รูปทรงลอย (มีรูปสินค้า → ย้ายข้อความขึ้นบน)
+        kin_cues = G.kinetic(ass, head, 0, D, i, cy=(0.17 if pcard is not None else None))
     elif head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
     if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
@@ -717,6 +721,16 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     else:
         parts.append(motion)
         parts.append(f"[mv]{','.join(vf)},format=yuv420p[v]")
+    if pcard is not None:  # รูปสินค้าลอยขึ้นมา โยกเบาๆ อยู่ใต้ตัวหนังสือ (ก่อนวาดซับ/กราฟิก)
+        inputs += ["-loop", "1", "-t", f"{D:.3f}", "-i", str(pcard)]; ip = n_in; n_in += 1
+        cw = int(W * (0.34 if has_g else 0.62))
+        cy = H * (0.40 if has_g else 0.52)
+        parts[parts.index(motion)] = motion.replace("[mv]", "[mv0]")
+        parts.insert(parts.index(motion.replace("[mv]", "[mv0]")) + 1,
+                     f"[{ip}:v]scale={cw}:-1,format=rgba,rotate='0.035*sin(t*1.7)':c=none:ow=rotw(0.05):oh=roth(0.05),"
+                     f"fade=in:st=0.1:d=0.35:alpha=1[pc];"
+                     f"[mv0][pc]overlay=x=(W-w)/2:y='{cy:.0f}-h/2+14*sin(t*2.1)+max(0,0.45-t)*500':"
+                     f"eof_action=pass:format=auto[mv]")
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
     d = int(LEAD * 1000)
     delay = f",adelay={d}|{d}" if narr else ""
