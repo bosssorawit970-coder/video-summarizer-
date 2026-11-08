@@ -58,18 +58,31 @@ if not key:
         key = userdata.get("ANTHROPIC_API_KEY") or ""
     except Exception:
         key = ""
-# คีย์ Gemini (ฟรี): วางในช่อง ANTHROPIC_API_KEY ได้เลย (ขึ้นต้นด้วย AIza) หรือเก็บใน Secrets ชื่อ GEMINI_API_KEY
+# คีย์ Gemini (ฟรี): วางในช่อง ANTHROPIC_API_KEY ได้เลย หรือเก็บใน Secrets ชื่อ GEMINI_API_KEY
+# คีย์ Gemini มี 2 แบบ: AIza… (แบบเก่า) และ AQ.… (แบบใหม่) — คีย์ Claude ขึ้นต้น sk-ant- เสมอ
+key = "".join(key.split()).strip("\"'")  # ตัดช่องว่าง/ขึ้นบรรทัด/เครื่องหมายคำพูดที่ติดมาตอนวาง
 gem = ""
-if key.startswith("AIza"):
+if key and not key.startswith("sk-ant"):
     gem, key = key, ""
 try:
     from google.colab import userdata
-    gem = gem or userdata.get("GEMINI_API_KEY") or ""
+    gem = gem or "".join((userdata.get("GEMINI_API_KEY") or "").split())
 except Exception:
     pass
 if gem:
     env["GEMINI_API_KEY"] = gem
-    step("   ใช้ Gemini ได้ ✓ (เลือก \"Gemini\" ในหน้าโปรแกรม)")
+    # ทดสอบคีย์จริงก่อน จะได้รู้ตั้งแต่ตอนนี้ว่าใช้ได้ไหม
+    import urllib.request as _ur, urllib.error as _ue
+    try:
+        _ur.urlopen(_ur.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+                                headers={"x-goog-api-key": gem}), timeout=20).read()
+        step(f"   ใช้ Gemini ได้ ✓ (คีย์ {gem[:4]}…{gem[-4:]}) — เลือก \"Gemini\" ในหน้าโปรแกรม")
+    except _ue.HTTPError as e:
+        why = e.read().decode("utf-8", "replace")[:200]
+        step(f"   ⚠️ คีย์ Gemini ใช้ไม่ได้ ({e.code}): {why}")
+        step("      ลองกด Create API key ใหม่ใน aistudio.google.com แล้ววางใหม่ (คัดลอกด้วยปุ่ม Copy key)")
+    except Exception as e:
+        step(f"   ใส่คีย์ Gemini แล้ว (ทดสอบไม่ได้ตอนนี้: {e})")
 if key:
     env["ANTHROPIC_API_KEY"] = key
 elif AI == "claude" and not gem:

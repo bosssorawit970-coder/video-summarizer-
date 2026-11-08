@@ -31,7 +31,7 @@ intro = """# 🎬 สรุปคลิป — วางลิงก์ YouTube 
 settings = '''#@title ⚙️ ตั้งค่า
 #@markdown **ใช้อะไรสรุปเนื้อหา** — `ollama` = ฟรี (ดาวน์โหลดโมเดลเพิ่ม ~5 GB ครั้งแรก) · `claude` = สรุปดีที่สุด แต่จ่ายตามการใช้ · `none` = เขียนบทพากย์เอง
 AI = "ollama"  #@param ["ollama", "claude", "none"]
-#@markdown 🔑 คีย์ AI: วางคีย์ **Gemini (ฟรี ขึ้นต้น AIza…)** หรือคีย์ Claude (sk-ant-…) ในช่องนี้ได้เลย — หรือเก็บไว้ใน 🔑 Secrets ชื่อ `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` จะปลอดภัยกว่า
+#@markdown 🔑 คีย์ AI: วางคีย์ **Gemini (ฟรี ขึ้นต้น AIza… หรือ AQ.…)** หรือคีย์ Claude (sk-ant-…) ในช่องนี้ได้เลย — หรือเก็บไว้ใน 🔑 Secrets ชื่อ `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` จะปลอดภัยกว่า
 ANTHROPIC_API_KEY = ""  #@param {type:"string"}
 #@markdown คีย์ Pexels สำหรับภาพถ่ายจริงในโหมดข้อความ → คลิป (ฟรี สมัครที่ pexels.com/api) — หรือเก็บใน 🔑 Secrets ชื่อ `PEXELS_API_KEY`
 PEXELS_API_KEY = ""  #@param {type:"string"}
