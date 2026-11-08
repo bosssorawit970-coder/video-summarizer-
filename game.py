@@ -27,6 +27,10 @@ EVENTS = [
     (r"(enemy has been slain|you have slain)", "KILL", 2),
 ]
 
+# ป้ายสำหรับช็อตที่ AI ดูจากภาพ / ผู้ใช้กด ⭐ เอง (ไม่มีเสียงประกาศ)
+EXTRA_LABELS = [("OUTPLAY", 6), ("NICE PLAY", 5), ("ESCAPE", 5), ("TEAMFIGHT", 4), ("CLUTCH", 6)]
+LABEL_SCORE = {lb: sc for _, lb, sc in EVENTS} | dict(EXTRA_LABELS)
+
 BEFORE, AFTER = 7.0, 2.5   # ช็อตเริ่มก่อนเสียงประกาศ (จังหวะไฟต์) และจบหลังประกาศ
 
 
@@ -91,8 +95,79 @@ def _detect(model, wav: Path, duration: float, progress: P.Progress) -> list[dic
     return out
 
 
+VISION_PROMPT = """คุณเป็นโค้ชและแคสเตอร์เกม Mobile Legends: Bang Bang (MLBB)
+ด้านล่างคือภาพจากคลิปอัดหน้าจอของผู้เล่น ช่วงละ 3 ภาพ (ก่อน / ระหว่าง / หลังจังหวะที่เสียงไฟต์ดังที่สุด)
+ให้ดูภาพแล้วให้คะแนนว่าแต่ละช่วงน่าเอาไปทำคลิปไฮไลต์แค่ไหน
+- 8-10: ช็อตเด็ดชัดเจน เช่น เก็บคิลหลายตัว หลบสกิลสวย เลือดน้อยแล้วรอด ไฟต์ใหญ่ชนะ ปิดลอร์ด/เทอร์เทิล
+- 5-7: ไฟต์ธรรมดาที่มีลุ้น
+- 0-4: เดินเลน ฟาร์ม ไม่มีอะไร หรือภาพไม่ใช่ในเกม (หน้าเมนู โหลด)
+label เลือกจาก: OUTPLAY, NICE PLAY, ESCAPE, TEAMFIGHT, CLUTCH, KILL, LORD, TURTLE หรือ "" ถ้าไม่เด่น
+desc: อธิบายสั้นๆ ภาษาไทยว่าเกิดอะไรขึ้น (ไม่เกิน 60 ตัวอักษร ห้ามเดาชื่อฮีโร่ถ้าไม่แน่ใจ)
+ตอบ JSON เท่านั้น: {"moments": [{"id": 1, "score": 0, "label": "", "desc": ""}, ...]} ครบทุกช่วง"""
+
+
+def vision_moments(src: Path, loud, hop: float, duration: float, events: list[dict],
+                   workdir: Path, progress=None, max_n: int = 12) -> list[dict]:
+    """ให้ Gemini ดูภาพช่วงที่เสียงไฟต์ดังแต่ไม่มีเสียงประกาศ → หาช็อตเด็ดที่ระบบเสียงหาไม่เจอ"""
+    import base64
+    import os
+    import numpy as np
+    if not (os.environ.get("GEMINI_API_KEY") or "").strip() or not len(loud):
+        return []
+    base = float(np.median(loud))
+    taken = [e["t"] for e in events]
+    peaks: list[float] = []
+    for i in np.argsort(-loud):
+        t = float(i) * hop
+        if loud[i] < base + 3 or len(peaks) >= max_n:
+            break
+        if t < 3 or t > duration - 1 or any(abs(t - x) < 10 for x in taken + peaks):
+            continue
+        peaks.append(t)
+    if not peaks:
+        return []
+    peaks.sort()
+    workdir.mkdir(parents=True, exist_ok=True)
+    out: list[dict] = []
+    for g in range(0, len(peaks), 6):  # ส่งทีละ 6 ช่วง (18 ภาพ) ต่อครั้ง
+        group = peaks[g:g + 6]
+        if progress:
+            progress(f"AI กำลังดูภาพเกม ช่วงที่ {g + 1}-{g + len(group)} จาก {len(peaks)}")
+        parts = []
+        for k, t in enumerate(group, 1):
+            parts.append({"text": f"ช่วงที่ {k} (นาที {P.fmt_time(t)})"})
+            for dt in (-2.0, -0.6, 0.8):
+                f = workdir / f"vis_{g + k}_{dt}.jpg"
+                try:
+                    P.run(["ffmpeg", "-y", "-hide_banner", "-ss", f"{max(0.0, t + dt):.2f}", "-i", str(src),
+                           "-frames:v", "1", "-vf", "scale='min(640,iw)':-2", "-q:v", "6", str(f)])
+                    parts.append({"inline_data": {"mime_type": "image/jpeg",
+                                                  "data": base64.b64encode(f.read_bytes()).decode()}})
+                except Exception:
+                    pass
+                finally:
+                    f.unlink(missing_ok=True)
+        try:
+            data = P._parse_json(P._ask_gemini(VISION_PROMPT, parts))
+        except Exception as e:
+            print("AI ดูภาพเกมไม่ได้:", e)
+            break  # โควตาเต็ม/ผิดพลาด → ใช้ผลจากเสียงอย่างเดียว
+        for m in data.get("moments") or []:
+            try:
+                k = int(m.get("id")) - 1
+                score = float(m.get("score") or 0)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= k < len(group):
+                label = str(m.get("label") or "").upper().strip()
+                out.append({"t": group[k], "score": score,
+                            "label": label if label in LABEL_SCORE else "",
+                            "desc": P.clean_text(str(m.get("desc") or ""))[:80]})
+    return out
+
+
 def pick_clips(events: list[dict], loud, hop: float, duration: float,
-               target: float) -> list[dict]:
+               target: float, seen: list[dict] | None = None) -> list[dict]:
     import numpy as np
     base = float(np.median(loud)) if len(loud) else 0.0
 
@@ -119,7 +194,16 @@ def pick_clips(events: list[dict], loud, hop: float, duration: float,
             c["score"] = top["score"] + 0.5 * sum(e["score"] for e in c["events"][1:]) \
                 + loud_bonus(c["start"], c["end"])
             c["end"] = min(c["end"], c["start"] + 22)  # ช็อตไม่ยาวเกิน
-    else:
+    # ช็อตที่ AI ดูภาพแล้วบอกว่าเด็ด (ไม่มีเสียงประกาศ)
+    for v in seen or []:
+        if v["score"] < 6:
+            continue
+        a, b = max(0.0, v["t"] - 5.5), min(duration, v["t"] + 2.5)
+        if any(a < c["end"] and b > c["start"] for c in cands):
+            continue
+        cands.append({"start": a, "end": b, "label": v["label"], "mark": v["t"], "desc": v.get("desc", ""),
+                      "score": v["score"] * 0.8 + loud_bonus(a, b), "events": []})
+    if not cands:
         # ไม่ได้ยินเสียงประกาศ → ใช้ช่วงที่เสียงดังที่สุด (ไฟต์)
         order = np.argsort(-loud)
         taken: list[float] = []
@@ -143,7 +227,7 @@ def pick_clips(events: list[dict], loud, hop: float, duration: float,
     return [{"start": round(c["start"], 2), "end": round(c["end"], 2), "label": c["label"],
              "score": round(float(c["score"]), 2),
              "mark": round(c["mark"], 2), "events": [e["label"] for e in c["events"]],
-             "narration": ""} for c in chosen]
+             "desc": c.get("desc", ""), "narration": ""} for c in chosen]
 
 
 GAME_PROMPT = """คุณเป็นแคสเตอร์เกม Mobile Legends: Bang Bang (MLBB) ชาวไทย พากย์มันส์ ใช้ศัพท์เกมเมอร์ไทยเป็นธรรมชาติ
@@ -176,6 +260,11 @@ TEMPLATES = {
     "FIRST BLOOD": "เฟิร์สบลัด! เปิดเกมก่อนเลย",
     "TURTLE": "เก็บเต่าได้ ทีมได้ทองเพิ่ม",
     "KILL": "เก็บคิลสวยๆ อีกหนึ่ง",
+    "OUTPLAY": "เอาท์เพลย์! อ่านเกมขาด เล่นเหนือกว่าชัดๆ",
+    "NICE PLAY": "จังหวะนี้สวยมาก ดูกันชัดๆ อีกที",
+    "ESCAPE": "เลือดติ่งแต่รอด! หนีออกมาได้แบบหวาดเสียว",
+    "TEAMFIGHT": "ไฟต์ใหญ่กลางแมพ ปะทะกันเดือดๆ",
+    "CLUTCH": "ช็อตชี้เป็นชี้ตาย! พลิกเกมได้ในจังหวะเดียว",
     "": "จังหวะไฟต์เดือด ดูกันชัดๆ",
 }
 
@@ -187,7 +276,8 @@ def make_game_plan(clips: list[dict], provider: str, note: str) -> dict:
     if provider != "none":
         shots = "\n".join(
             f"{i + 1}. เวลา {P.fmt_time(c['start'])}-{P.fmt_time(c['end'])} "
-            f"เหตุการณ์: {', '.join(c['events']) or 'ไฟต์ (เสียงดัง)'} "
+            f"เหตุการณ์: {', '.join(c['events']) or c.get('label') or 'ไฟต์ (เสียงดัง)'} "
+            f"{('— ภาพ: ' + c['desc'] + ' ') if c.get('desc') else ''}"
             f"(บทพากย์ไม่เกิน {max(20, int((c['end'] - c['start']) * 10))} ตัวอักษร)"
             for i, c in enumerate(clips))
         prompt = GAME_PROMPT.format(
@@ -205,7 +295,7 @@ def make_game_plan(clips: list[dict], provider: str, note: str) -> dict:
             print("AI เขียนบทไม่สำเร็จ ใช้บทสำเร็จรูปแทน:", e)
     for c in clips:
         c["narration"] = TEMPLATES.get(c["label"], TEMPLATES[""])
-    best = max(found, key=lambda l: next(s for _, lb, s in EVENTS if lb == l), default="")
+    best = max(found, key=lambda l: LABEL_SCORE.get(l, 0), default="")
     return {"title": f"{best.title()} ในเกม MLBB 🔥" if best else "ไฮไลต์เกม MLBB 🔥",
             "summary": f"ไฮไลต์เกมนี้: {', '.join(dict.fromkeys(found)) or 'ไฟต์เดือดๆ'}\n#MLBB #MobileLegends #ไฮไลต์",
             "clips": clips}

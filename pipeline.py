@@ -325,11 +325,12 @@ def _parse_json(text: str) -> dict:
 GEMINI_MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.5-flash-lite"] if m]
 
 
-def _ask_gemini(prompt: str) -> str:
-    """Google Gemini (มีโควตาฟรี) — ขอคีย์ได้ที่ aistudio.google.com"""
+def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
+    """Google Gemini (มีโควตาฟรี) — ขอคีย์ได้ที่ aistudio.google.com
+    extra_parts: ส่วนเพิ่ม เช่น รูปภาพ {"inline_data": {"mime_type": "image/jpeg", "data": base64}}"""
     import urllib.error
     key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+    body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}, *(extra_parts or [])]}],
                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}).encode()
     last = None
     for model in GEMINI_MODELS:
@@ -919,6 +920,23 @@ def _layout_filter(layout: str, src: str = "[0:v]") -> tuple[str, int]:
 
 SLOW = 0.5          # ความเร็วช่วงสโลว์ (0.5 = ช้าลงครึ่งหนึ่ง)
 SLOW_BEFORE, SLOW_AFTER = 1.4, 0.5   # ช่วงสโลว์รอบจังหวะเก็บคิล
+FREEZE = 0.35       # หยุดภาพค้างตรงจังหวะเก็บคิล (วินาที)
+
+
+def make_sfx(workdir: Path) -> tuple[Path, Path]:
+    """สร้างเสียงเอฟเฟกต์ด้วย ffmpeg (ไม่ต้องโหลดไฟล์): วูบ (ก่อนคิล) + ตูม (ตอนคิล)"""
+    whoosh, boom = workdir / "sfx_whoosh.wav", workdir / "sfx_boom.wav"
+    if not whoosh.exists():
+        run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i", "anoisesrc=d=0.55:c=pink:a=0.9:r=44100",
+             "-af", "highpass=f=500,lowpass=f=5000,afade=t=in:st=0:d=0.42:curve=exp,"
+                    "afade=t=out:st=0.43:d=0.12,volume=1.6", "-ac", "2", str(whoosh)])
+    if not boom.exists():
+        run(["ffmpeg", "-y", "-hide_banner",
+             "-f", "lavfi", "-i", "aevalsrc='0.95*sin(2*PI*(95*t-45*t*t))*exp(-4.5*t)':d=0.9:s=44100",
+             "-f", "lavfi", "-i", "anoisesrc=d=0.18:c=brown:a=0.8:r=44100",
+             "-filter_complex", "[1]lowpass=f=900,afade=t=out:st=0:d=0.18[n];"
+                                "[0][n]amix=inputs=2:duration=longest,volume=2.2", "-ac", "2", str(boom)])
+    return whoosh, boom
 
 
 def render_clip(src: Path, info: dict, clip: dict, narr: Path | None, out: Path,
@@ -960,7 +978,9 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
         sb = min(src_len - 0.15, mark_rel + SLOW_AFTER)
         if sb - sa >= 0.5:
             slow = (sa, sb)
-    extra_slow = (slow[1] - slow[0]) * (1 / SLOW - 1) if slow else 0.0
+    # หยุดภาพค้างตรงจังหวะคิล (อยู่ในช่วงสโลว์เสมอ)
+    freeze = FREEZE if slow and fx and slow[0] < mark_rel < slow[1] else 0.0
+    extra_slow = (slow[1] - slow[0]) * (1 / SLOW - 1) + freeze if slow else 0.0
     eff = src_len + extra_slow
     need = narr_dur + LEAD_IN + 0.4 if narr else 0.0
     if need > eff:  # บทพากย์ยาว → ใช้ภาพต้นฉบับต่ออีก ถ้าไม่มีก็หยุดภาพค้าง
@@ -973,16 +993,42 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     def out_t(t_rel: float) -> float:  # เวลาในต้นฉบับ → เวลาในคลิปที่สโลว์แล้ว
         if not slow or t_rel <= slow[0]:
             return t_rel
-        if t_rel <= slow[1]:
+        if freeze and t_rel <= mark_rel:
             return slow[0] + (t_rel - slow[0]) / SLOW
+        if t_rel <= slow[1]:
+            return slow[0] + (t_rel - slow[0]) / SLOW + freeze
         return t_rel + extra_slow
     mark_out = out_t(mark_rel) if mark_rel is not None else None
+    if freeze:  # จังหวะคิล = ตอนเริ่มภาพค้าง
+        mark_out = slow[0] + (mark_rel - slow[0]) / SLOW
 
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
     has_a = info["has_audio"] and orig_volume > 0
     parts = []
     # ── สโลว์โมชัน: แบ่ง 3 ท่อน ก่อน/ระหว่าง/หลัง แล้วต่อกัน (ภาพและเสียงตรงกัน) ──
-    if slow:
+    if slow and freeze:
+        # ก่อน / สโลว์ถึงจังหวะคิล / ภาพค้าง / สโลว์ต่อ / หลัง
+        sa, sb, m = slow[0], slow[1], mark_rel
+        nf = max(1, round(freeze * 30))
+        parts.append("[0:v]setpts=PTS-STARTPTS,fps=30,split=5[v1][v2][vf][v4][v3]")
+        parts.append(f"[v1]trim=0:{sa:.3f},setpts=PTS-STARTPTS[p1]")
+        parts.append(f"[v2]trim={sa:.3f}:{m:.3f},setpts=(PTS-STARTPTS)/{SLOW}[p2]")
+        parts.append(f"[vf]trim={m:.3f}:{m + 0.034:.3f},setpts=PTS-STARTPTS,loop=loop={nf}:size=1:start=0,"
+                     f"setpts=N/30/TB,trim=end_frame={nf}[pf]")
+        parts.append(f"[v4]trim={m:.3f}:{sb:.3f},setpts=(PTS-STARTPTS)/{SLOW}[p4]")
+        parts.append(f"[v3]trim={sb:.3f},setpts=PTS-STARTPTS[p3]")
+        if has_a:
+            parts.append(f"[0:a]asetpts=PTS-STARTPTS,{norm},asplit=4[x1][x2][x4][x3]")
+            parts.append(f"[x1]atrim=0:{sa:.3f},asetpts=PTS-STARTPTS[q1]")
+            parts.append(f"[x2]atrim={sa:.3f}:{m:.3f},asetpts=PTS-STARTPTS,atempo={SLOW}[q2]")
+            parts.append(f"aevalsrc=0|0:d={nf / 30:.4f}:s=44100,{norm}[qf]")
+            parts.append(f"[x4]atrim={m:.3f}:{sb:.3f},asetpts=PTS-STARTPTS,atempo={SLOW}[q4]")
+            parts.append(f"[x3]atrim={sb:.3f},asetpts=PTS-STARTPTS[q3]")
+            parts.append("[p1][q1][p2][q2][pf][qf][p4][q4][p3][q3]concat=n=5:v=1:a=1[vs][as]")
+        else:
+            parts.append("[p1][p2][pf][p4][p3]concat=n=5:v=1:a=0[vs]")
+        vsrc, asrc = "[vs]", "[as]"
+    elif slow:
         sa, sb = slow
         parts.append("[0:v]setpts=PTS-STARTPTS,split=3[v1][v2][v3]")
         parts.append(f"[v1]trim=0:{sa:.3f},setpts=PTS-STARTPTS[p1]")
@@ -1005,7 +1051,7 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     cur = "[base]"
     # ── ซูมเข้า + สั่นจอ ช่วงสโลว์ ──
     if slow:
-        a0, b0 = slow[0], slow[0] + (slow[1] - slow[0]) / SLOW
+        a0, b0 = slow[0], slow[0] + (slow[1] - slow[0]) / SLOW + freeze
         parts.append(f"{cur}split[b1][b2]")
         parts.append("[b2]scale=iw*1.12:-2,"
                      "crop=iw/1.12:ih/1.12:"
@@ -1017,8 +1063,9 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     vf = []
     if pad > 0.01:
         vf.append(f"tpad=stop_mode=clone:stop_duration={pad:.3f}")
-    if fx and mark_out is not None:  # แฟลชขาวตอนเก็บคิล
+    if fx and mark_out is not None:  # แฟลชขาว + ภาพแยกสี (glitch) ตอนเก็บคิล
         vf.append(f"eq=brightness=0.35:enable='between(t,{mark_out:.2f},{mark_out + 0.1:.2f})'")
+        vf.append(f"rgbashift=rh=-16:bh=16:enable='between(t,{mark_out:.2f},{mark_out + max(0.25, freeze):.2f})'")
     if fades:
         vf += [f"fade=t=in:st=0:d={FADE}", f"fade=t=out:st={length - FADE:.3f}:d={FADE}"]
 
@@ -1055,6 +1102,13 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
         inputs += ["-i", str(narr)]; idx_narr = n_in; n_in += 1
     if logo:
         inputs += ["-loop", "1", "-i", str(logo)]; idx_logo = n_in; n_in += 1
+    idx_sfx = None
+    if fx and mark_out is not None and extras:
+        try:
+            whoosh, boom = make_sfx(workdir)
+            inputs += ["-i", str(whoosh), "-i", str(boom)]; idx_sfx = n_in; n_in += 2
+        except Exception as e:
+            print("ทำเสียงเอฟเฟกต์ไม่ได้:", e)
 
     if logo:
         parts.append(f"{cur}{','.join(vf) or 'null'}[pre]")
@@ -1086,8 +1140,18 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     else:
         inputs += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]; idx_null = n_in; n_in += 1
         parts.append(f"[{idx_null}:a]{norm}[mx]")
+    if idx_sfx is not None:  # วูบก่อนคิล + ตูมตอนคิล
+        dw, db = int(max(0.0, mark_out - 0.45) * 1000), int(mark_out * 1000)
+        parts.append(f"[{idx_sfx}:a]{norm},volume=1.0,adelay={dw}|{dw}[sw]")
+        parts.append(f"[{idx_sfx + 1}:a]{norm},volume=0.8,adelay={db}|{db}[sb]")
+        parts.append("[sw][sb]amix=inputs=2:duration=longest:dropout_transition=0,volume=2,apad[sfx]")
+        parts.append("[mx]apad[mx0]")
+        parts.append("[mx0][sfx]amix=inputs=2:duration=shortest:dropout_transition=0,volume=2[mx2]")
+        mx = "[mx2]"
+    else:
+        mx = "[mx]"
     af = 0.05 if not fades else FADE  # ไม่เฟดภาพ แต่เฟดเสียงสั้นๆ กันเสียงคลิก
-    parts.append(f"[mx]apad,atrim=0:{length:.3f},afade=t=in:st=0:d={af},"
+    parts.append(f"{mx}apad,atrim=0:{length:.3f},afade=t=in:st=0:d={af},"
                  f"afade=t=out:st={length - af:.3f}:d={af}[a]")
 
     cmd = ["ffmpeg", "-y", "-hide_banner", *inputs,

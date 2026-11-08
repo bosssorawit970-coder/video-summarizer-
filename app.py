@@ -200,9 +200,22 @@ def analyze_game(jid: str, src: Path, info: dict) -> dict:
         jid, step="transcribe", progress=5 + pct * 0.75, message=msg))
     loud, hop = G.loudness(wav)
     wav.unlink(missing_ok=True)
-    found = ", ".join(dict.fromkeys(e["label"] for e in events)) or "ไม่พบเสียงประกาศ ใช้ช่วงไฟต์ที่เสียงดังแทน"
-    save(jid, events=events, step="plan", progress=82, message=f"พบ: {found} — กำลังเขียนบทพากย์")
-    clips = G.pick_clips(events, loud, hop, info["duration"], j["opts"]["target_seconds"])
+    seen = []
+    if j["opts"].get("vision", True) and provider_available("gemini"):
+        try:
+            seen = G.vision_moments(src, loud, hop, info["duration"], events, d / "vision",
+                                    lambda m: save(jid, step="plan", progress=81, message=m))
+        except Exception as e:
+            print("AI ดูภาพเกมไม่ได้:", e)
+        shutil.rmtree(d / "vision", ignore_errors=True)
+    found = ", ".join(dict.fromkeys(e["label"] for e in events)) or "ไม่พบเสียงประกาศ"
+    extra = [v for v in seen if v["score"] >= 6]
+    if extra:
+        found += f" + AI เห็นช็อตเด็ดจากภาพอีก {len(extra)} ช็อต"
+    elif not events:
+        found += " ใช้ช่วงไฟต์ที่เสียงดังแทน"
+    save(jid, events=events, vision=seen, step="plan", progress=82, message=f"พบ: {found} — กำลังเขียนบทพากย์")
+    clips = G.pick_clips(events, loud, hop, info["duration"], j["opts"]["target_seconds"], seen)
     return G.make_game_plan(clips, j["opts"]["provider"], j["opts"].get("note", ""))
 
 
@@ -228,7 +241,7 @@ def _brand(r: dict) -> dict:
 
 
 def _best_clip(clips: list[dict]) -> dict:
-    rank = {lb: sc for _, lb, sc in G.EVENTS}
+    rank = G.LABEL_SCORE
     return max(clips, key=lambda c: (float(c.get("score") or 0), rank.get(c.get("label") or "", 0)))
 
 
@@ -738,6 +751,7 @@ async def render_job(req: Request):
             clips.append({"start": s, "end": e, "narration": str(c.get("narration", "")),
                           "label": str(c.get("label") or "")[:20],
                           "mark": _num(c.get("mark"), s), "score": _num(c.get("score"), 0),
+                          "desc": str(c.get("desc") or "")[:100],
                           **({"src": src} if src else {})})
     if not clips:
         return JSONResponse({"error": "ต้องมีอย่างน้อย 1 ช่วงที่ยาวกว่า 0.5 วินาที"},

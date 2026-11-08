@@ -38,6 +38,7 @@ label.f{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}
 .seg label.dis{opacity:.5}
 .modal{position:fixed;inset:0;background:#0008;z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:12px;overflow:auto}
 .modal>.card{max-width:560px;width:100%;margin:auto}
+.evtsel{font-size:12px;font-weight:700;padding:2px 4px;width:auto;max-width:130px;background:#fff4d6;color:#7a5200;border-radius:6px}
 .tag{font-size:11px;padding:1px 7px;border-radius:99px;background:var(--line);color:var(--muted)}
 .tag.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
 select,input[type=text],input[type=number],textarea{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
@@ -297,6 +298,8 @@ video{width:100%;border-radius:10px;background:#000;display:block}
         <video id="srcVid" controls preload="metadata"></video>
         <div class="hint hidden" id="prevNote" style="margin-top:6px"></div>
         <p class="hint">กด "▶ ดู" เพื่อเล่นเฉพาะช่วงนั้น · เลื่อนวิดีโอไปจุดที่ต้องการแล้วกด "⏱" เพื่อตั้งเวลาเริ่ม/จบ หรือ "เพิ่มช่วงตรงนี้"</p>
+        <button id="starBtn" class="primary hidden" style="width:100%;margin:8px 0;font-size:17px">⭐ ช็อตเด็ดตรงนี้!</button>
+        <p class="hint hidden" id="starHint">เล่นวิดีโอ แล้วแตะ ⭐ ตอนที่เก็บคิล/เล่นสวย — ระบบตัดช็อตก่อนหน้า 6 วิ ใส่สโลว์ ภาพค้าง และเสียงตูมตรงจังหวะนั้นให้</p>
         <div class="row"><button id="addClip">+ เพิ่มช่วงตรงนี้</button><span class="spacer"></span>
           <span class="hint">รวม ≈ <b class="stat" id="totalLen">0</b> วิ</span></div>
       </div>
@@ -762,6 +765,7 @@ function enterReview() {
   const multi = !!job.multi || isStory();
   $("#s-review .card.sticky").classList.toggle("hidden", multi);
   $("#addClip").classList.toggle("hidden", multi);
+  $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
@@ -823,11 +827,12 @@ function drawClips() {
   $("#clips").innerHTML = clips.map((c, i) => {
     const len = c.end - c.start, need = c.narration.replace(/\s/g, "").length / 11;
     return `<div class="clip" data-i="${i}">
-      <div class="head"><span class="num">${String(i+1).padStart(2,"0")}</span>${c.label ? `<span class="evt">${esc(c.label)}</span>` : ""}
+      <div class="head"><span class="num">${String(i+1).padStart(2,"0")}</span>${isGame() ? labelSel(c.label) : c.label ? `<span class="evt">${esc(c.label)}</span>` : ""}
         <input class="t" data-k="start" inputmode="decimal" value="${fmt(c.start)}"> → <input class="t" data-k="end" inputmode="decimal" value="${fmt(c.end)}">
         <span class="len">${len.toFixed(1)}s</span>${job?.multi ? "" : `<button data-a="play">▶ ดู</button>`}<span class="spacer"></span>
         <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del" title="ลบ">ลบ</button></div>
-      ${job?.multi ? "" : `<div class="row" style="margin-bottom:6px"><button class="tset" data-a="setStart">⏱ เริ่ม = ตำแหน่งวิดีโอ</button><button class="tset" data-a="setEnd">⏱ จบ = ตำแหน่งวิดีโอ</button></div>`}
+      ${job?.multi ? "" : `<div class="row" style="margin-bottom:6px"><button class="tset" data-a="setStart">⏱ เริ่ม = ตำแหน่งวิดีโอ</button><button class="tset" data-a="setEnd">⏱ จบ = ตำแหน่งวิดีโอ</button>${isGame() ? `<button class="tset" data-a="setMark">⭐ จังหวะเด็ด = ตำแหน่งวิดีโอ${c.mark != null ? ` (${fmt(c.mark)})` : ""}</button>` : ""}</div>`}
+      ${c.desc ? `<p class="hint">🤖 AI เห็นในภาพ: ${esc(c.desc)}</p>` : ""}
       <textarea data-k="narration" rows="3" placeholder="บทพากย์ช่วงนี้ (เว้นว่าง = ใช้เสียงต้นฉบับ)">${esc(c.narration)}</textarea>
       ${need > len + 0.5 ? `<div class="warn">บทยาวกว่าช่วงคลิป (~${need.toFixed(0)} วิ) — ภาพจะยืดต่อให้อัตโนมัติ หรือตัดบทให้สั้นลง</div>` : ""}
     </div>`;
@@ -838,6 +843,9 @@ function drawClips() {
 $("#clips").addEventListener("change", e => {
   if (isStory()) { const el = e.target, i = +el.closest(".scene")?.dataset.i; if (!isNaN(i) && el.dataset.k) clips[i][el.dataset.k] = el.value; return; }
   const el = e.target, i = +el.closest(".clip")?.dataset.i, k = el.dataset.k; if (isNaN(i) || !k) return;
+  if (k === "label") { const c = clips[i]; c.label = el.value;
+    if (!c.narration.trim() || Object.values(GAME_LINES).flat().includes(c.narration)) c.narration = gameLine(c.label);
+    return drawClips(); }
   clips[i][k] = k === "narration" ? el.value : parseT(el.value);
   if (k !== "narration") { const c = clips[i]; if (c.end < c.start) [c.start, c.end] = [c.end, c.start]; if (!job?.multi) clips.sort((a, b) => a.start - b.start); }
   drawClips();
@@ -893,6 +901,11 @@ $("#clips").addEventListener("click", async e => {
     if (c.end < c.start) [c.start, c.end] = [c.end, c.start];
     clips.sort((x, y) => x.start - y.start); drawClips();
   }
+  if (a === "setMark") {
+    const t = $("#srcVid").currentTime || 0, c = clips[i];
+    c.mark = t; if (t < c.start) c.start = Math.max(0, t - 5); if (t > c.end) c.end = Math.min(job.duration || t + 2, t + 2);
+    clips.sort((x, y) => x.start - y.start); drawClips();
+  }
   if (a === "up" && i > 0) { [clips[i-1], clips[i]] = [clips[i], clips[i-1]]; drawClips(); }
   if (a === "play") {
     const v = $("#srcVid"); v.currentTime = clips[i].start; stopAt = clips[i].end; v.play();
@@ -901,6 +914,37 @@ $("#clips").addEventListener("click", async e => {
   }
 });
 $("#srcVid").ontimeupdate = e => { if (stopAt != null && e.target.currentTime >= stopAt) { e.target.pause(); stopAt = null; document.querySelectorAll(".clip.playing").forEach(d => d.classList.remove("playing")); } };
+// ── ⭐ ช็อตเด็ด (โหมดเกม) ──
+const GAME_LINES = {
+  "": ["จังหวะนี้ต้องดูช้าๆ สวยเกิน!", "ช็อตนี้แหละ ที่ทำให้เกมพลิก!", "ดูกันชัดๆ อีกรอบ จังหวะเด็ดมาก!"],
+  "NICE PLAY": ["จังหวะนี้สวยมาก ดูกันชัดๆ อีกที"], "OUTPLAY": ["เอาท์เพลย์! อ่านเกมขาด เล่นเหนือกว่าชัดๆ"],
+  "ESCAPE": ["เลือดติ่งแต่รอด! หนีออกมาได้แบบหวาดเสียว"], "TEAMFIGHT": ["ไฟต์ใหญ่กลางแมพ ปะทะกันเดือดๆ"],
+  "CLUTCH": ["ช็อตชี้เป็นชี้ตาย! พลิกเกมได้ในจังหวะเดียว"], "SAVAGE": ["ซาเวจจจ! เก็บครบห้าศพ โหดเกินต้าน!"],
+  "MANIAC": ["มาเนียค! สี่ศพรวด คุมเกมอยู่หมัด!"], "WIPED OUT": ["กวาดเรียบทั้งทีม ไม่เหลือใครยืน!"],
+  "TRIPLE KILL": ["ทริปเปิ้ลคิล! สามศพติด สวยมาก!"], "DOUBLE KILL": ["ดับเบิ้ลคิล! เก็บสองศพในจังหวะเดียว"],
+  "KILL": ["เก็บคิลสวยๆ อีกหนึ่ง"], "KILLING SPREE": ["ฟอร์มร้อนแรง ไล่เก็บไม่หยุด!"],
+  "LORD": ["ปิดลอร์ดได้! ได้เปรียบเต็มๆ"], "TURTLE": ["เก็บเต่าได้ ทีมได้ทองเพิ่ม"],
+  "SHUTDOWN": ["ชัตดาวน์! หยุดตัวตึงฝั่งตรงข้ามได้"], "FIRST BLOOD": ["เฟิร์สบลัด! เปิดเกมก่อนเลย"],
+  "VICTORY": ["และนี่คือชัยชนะ! จบเกมสวยๆ"],
+};
+const gameLine = lb => { const l = GAME_LINES[lb] || GAME_LINES[""]; return l[Math.floor(Math.random() * l.length)]; };
+const isGame = () => job?.opts?.mode === "game";
+function labelSel(v) {
+  const opts = Object.keys(GAME_LINES);
+  return `<select class="evtsel" data-k="label" title="ป้ายบนจอ">${opts.map(o => `<option value="${o}" ${o === (v || "") ? "selected" : ""}>${o || "ไม่มีป้าย"}</option>`).join("")}${v && !opts.includes(v) ? `<option selected>${esc(v)}</option>` : ""}</select>`;
+}
+$("#starBtn").onclick = () => {
+  const v = $("#srcVid"), t = v.currentTime || 0, d = job.duration || t + 3;
+  const inside = clips.find(c => t >= c.start - 0.5 && t <= c.end + 0.5);
+  if (inside) {  // อยู่ในช็อตเดิม → ย้ายจังหวะเด็ดมาตรงนี้
+    inside.mark = t; inside.start = Math.min(inside.start, Math.max(0, t - 6)); inside.end = Math.max(inside.end, Math.min(d, t + 2));
+  } else {
+    clips.push({start: Math.max(0, t - 6), end: Math.min(d, t + 2), mark: t, label: "NICE PLAY", narration: gameLine("NICE PLAY"), score: 9});
+  }
+  clips.sort((a, b) => a.start - b.start); drawClips();
+  const b = $("#starBtn"); b.textContent = `✓ เพิ่มแล้ว (${fmt(t)}) — แตะอีกได้`; setTimeout(() => b.textContent = "⭐ ช็อตเด็ดตรงนี้!", 1500);
+};
+
 $("#addClip").onclick = () => {
   const t = $("#srcVid").currentTime || 0, d = job.duration || t + 8;
   clips.push({start: t, end: Math.min(d, t + 8), narration: ""}); clips.sort((a, b) => a.start - b.start); drawClips();
