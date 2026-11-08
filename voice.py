@@ -58,8 +58,9 @@ def _too_long(seconds: float, text: str) -> bool:
     chars = len("".join(text.split()))
     return seconds > chars / 9 + 2.5
 
-GEMINI_TTS_MODELS = [m for m in [os.environ.get("GEMINI_TTS_MODEL"), "gemini-3.8-flash-tts",
-                                 "gemini-2.5-flash-preview-tts"] if m]
+def _tts_models() -> list[str]:
+    import pipeline as P
+    return P.gemini_models("tts") or ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"]
 _gemini_off: str | None = None   # โควตาเต็ม/ใช้ไม่ได้ → ไม่ต้องลองซ้ำทุกฉากในรอบนี้
 
 
@@ -121,7 +122,7 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
                              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}},
     }).encode()
     last = "เรียกเสียง Gemini ไม่สำเร็จ"
-    for model in GEMINI_TTS_MODELS:
+    for model in _tts_models():
         tries = 0
         while True:
             req = urllib.request.Request(

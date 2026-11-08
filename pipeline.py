@@ -322,7 +322,71 @@ def _parse_json(text: str) -> dict:
     return json.loads(text[a:b + 1])
 
 
-GEMINI_MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.5-flash-lite"] if m]
+# รุ่นสำรอง (ถ้าถามรายชื่อรุ่นจาก Google ไม่ได้) — รุ่น 2.5 ถูกปิดไปแล้ว (16 ต.ค. 2026)
+GEMINI_FALLBACK = ["gemini-3-flash", "gemini-3-flash-preview", "gemini-3.1-flash", "gemini-3.1-flash-lite",
+                   "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+_gemini_list: list[dict] | None = None
+_gemini_dead: set[str] = set()  # รุ่นที่ตอบ 404 แล้ว ไม่ต้องลองซ้ำ
+
+
+def gemini_model_list() -> list[dict]:
+    """รายชื่อรุ่น Gemini ที่คีย์นี้ใช้ได้จริง (ถาม Google ครั้งเดียวแล้วจำไว้)"""
+    global _gemini_list
+    if _gemini_list is not None:
+        return _gemini_list
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    out, token = [], ""
+    try:
+        for _ in range(5):
+            url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" + \
+                  (f"&pageToken={token}" if token else "")
+            req = urllib.request.Request(url, headers={"x-goog-api-key": key})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = json.loads(r.read())
+            out += data.get("models") or []
+            token = data.get("nextPageToken") or ""
+            if not token:
+                break
+    except Exception as e:
+        print("ถามรายชื่อรุ่น Gemini ไม่ได้ (ใช้รายชื่อสำรอง):", e)
+        return []  # ไม่จำ → ครั้งหน้าลองถามใหม่
+    _gemini_list = out
+    return out
+
+
+def _gem_version(name: str) -> float:
+    m = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
+    return float(m.group(1)) if m else 0.0
+
+
+def gemini_models(kind: str = "text") -> list[str]:
+    """เรียงรุ่นที่ควรลอง: kind="text" = flash รุ่นใหม่สุด (เสถียรก่อน preview) แล้วค่อย flash-lite · "tts" = รุ่นพากย์เสียง"""
+    names = []
+    for m in gemini_model_list():
+        name = str(m.get("name", "")).split("/")[-1]
+        if "generateContent" not in (m.get("supportedGenerationMethods") or []):
+            continue
+        if kind == "tts":
+            if "tts" in name:
+                names.append(name)
+        elif "flash" in name and not re.search(r"tts|image|live|audio|embed|thinking|exp|robotics|computer", name):
+            names.append(name)
+    if kind == "tts":
+        names.sort(key=lambda n: (-_gem_version(n), "preview" in n, n))
+        env = os.environ.get("GEMINI_TTS_MODEL")
+        fallback = ["gemini-3.8-flash-tts", "gemini-3.1-flash-tts", "gemini-3-flash-tts", "gemini-2.5-flash-preview-tts"]
+    else:
+        names.sort(key=lambda n: ("lite" in n, -_gem_version(n), "preview" in n, bool(re.search(r"-\d{2,3}$", n)), n))
+        env = os.environ.get("GEMINI_MODEL")
+        fallback = GEMINI_FALLBACK
+    order = ([env] if env else []) + names[:5] + ([] if names else fallback)
+    return [m for m in dict.fromkeys(order) if m not in _gemini_dead]
+
+
+def __getattr__(name):  # โค้ดเก่าที่อ้าง P.GEMINI_MODELS
+    if name == "GEMINI_MODELS":
+        return gemini_models()
+    raise AttributeError(name)
 
 
 def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
@@ -332,8 +396,8 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
     key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}, *(extra_parts or [])]}],
                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}).encode()
-    last = None
-    for model in GEMINI_MODELS:
+    last, tried = None, []
+    for model in gemini_models() or GEMINI_FALLBACK:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
                                                               "x-goog-api-key": key})
@@ -343,10 +407,13 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
         except urllib.error.HTTPError as e:
             msg = e.read().decode("utf-8", "replace")[:300]
             if e.code == 404:  # รุ่นนี้ไม่มี/เลิกใช้ → ลองรุ่นถัดไป
-                last = f"ไม่พบรุ่น {model}"
+                _gemini_dead.add(model)
+                tried.append(f"{model}: ไม่มีรุ่นนี้แล้ว")
+                last = "ไม่พบรุ่น Gemini ที่ใช้ได้ (" + "; ".join(tried[-3:]) + ")"
                 continue
             if e.code == 429:
-                last = "โควตา Gemini ฟรีเต็มแล้ว ลองใหม่ภายหลัง (หรือใช้ Ollama แทน)"
+                tried.append(f"{model}: โควตาเต็ม")
+                last = "โควตา Gemini ฟรีเต็มแล้ว ลองใหม่ภายหลัง (" + ", ".join(tried[-3:]) + ")"
                 continue  # รุ่นเล็กกว่าอาจยังมีโควตา
             if e.code in (400, 401, 403) and ("API key" in msg or "API_KEY" in msg or e.code != 400):
                 raise RuntimeError("คีย์ Gemini ไม่ถูกต้อง หรือยังใช้ในพื้นที่นี้ไม่ได้") from e
@@ -356,6 +423,7 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
         if text:
             return text
         last = "Gemini ไม่ตอบ (อาจถูกระบบกรองเนื้อหา)"
+        tried.append(f"{model}: ไม่ตอบ")
     raise RuntimeError(last or "เรียก Gemini ไม่สำเร็จ")
 
 
