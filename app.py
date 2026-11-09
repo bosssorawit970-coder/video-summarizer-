@@ -289,8 +289,15 @@ def analyze_game(jid: str, src: Path, info: dict) -> dict:
         found += f" + AI เห็นช็อตเด็ดจากภาพอีก {len(extra)} ช็อต"
     elif not events:
         found += " ใช้ช่วงไฟต์ที่เสียงดังแทน"
-    save(jid, events=events, vision=seen, step="plan", progress=82, message=f"พบ: {found} — กำลังเขียนบทพากย์")
+    narrate = j["opts"].get("narrate", True)
+    save(jid, events=events, vision=seen, step="plan", progress=82,
+         message=f"พบ: {found} — " + ("กำลังเขียนบทพากย์" if narrate else "ตัดไฮไลต์ (ไม่พากย์)"))
     clips = G.pick_clips(events, loud, hop, info["duration"], j["opts"]["target_seconds"], seen)
+    if not narrate:  # ไม่พากย์: ใช้ชื่อคลิป/สรุปแบบพื้นฐาน ไม่เรียก AI เขียนบท
+        plan = G.make_game_plan(clips, "none", j["opts"].get("note", ""))
+        for c in plan["clips"]:
+            c["narration"] = ""
+        return plan
     return G.make_game_plan(clips, j["opts"]["provider"], j["opts"].get("note", ""))
 
 
@@ -550,6 +557,10 @@ def job_opts(form) -> dict:
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
     opts["render"] = _render_opts(form, opts["mode"])
+    if opts["mode"] == "game":
+        opts["narrate"] = _bool(form.get("narrate"), True)
+        if not opts["narrate"]:  # ไม่พากย์: เสียงเกมเต็ม + เอฟเฟกต์ ไม่มีซับบทพากย์
+            opts["render"].update(orig_volume=1.0, subtitles=False, fx=True)
     if opts.get("product_info"):
         if not form.get("tone"):
             opts["render"]["tone"] = "bright"  # ป้ายยา = เสียงสดใส
@@ -733,7 +744,10 @@ def check_batch(bid: str) -> None:
     save(cid, status="analyzing", step="plan", progress=50,
          message=f"รวมช็อตเด็ดจาก {len(ok)} เกม — กำลังเขียนบทพากย์")
     try:
-        plan = G.make_game_plan(chosen, opts["provider"], note)
+        plan = G.make_game_plan(chosen, opts["provider"] if opts.get("narrate", True) else "none", note)
+        if not opts.get("narrate", True):
+            for c in plan["clips"]:
+                c["narration"] = ""
         if plan["title"].startswith(tuple(lb.title() for _, lb, _ in G.EVENTS)) or plan["title"].startswith("ไฮไลต์"):
             plan["title"] = f"รวมช็อตเด็ด {len(ok)} เกม 🔥"
     except Exception as e:

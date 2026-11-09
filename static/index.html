@@ -269,6 +269,11 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <div class="gameOnly hidden">
         <label class="f">ฮีโร่ที่ใช้ / รายละเอียดเพิ่ม (ไม่บังคับ)</label>
         <input type="text" id="note" maxlength="200" placeholder="เช่น เล่น Ling ป่า, แรงค์ Mythic">
+        <label class="f">เสียงพากย์</label>
+        <div class="seg">
+          <label><input type="radio" name="narrate" value="1" checked> 🎙️ พากย์แบบแคสเตอร์</label>
+          <label><input type="radio" name="narrate" value="0"> 🎮 ไม่พากย์ — ตัดไฮไลต์ + เอฟเฟกต์ล้วน (เสียงเกมเต็ม)</label>
+        </div>
       </div>
       <div>
         <label class="f talkOnly">ความแม่นยำการถอดเสียง <span class="tag" id="gpuTag">ไม่มีการ์ดจอ</span></label>
@@ -763,6 +768,7 @@ function commonFields(fd) {
   fd.append("mode", mode());
   fd.append("layout", $("#layout0").value);
   fd.append("note", $("#note").value);
+  fd.append("narrate", document.querySelector("input[name=narrate]:checked")?.value ?? "1");
   fd.append("fx", mode() === "game" && $("#fx0").checked ? "1" : "");
   fd.append("music", $("#music0").value);
   fd.append("music_volume", $("#mvol0").value / 100);
