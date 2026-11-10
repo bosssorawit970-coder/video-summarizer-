@@ -4,7 +4,7 @@ python-multipart>=0.0.9
 faster-whisper>=1.1.1
 numpy
 pillow
-edge-tts>=6.1
+edge-tts>=7.2
 anthropic>=0.40
 yt-dlp[default]
 pythainlp

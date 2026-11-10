@@ -714,14 +714,52 @@ def _note(msg: str) -> None:
         print("เสียงพากย์:", msg)
 
 
+def _speakable(text: str) -> str:
+    """ล้างอักขระที่ Edge TTS อ่านไม่ได้ (อีโมจิ, markdown, สัญลักษณ์แปลกๆ) — ข้อความที่มีแต่พวกนี้ทำให้ได้ error 'No audio was received'"""
+    t = re.sub(r"[*_#`~|<>\[\]{}^\\]", " ", text or "")
+    t = "".join(ch for ch in t if ch.isalnum() or ch.isspace() or ch in ".,!?;:'\"-()%/+&@฿$…–—“”‘’ๆฯ"
+                or 0x0E00 <= ord(ch) <= 0x0E7F)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _silence(out_mp3: Path, sec: float) -> None:
+    run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", f"{sec:.2f}",
+         "-c:a", "libmp3lame", "-q:a", "4", str(out_mp3)])
+
+
 def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
+    """Edge TTS + กันพัง: ล้างข้อความ → ลองซ้ำ (เซิร์ฟเวอร์ Microsoft สะดุดบ่อย) → ลองเสียงไทยตัวอื่น
+    → สุดท้ายใส่ช่วงเงียบแทน ไม่ให้งานทั้งคลิปพังเพราะท่อนเดียว"""
+    import time
     import edge_tts
 
-    async def go():
-        comm = edge_tts.Communicate(text, voice, rate=f"{rate:+d}%")
+    clean = _speakable(text)
+    if not re.search(r"[0-9A-Za-z\u0E01-\u0E4E]", clean):
+        _silence(out_mp3, 1.0)
+        return
+
+    async def go(v: str, r: int):
+        comm = edge_tts.Communicate(clean, v, rate=f"{r:+d}%")
         await comm.save(str(out_mp3))
 
-    asyncio.run(go())
+    voices = [voice] + [x["id"] for x in THAI_VOICES if x["id"] != voice]
+    last = None
+    for attempt, (v, r) in enumerate([(voices[0], rate), (voices[0], rate), (voices[0], 0)] +
+                                     [(x, 0) for x in voices[1:]]):
+        try:
+            asyncio.run(go(v, r))
+            if out_mp3.exists() and out_mp3.stat().st_size > 800:
+                if v != voice:
+                    _note(f"เสียง{VOICE_NAMES.get(voice, voice)}สร้างไม่ได้บางท่อน — ใช้เสียง{VOICE_NAMES.get(v, v)}แทน")
+                return
+        except Exception as e:
+            last = e
+            print(f"Edge TTS ลองครั้งที่ {attempt + 1} ไม่ได้ ({v}): {e}")
+        time.sleep(min(6, 1.5 * (attempt + 1)))
+    # ใช้ไม่ได้เลย (เน็ตหลุด/Microsoft บล็อกชั่วคราว) → ใส่เงียบตามความยาวประมาณ ไม่ให้คลิปพัง
+    _note(f"สร้างเสียงพากย์บางท่อนไม่ได้ ({last}) — ใส่ช่วงเงียบแทน ลองกดทำใหม่อีกครั้งภายหลัง "
+          "หรือถ้าเป็นทุกท่อน ให้อัปเดต edge-tts: .venv\\Scripts\\python -m pip install -U edge-tts")
+    _silence(out_mp3, max(1.5, len(clean) / 11.5))
 
 
 def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
