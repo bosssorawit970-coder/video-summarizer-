@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
 
 FPS = 30
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")  # Windows: ไม่ต้องเตือนเรื่อง symlink
 
 EFFECTS = {
     "auto": "🪄 อัตโนมัติ (มีตัวเด่น → 3D ลอยมิติ, ไม่มี → ซูมเข้า)",
@@ -390,8 +392,27 @@ def ai_frames(img, strength: str = "normal", seed: int = 0, progress=None):
     if progress:
         progress("AI กำลังสร้างการเคลื่อนไหว (~2-5 นาที/ภาพ ขึ้นกับการ์ดจอ)")
     gen = torch.manual_seed(seed or 42)
-    out = pipe(src, decode_chunk_size=1 if small else 2, generator=gen, num_frames=25, motion_bucket_id=motion,
-               noise_aug_strength=0.02, fps=12).frames[0]
+    import time
+    steps, t0 = 25, time.time()
+
+    def on_step(_p, i, _t, kw):
+        done = i + 1
+        left = (time.time() - t0) / done * (steps - done)
+        msg = f"AI กำลังสร้างการเคลื่อนไหว ขั้นที่ {done}/{steps} (เหลืออีกราว {max(1, round(left / 60))} นาที)"
+        print(msg, flush=True)
+        if progress:
+            progress(msg)
+        return kw
+
+    kw = dict(decode_chunk_size=1 if small else 2, generator=gen, num_frames=25, motion_bucket_id=motion,
+              noise_aug_strength=0.02, fps=12, num_inference_steps=steps)
+    try:
+        res = pipe(src, callback_on_step_end=on_step, **kw)
+    except TypeError:  # diffusers รุ่นเก่าไม่มี callback
+        res = pipe(src, **kw)
+    if progress:
+        progress("AI สร้างเสร็จแล้ว กำลังถอดเป็นภาพทีละเฟรม…")
+    out = res.frames[0]
     return out, (w, h)
 
 
