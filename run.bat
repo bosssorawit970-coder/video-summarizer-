@@ -3,10 +3,12 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title สรุปคลิป
 
-rem ── 1) ต้องมี Python ──
+rem ── 1) หา Python (ใช้ 3.12 / 3.11 ก่อน เพราะไลบรารีบางตัวยังไม่รองรับเวอร์ชันใหม่ล่าสุด) ──
 set PY=
-where py >nul 2>nul && set PY=py -3
-if not defined PY ( where python >nul 2>nul && set PY=python )
+py -3.12 -c "1" >nul 2>nul && set PY=py -3.12
+if not defined PY ( py -3.11 -c "1" >nul 2>nul && set PY=py -3.11 )
+if not defined PY ( py -3 -c "1" >nul 2>nul && set PY=py -3 )
+if not defined PY ( python -c "1" >nul 2>nul && set PY=python )
 if not defined PY (
   echo [!] ยังไม่มี Python — ติดตั้งก่อน:  winget install Python.Python.3.12
   echo     หรือโหลดจาก python.org ^(ติ๊ก "Add python.exe to PATH" ตอนติดตั้ง^)
@@ -31,12 +33,24 @@ if not exist "settings.txt" (
   start /wait notepad "settings.txt"
 )
 
-rem ── 4) ติดตั้งครั้งแรก ──
-if not exist .venv (
-  echo กำลังติดตั้งครั้งแรก อาจใช้เวลา 5-15 นาที...
-  %PY% -m venv .venv
+rem ── 4) ติดตั้งไลบรารี — ทำใหม่จนกว่าจะสำเร็จครบ (มีไฟล์ .venv\installed.ok) ──
+if exist .venv\Scripts\python.exe (
+  .venv\Scripts\python -c "import starlette, uvicorn, faster_whisper, edge_tts" >nul 2>nul || del /q .venv\installed.ok >nul 2>nul
+)
+if not exist .venv\installed.ok (
+  echo กำลังติดตั้งไลบรารี อาจใช้เวลา 5-15 นาที ^(ทำครั้งเดียว^)...
+  if not exist .venv\Scripts\python.exe %PY% -m venv .venv
   .venv\Scripts\python -m pip install --upgrade pip
-  .venv\Scripts\python -m pip install -r requirements.txt || (pause & exit /b 1)
+  .venv\Scripts\python -m pip install -r requirements.txt
+  if errorlevel 1 (
+    echo.
+    echo [!] ติดตั้งไม่สำเร็จ — แคปข้อความสีแดงด้านบนส่งให้ Claude ดู
+    echo     ถ้าใช้ Python ใหม่มาก ลองติดตั้ง 3.12:  winget install Python.Python.3.12
+    echo     แล้วลบโฟลเดอร์ .venv ทิ้ง ดับเบิลคลิก run.bat ใหม่
+    pause
+    exit /b 1
+  )
+  echo ok> .venv\installed.ok
 )
 
 start "" http://localhost:8000
