@@ -50,7 +50,7 @@ if not exist "settings.txt" (
 
 rem ── 4) ติดตั้งไลบรารี — ทำใหม่จนกว่าจะสำเร็จครบ (มีไฟล์ .venv\installed.ok) ──
 if exist .venv\Scripts\python.exe (
-  .venv\Scripts\python -c "import starlette, uvicorn, faster_whisper, edge_tts" >nul 2>nul || del /q .venv\installed.ok >nul 2>nul
+  .venv\Scripts\python -c "import starlette, uvicorn, faster_whisper, edge_tts, PIL, pythainlp, yt_dlp, trafilatura" >nul 2>nul || del /q .venv\installed.ok >nul 2>nul
 )
 if not exist .venv\installed.ok (
   echo กำลังติดตั้งไลบรารี อาจใช้เวลา 5-15 นาที ^(ทำครั้งเดียว^)...
