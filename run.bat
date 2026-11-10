@@ -17,6 +17,21 @@ if not defined PY (
   exit /b 1
 )
 
+rem ── 1.1) ไลบรารีถอดเสียง (onnxruntime) ยังไม่รองรับ Python ใหม่มาก/32 บิต → ใช้ 3.12 ──
+%PY% -c "import sys,struct; sys.exit(0 if (3,10)<=sys.version_info[:2]<=(3,13) and struct.calcsize('P')==8 else 1)" >nul 2>nul
+if errorlevel 1 (
+  echo [!] Python ที่มีอยู่เป็นเวอร์ชันที่ไลบรารียังไม่รองรับ — กำลังติดตั้ง Python 3.12 ให้...
+  winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+  py -3.12 -c "1" >nul 2>nul && set PY=py -3.12
+  py -3.12 -c "1" >nul 2>nul || (
+    echo [!] ติดตั้ง Python 3.12 ไม่สำเร็จ — โหลดเองที่ python.org/downloads/release/python-3128/
+    echo     ^(เลือก Windows installer 64-bit ติ๊ก Add python.exe to PATH^) แล้วเปิด run.bat ใหม่
+    pause
+    exit /b 1
+  )
+  if exist .venv rmdir /s /q .venv
+)
+
 rem ── 2) ต้องมี ffmpeg ──
 where ffmpeg >nul 2>nul
 if errorlevel 1 (
