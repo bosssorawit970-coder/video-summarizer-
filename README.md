@@ -63,23 +63,29 @@
 - Mac: `brew install ffmpeg`
 - Ubuntu: `sudo apt install ffmpeg`
 
-**3. ตั้งค่า AI สำหรับสรุป** (เลือกอย่างใดอย่างหนึ่ง)
+**3. ดาวน์โหลดโปรแกรม** — หน้า GitHub นี้ → ปุ่มเขียว **Code → Download ZIP** → แตกไฟล์ (Extract All)
+(หรือ `git clone` แล้วอัปเดตด้วย `git pull`)
 
-| ตัวเลือก | ค่าใช้จ่าย | คุณภาพบทพากย์ | วิธีตั้งค่า |
-|---|---|---|---|
-| **Claude AI** | จ่ายตามการใช้ (คลิปละไม่กี่บาท) | ดีที่สุด | คัดลอก `.env.example` เป็น `.env` แล้วใส่ `ANTHROPIC_API_KEY` จาก https://console.anthropic.com |
-| **Ollama** | ฟรี | พอใช้ (ขึ้นกับรุ่น) | ติดตั้ง https://ollama.com แล้วรัน `ollama pull qwen2.5:7b` |
-| **ไม่ใช้ AI** | ฟรี | เขียนบทเอง | ไม่ต้องตั้งค่า — โปรแกรมเลือกช่วงให้ แล้วคุณพิมพ์บทเอง |
+**4. เปิดโปรแกรม**
+- Windows: ดับเบิลคลิก `run.bat` — ครั้งแรกจะเปิด Notepad ไฟล์ `settings.txt` ให้ใส่คีย์ (ใส่หรือข้ามก็ได้)
+- Mac / Linux: `bash run.sh`
 
-> การถอดเสียงและเสียงพากย์ฟรีเสมอ ส่วนที่อาจมีค่าใช้จ่ายมีแค่ Claude API ถ้าเลือกใช้
-
-## ใช้งาน
-
-- **Windows:** ดับเบิลคลิก `run.bat`
-- **Mac / Linux:** เปิด Terminal ในโฟลเดอร์นี้แล้วรัน `bash run.sh`
-
-ครั้งแรกจะติดตั้งไลบรารีหลายนาที จากนั้นเบราว์เซอร์จะเปิด http://localhost:8000 ให้เอง
+ครั้งแรกติดตั้งไลบรารี 5–15 นาที แล้วเบราว์เซอร์จะเปิด http://localhost:8000 ให้เอง
 (ครั้งแรกที่ถอดเสียง โปรแกรมจะดาวน์โหลดโมเดล Whisper ประมาณ 0.5–1.6 GB)
+
+**คีย์ในไฟล์ `settings.txt`** (แก้ได้ทุกเมื่อ แล้วปิด-เปิดโปรแกรมใหม่)
+
+| ชื่อ | ใช้ทำอะไร | ค่าใช้จ่าย |
+|---|---|---|
+| `GEMINI_API_KEY` | AI เขียนบท/แปล/ดูภาพ + เสียง Gemini | ฟรี (มีโควตา) — aistudio.google.com |
+| `PEXELS_API_KEY` | ภาพ/วิดีโอฟรี (ใส่คีย์ Pixabay ได้) | ฟรี |
+| `ANTHROPIC_API_KEY` | Claude AI (ไม่ใส่ก็ได้) | จ่ายตามการใช้ |
+| `HOST=0.0.0.0` + `APP_PIN` | เปิดใช้จากมือถือใน Wi-Fi เดียวกัน | — |
+
+**การ์ดจอ NVIDIA (ไม่บังคับ):** AI วาดภาพ / โคลนเสียงต้องใช้ — ติดตั้งเพิ่มใน `.venv` ด้วย
+`.venv\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cu124` แล้ว `pip install diffusers transformers accelerate`
+
+**อัปเดตเป็นเวอร์ชันใหม่:** โหลด ZIP ใหม่แล้วแตกทับโฟลเดอร์เดิม (`settings.txt`, `jobs/`, `.venv` อยู่ครบ)
 
 ## เคล็ดลับ
 

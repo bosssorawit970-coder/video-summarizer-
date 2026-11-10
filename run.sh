@@ -7,6 +7,11 @@ if ! command -v ffmpeg >/dev/null; then
   exit 1
 fi
 
+if [ ! -f "settings.txt" ]; then
+  cp "settings-example.txt" "settings.txt"
+  echo "สร้างไฟล์ settings.txt แล้ว — ใส่คีย์ Gemini / Pixabay ในไฟล์นี้ (ข้ามได้)"
+fi
+
 if [ ! -d .venv ]; then
   echo "กำลังติดตั้งครั้งแรก อาจใช้เวลาหลายนาที..."
   python3 -m venv .venv
@@ -14,5 +19,5 @@ if [ ! -d .venv ]; then
   .venv/bin/pip install -r requirements.txt
 fi
 
-( sleep 2; (open http://localhost:8000 || xdg-open http://localhost:8000) >/dev/null 2>&1 ) &
+( sleep 3; (open http://localhost:8000 || xdg-open http://localhost:8000) >/dev/null 2>&1 ) &
 .venv/bin/python app.py

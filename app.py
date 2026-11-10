@@ -27,13 +27,20 @@ from starlette.routing import Route
 
 BASE = Path(__file__).resolve().parent
 
-# โหลดค่าจากไฟล์ .env (ถ้ามี) แบบง่ายๆ
-env_file = BASE / ".env"
-if env_file.exists():
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        if "=" in line and not line.strip().startswith("#"):
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"'))
+# โหลดค่าจากไฟล์ตั้งค่า (ใช้บนคอม): "ตั้งค่า.txt" / settings.txt / .env  — รูปแบบ ชื่อ=ค่า บรรทัดละค่า
+for _name in ("ตั้งค่า.txt", "settings.txt", ".env"):
+    env_file = BASE / _name
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                v = "".join(v.split()).strip('"\'') if k.strip().endswith("_KEY") else v.strip().strip('"')
+                if v:
+                    os.environ.setdefault(k.strip(), v)
+# คีย์ Gemini ที่เผลอวางในช่อง ANTHROPIC_API_KEY (คีย์ Claude ขึ้นต้น sk-ant- เสมอ)
+_ak = os.environ.get("ANTHROPIC_API_KEY", "")
+if _ak and not _ak.startswith("sk-ant") and not os.environ.get("GEMINI_API_KEY"):
+    os.environ["GEMINI_API_KEY"] = os.environ.pop("ANTHROPIC_API_KEY")
 
 import pipeline as P  # noqa: E402 (ต้องโหลด .env ก่อน)
 import game as G  # noqa: E402
@@ -1425,8 +1432,29 @@ app = Starlette(routes=[
 ])
 app = PinGate(app)
 
+def _fetch_fonts() -> None:
+    """ฟอนต์ไทย Kanit สำหรับซับ/หัวข้อ (โหลดครั้งแรกครั้งเดียว ~400KB) — โหลดไม่ได้ก็ใช้ฟอนต์ในเครื่องแทน"""
+    import urllib.request
+    fd = P.FONT_DIR
+    fd.mkdir(parents=True, exist_ok=True)
+    for w in ("Bold", "SemiBold", "Regular"):
+        f = fd / f"Kanit-{w}.ttf"
+        if not f.exists():
+            try:
+                urllib.request.urlretrieve(f"https://github.com/google/fonts/raw/main/ofl/kanit/Kanit-{w}.ttf", f)
+            except Exception as e:
+                print(f"  (โหลดฟอนต์ Kanit ไม่ได้: {e} — ใช้ฟอนต์ไทยในเครื่องแทน)")
+                f.unlink(missing_ok=True)
+                return
+
+
 if __name__ == "__main__":
     import uvicorn
+    _fetch_fonts()
+    ok = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Claude", "ANTHROPIC_API_KEY"),
+                         ("ภาพฟรี Pixabay/Pexels", "PEXELS_API_KEY")) if os.environ.get(k)]
+    print("  คีย์ที่ใส่ไว้: " + (", ".join(ok) if ok else "ยังไม่มี (แก้ได้ในไฟล์ settings.txt)"))
+    print("  การ์ดจอ: " + ("มี ✓" if P.has_gpu() else "ไม่มี (AI วาดภาพ/โคลนเสียงใช้ไม่ได้ ที่เหลือใช้ได้ปกติ)"))
     port = int(os.environ.get("PORT") or 8000)
     print(f"\n  เปิดเบราว์เซอร์ไปที่  http://localhost:{port}\n")
     uvicorn.run(app, host=os.environ.get("HOST") or "127.0.0.1", port=port, log_level="warning")
