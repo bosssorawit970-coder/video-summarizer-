@@ -638,14 +638,15 @@ const M_HINT = {
   light: "แถบแสงวิ่งพาดผ่าน + ซูมเบาๆ — เหมาะกับรูปสินค้า",
   handheld: "สั่นไหวเบาๆ เหมือนถือมือถือถ่าย ทำให้ภาพนิ่งดูเป็นวิดีโอจริง",
   breathe: "ซูมเข้า-ออกนิดเดียว เริ่มกับจบเหมือนกัน วนลูปไม่สะดุด",
-  ai: "AI (Stable Video Diffusion) ทำให้ของในภาพขยับเอง เช่น ผมปลิว น้ำไหล เมฆลอย คนขยับ — ใช้เวลา ~2-4 นาที/ภาพบน Colab การ์ดจอ · ผลลัพธ์สุ่ม บางทีภาพเพี้ยน ลองใหม่ได้ · ใช้งานเชิงพาณิชย์ได้ถ้ารายได้ไม่ถึง 1 ล้านดอลลาร์/ปี (สัญญาอนุญาต Stability AI Community)",
+  ai: "AI (Stable Video Diffusion) ทำให้ของในภาพขยับเอง เช่น ผมปลิว น้ำไหล เมฆลอย คนขยับ — ใช้การ์ดจอ NVIDIA ในคอม (แนะนำ 8 GB ขึ้นไป) หรือ Colab GPU ~2-5 นาที/ภาพ · ผลลัพธ์สุ่ม บางทีภาพเพี้ยน ลองใหม่ได้ · ใช้งานเชิงพาณิชย์ได้ถ้ารายได้ไม่ถึง 1 ล้านดอลลาร์/ปี (สัญญาอนุญาต Stability AI Community)",
 };
 function motionSetup() {
   const sel = $("#mEffect");
   sel.innerHTML = Object.entries(cfg.motion_effects || {}).map(([k, v]) =>
-    `<option value="${k}" ${k === "ai" && !cfg.gpu ? "disabled" : ""}>${esc(v)}${k === "ai" && !cfg.gpu ? " — เครื่องนี้ไม่มีการ์ดจอ" : ""}</option>`).join("");
+    `<option value="${k}" ${k === "ai" && !cfg.motion_ai ? "disabled" : ""}>${esc(v)}${k === "ai" && !cfg.motion_ai ? " — ไม่พบการ์ดจอ NVIDIA" : ""}</option>`).join("");
   $("#mAspect").innerHTML = Object.entries(cfg.motion_aspects || {}).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
-  const hint = () => { $("#mEffHint").textContent = M_HINT[sel.value] || ""; };
+  const hint = () => { $("#mEffHint").textContent = (M_HINT[sel.value] || "") +
+    (sel.value === "ai" && cfg.motion_ai_status ? " · การ์ดจอ: " + cfg.motion_ai_status : ""); };
   sel.onchange = hint; hint();
 }
 $("#mSec").oninput = e => $("#mSecV").textContent = e.target.value;

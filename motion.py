@@ -1,7 +1,7 @@
 """
 ภาพนิ่ง → วิดีโอสั้น 1-4 วินาทีที่มีโมชันนิดๆ
   • เอฟเฟกต์กล้อง (ฟรี เร็ว ไม่ต้องใช้การ์ดจอ): ซูม · แพน · 3D ลอยมิติ (แยกฉากหน้า/หลัง) · กล้องมือถือ · แสงวิ้ง · หายใจ
-  • ✨ AI ขยับของในภาพ (Stable Video Diffusion) — ต้องมีการ์ดจอ (Colab GPU) ใช้เวลาหลายนาที
+  • ✨ AI ขยับของในภาพ (Stable Video Diffusion) — ใช้การ์ด NVIDIA ในคอม (ติดตั้ง PyTorch ให้เองครั้งแรก) หรือ Colab GPU
 ทำงานทีละเฟรมด้วย PIL (ซับพิกเซล ไม่สั่นเหมือน zoompan ของ ffmpeg) แล้วส่งให้ ffmpeg เข้ารหัส
 """
 from __future__ import annotations
@@ -233,12 +233,71 @@ def make_gif(mp4: Path, gif: Path, width: int = 480) -> None:
 _svd = None
 
 
-def ai_available() -> bool:
+def nvidia_gpu() -> dict | None:
+    """การ์ดจอ NVIDIA ในเครื่อง (ดูจาก nvidia-smi ไม่ต้องมี torch) → {"name", "vram_gb"} หรือ None"""
+    import shutil
+    exe = shutil.which("nvidia-smi")
+    if not exe and sys.platform.startswith("win"):
+        p = Path(r"C:\Windows\System32\nvidia-smi.exe")
+        exe = str(p) if p.exists() else None
+    if not exe:
+        return None
+    try:
+        r = subprocess.run([exe, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=15)
+        name, mem = [x.strip() for x in r.stdout.strip().splitlines()[0].split(",")[:2]]
+        return {"name": name, "vram_gb": round(float(mem) / 1024, 1)}
+    except Exception:
+        return None
+
+
+def _torch_cuda() -> bool | None:
+    """True = torch ใช้การ์ดจอได้ · False = มี torch แต่เป็นรุ่น CPU · None = ยังไม่มี torch"""
     try:
         import torch
-        return torch.cuda.is_available()
     except Exception:
-        return False
+        return None
+    return bool(torch.cuda.is_available())
+
+
+def ai_available() -> bool:
+    """ใช้ AI ขยับภาพได้ไหม: มี torch+CUDA แล้ว หรือมีการ์ด NVIDIA (จะติดตั้ง torch ให้ตอนใช้ครั้งแรก)"""
+    return bool(_torch_cuda()) or nvidia_gpu() is not None
+
+
+def ai_status() -> str:
+    g = nvidia_gpu()
+    if _torch_cuda():
+        return f"พร้อม ({g['name']} {g['vram_gb']} GB)" if g else "พร้อม"
+    if g:
+        warn = " — การ์ดจอหน่วยความจำน้อย อาจช้าหรือไม่พอ" if g["vram_gb"] < 6 else ""
+        return f"ใช้การ์ดจอ {g['name']} {g['vram_gb']} GB ได้ (ครั้งแรกติดตั้งไลบรารี ~3 GB){warn}"
+    return ""
+
+
+def _ensure_torch(progress=None) -> None:
+    """เครื่องมีการ์ด NVIDIA แต่ยังไม่มี torch รุ่นการ์ดจอ → ติดตั้งให้ (ครั้งเดียว ~2.5 GB)"""
+    st = _torch_cuda()
+    if st:
+        return
+    if not nvidia_gpu():
+        raise RuntimeError("ไม่พบการ์ดจอ NVIDIA (AI ขยับภาพต้องใช้การ์ด NVIDIA หรือ Colab GPU)")
+    if st is False and "torch" in sys.modules:
+        # มี torch รุ่น CPU โหลดค้างอยู่แล้ว → ติดตั้งทับได้ แต่ต้องปิด-เปิดโปรแกรมใหม่
+        pass
+    if progress:
+        progress("กำลังติดตั้ง PyTorch สำหรับการ์ดจอ (ครั้งแรกครั้งเดียว ~2.5 GB อาจใช้ 5-20 นาที)")
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "torch", "--index-url",
+           "https://download.pytorch.org/whl/cu124"]
+    if st is False:
+        cmd.insert(5, "--force-reinstall")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("ติดตั้ง PyTorch ไม่สำเร็จ: " + (r.stderr or r.stdout)[-300:])
+    if "torch" in sys.modules:
+        raise RuntimeError("ติดตั้ง PyTorch รุ่นการ์ดจอแล้ว — ปิดหน้าต่างดำแล้วเปิด run.bat ใหม่ 1 ครั้ง แล้วกดทำอีกรอบ")
+    if not _torch_cuda():
+        raise RuntimeError("ติดตั้ง PyTorch แล้วแต่ยังใช้การ์ดจอไม่ได้ — ลองอัปเดตไดรเวอร์การ์ดจอ NVIDIA แล้วเปิดโปรแกรมใหม่")
 
 
 def _free_other_models() -> None:
@@ -262,6 +321,7 @@ def _load_svd(progress=None):
     global _svd
     if _svd is not None:
         return _svd
+    _ensure_torch(progress)
     import torch
     try:
         import diffusers  # noqa: F401
@@ -295,19 +355,21 @@ def release_ai() -> None:
 
 def ai_frames(img, strength: str = "normal", seed: int = 0, progress=None):
     """ให้ AI ขยับภาพ: คืน list ภาพ 25 เฟรม (ขนาดที่โมเดลถนัด 1024×576 หรือ 576×1024)"""
-    import torch
     from PIL import Image, ImageOps
     pipe = _load_svd(progress)
+    import torch
     land = img.width >= img.height
-    w, h = (1024, 576) if land else (576, 1024)
+    g = nvidia_gpu()
+    small = bool(g and g["vram_gb"] < 10)  # การ์ดเกม 6-8 GB → ลดขนาดภาพ ไม่ให้หน่วยความจำเต็ม
+    w, h = ((768, 432) if small else (1024, 576)) if land else ((432, 768) if small else (576, 1024))
     if abs(img.width / img.height - 1) < 0.15:
-        w, h = 768, 768
+        w, h = (576, 576) if small else (768, 768)
     src = ImageOps.fit(img, (w, h), Image.LANCZOS)
     motion = {"soft": 70, "normal": 127, "strong": 180}.get(strength, 127)
     if progress:
-        progress("AI กำลังสร้างการเคลื่อนไหว (การ์ดจอ Colab ~2-4 นาที/ภาพ)")
+        progress("AI กำลังสร้างการเคลื่อนไหว (~2-5 นาที/ภาพ ขึ้นกับการ์ดจอ)")
     gen = torch.manual_seed(seed or 42)
-    out = pipe(src, decode_chunk_size=2, generator=gen, num_frames=25, motion_bucket_id=motion,
+    out = pipe(src, decode_chunk_size=1 if small else 2, generator=gen, num_frames=25, motion_bucket_id=motion,
                noise_aug_strength=0.02, fps=12).frames[0]
     return out, (w, h)
 
@@ -354,7 +416,7 @@ def animate(src: Path, out: Path, effect: str = "auto", seconds: float = 2.0, as
                 print(note)
                 used = "auto"
         else:
-            note = "เครื่องนี้ไม่มีการ์ดจอ AI ขยับภาพไม่ได้ (ใช้ได้บน Colab GPU) — ใช้เอฟเฟกต์ 3D ลอยมิติแทน"
+            note = "ไม่พบการ์ดจอ NVIDIA — AI ขยับภาพไม่ได้ (ใช้ได้บน Colab GPU) ใช้เอฟเฟกต์ 3D ลอยมิติแทน"
             used = "auto"
     if used in ("auto", "parallax"):
         if progress:

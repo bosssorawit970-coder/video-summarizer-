@@ -508,6 +508,8 @@ async def config(_: Request):
         "videos": imagegen.videos_available(),
         "motion_effects": MO.EFFECTS,
         "motion_aspects": MO.ASPECTS,
+        "motion_ai": MO.ai_available(),
+        "motion_ai_status": MO.ai_status(),
     })
 
 
