@@ -41,6 +41,25 @@ def run(cmd: list[str], cwd: str | Path | None = None) -> str:
     return p.stdout
 
 
+_FF_MAJOR: int | None = None
+
+
+def ffmpeg_major() -> int:
+    global _FF_MAJOR
+    if _FF_MAJOR is None:
+        try:
+            m = re.search(r"ffmpeg version \D*(\d+)", run(["ffmpeg", "-hide_banner", "-version"]))
+            _FF_MAJOR = int(m.group(1)) if m else 0
+        except Exception:
+            _FF_MAJOR = 0
+    return _FF_MAJOR
+
+
+def filter_script_args(script: Path) -> list[str]:
+    """ffmpeg 7+ ใช้ -/filter_complex <ไฟล์> (ffmpeg 8 ตัด -filter_complex_script ทิ้งแล้ว) · รุ่นเก่าใช้แบบเดิม"""
+    return ["-/filter_complex", str(script)] if ffmpeg_major() >= 7 else ["-filter_complex_script", str(script)]
+
+
 def probe(path: str | Path) -> dict:
     out = run(["ffprobe", "-v", "error", "-show_entries",
                "format=duration:stream=codec_type,codec_name,width,height,pix_fmt",
@@ -1536,7 +1555,7 @@ def concat(clips: list[Path], out: Path, workdir: Path) -> None:
     parts.append("[a0]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[a]")
     script = workdir / "concat_filter.txt"
     script.write_text(";\n".join(parts), encoding="utf-8")
-    base = ["ffmpeg", "-y", "-hide_banner", *inputs, "-filter_complex_script", str(script.resolve()),
+    base = ["ffmpeg", "-y", "-hide_banner", *inputs, *filter_script_args(script.resolve()),
             "-map", "[v]", "-map", "[a]", "-r", "30"]
     tail = [*FINAL_AUDIO, "-movflags", "+faststart", str(out.resolve())]
     if _has_nvenc():
