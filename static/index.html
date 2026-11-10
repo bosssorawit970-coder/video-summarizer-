@@ -399,7 +399,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
     <div class="msg" id="msg">กำลังอัปโหลด…</div>
     <div class="row hidden" id="cancelRow" style="margin-top:12px"><span class="spacer"></span><button id="cancelBtn" class="ghost">✕ ยกเลิกงานนี้</button></div>
     <div class="row hidden" id="errRow" style="margin-top:12px">
-      <button id="retryBack">← กลับไปแก้ไข</button><button id="restart">เริ่มคลิปใหม่</button>
+      <button id="retryBack">← กลับไปแก้ไข</button><button id="retryJob" class="primary">🔁 ลองใหม่</button><button id="restart">เริ่มคลิปใหม่</button>
     </div>
   </section>
 
@@ -1045,7 +1045,7 @@ function setSteps(cur, kind) {
 function fail(m, detail) {
   show("s-progress"); $("#cancelRow").classList.add("hidden");
   $("#msg").innerHTML = `<span class="err">เกิดข้อผิดพลาด: ${esc(m || "ไม่ทราบสาเหตุ")}</span>` +
-    (detail ? `<details style="margin-top:8px"><summary class="hint">รายละเอียดสำหรับแจ้งปัญหา (แคปหน้าจอส่งได้)</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:260px;overflow:auto">${esc(detail)}</pre></details>` : ""); $("#errRow").classList.remove("hidden"); $("#retryBack").classList.toggle("hidden", !job?.plan); }
+    (detail ? `<details style="margin-top:8px"><summary class="hint">รายละเอียดสำหรับแจ้งปัญหา (แคปหน้าจอส่งได้)</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:260px;overflow:auto">${esc(detail)}</pre></details>` : ""); $("#errRow").classList.remove("hidden"); $("#retryBack").classList.toggle("hidden", !job?.plan); $("#retryJob").classList.toggle("hidden", !!job?.plan); }
 
 async function openJob(id) {
   clearTimeout(poll); clearTimeout(bPoll);
@@ -1560,6 +1560,10 @@ $("#thumbShare").onclick = async () => {
   } catch (e) { if (e.name !== "AbortError") alert("แชร์ไม่ได้ — กดดาวน์โหลดแทน"); }
 };
 $("#copySum").onclick = () => navigator.clipboard.writeText(`${job.plan?.title || ""}\n\n${job.plan?.summary || ""}`.trim());
+$("#retryJob").onclick = async () => {
+  try { await api(`/api/jobs/${job.id}/retry`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}); openJob(job.id); }
+  catch (e) { alert(e.message); }
+};
 $("#editAgain").onclick = $("#retryBack").onclick = () => { $("#outVid").pause(); enterReview(); };
 $("#newClip").onclick = $("#restart").onclick = () => { $("#outVid").pause(); location.hash = ""; job = null; show("s-upload"); };
 

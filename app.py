@@ -311,8 +311,10 @@ def analyze_game(jid: str, src: Path, info: dict) -> dict:
 
 def analyze_talk(jid: str, src: Path, info: dict) -> dict:
     d, j = job_dir(jid), jobs[jid]
-    segs = []
-    if info["has_audio"]:
+    segs = j.get("transcript") or []
+    if segs:  # กดลองใหม่หลังถอดเสียงเสร็จแล้ว → ใช้ข้อความเดิม ไม่ต้องถอดซ้ำ
+        save(jid, step="plan", progress=82, message="ใช้คำถอดเสียงเดิม — AI กำลังสรุปเนื้อหาใหม่")
+    elif info["has_audio"]:
         wav = d / "audio.wav"
         P.extract_audio(src, wav)
         segs = P.transcribe(
@@ -580,6 +582,25 @@ def job_opts(form) -> dict:
         if str(opts["render"]["voice"]).startswith("clone:"):  # โคลนเสียงห้ามใช้เชิงพาณิชย์
             opts["render"]["voice"] = "gemini:Leda" if V.gemini_ready() else P.THAI_VOICES[0]["id"]
     return opts
+
+
+async def retry_job(req: Request):
+    """งานพังตอนวิเคราะห์ (เช่น AI ไม่ตอบ/เน็ตหลุด) → ลองใหม่ต่อจากเดิม (ไฟล์ที่โหลดแล้ว/คำถอดเสียงเดิมใช้ต่อ)"""
+    jid = req.path_params["jid"]
+    j = jobs.get(jid)
+    if not j:
+        return JSONResponse({"error": "ไม่พบงานนี้"}, status_code=404)
+    if j.get("status") != "error":
+        return JSONResponse({"error": "งานนี้ไม่ได้ผิดพลาด"}, status_code=400)
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    if body.get("provider") in ("claude", "gemini", "ollama"):
+        j["opts"]["provider"] = body["provider"]
+    save(jid, status="queued", step="queued", progress=0, message="ลองใหม่ — รอคิว", detail="")
+    executor.submit(do_analyze, jid)
+    return JSONResponse({"ok": True})
 
 
 def new_job(name: str, url: str, part: Path | None, opts: dict, batch: str = "") -> str:
@@ -1542,6 +1563,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/videos", video_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
     Route("/api/motion", create_motion, methods=["POST"]),
+    Route("/api/jobs/{jid}/retry", retry_job, methods=["POST"]),
     Route("/api/motion/{mid}", get_motion),
     Route("/api/motion/{mid}/{name}", motion_file),
     Route("/api/voices", upload_voice, methods=["POST"]),

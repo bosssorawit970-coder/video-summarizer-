@@ -426,6 +426,11 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
     for model in gemini_models() or GEMINI_FALLBACK:
         try:
             data = _gemini_post(model, body, key)
+        except GeminiNetError as e:  # รุ่นนี้ตอบช้าเกิน/เน็ตหลุด → ลองรุ่นถัดไป (รุ่นเล็กมักเร็วกว่า)
+            tried.append(str(e)[:80])
+            last = ("Gemini ไม่ตอบภายในเวลา (เน็ตช้า/หลุด หรือเซิร์ฟเวอร์ช้า) — กดลองใหม่อีกครั้ง ("
+                    + "; ".join(tried[-2:]) + ")")
+            continue
         except urllib.error.HTTPError as e:
             msg = getattr(e, "_msg_text", "") or e.read().decode("utf-8", "replace")[:300]
             if e.code in (500, 502, 503, 504):  # เซิร์ฟเวอร์ Google คนใช้เยอะชั่วคราว (ลองซ้ำแล้ว) → ลองรุ่นถัดไป
@@ -453,16 +458,21 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
     raise RuntimeError(last or "เรียก Gemini ไม่สำเร็จ")
 
 
+class GeminiNetError(RuntimeError):
+    pass
+
+
 def _gemini_post(model: str, body: bytes, key: str) -> dict:
     """เรียก Gemini 1 รุ่น — ถ้าเซิร์ฟเวอร์ยุ่ง (503/500) รอแล้วลองซ้ำ 3 ครั้ง (5, 12, 25 วิ)"""
     import time as _t
     import urllib.error
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    net_fail = 0
     for wait in (5, 12, 25, None):
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
                                                               "x-goog-api-key": key})
         try:
-            with urllib.request.urlopen(req, timeout=180) as r:
+            with urllib.request.urlopen(req, timeout=240) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             if e.code in (500, 502, 503, 504) and wait:
@@ -476,6 +486,14 @@ def _gemini_post(model: str, body: bytes, key: str) -> dict:
                 pass
             e._msg_text = text[:300]
             raise
+        except (TimeoutError, OSError, ValueError) as e:
+            # เน็ตสะดุด/รอคำตอบนานเกิน (The read operation timed out) → ลองซ้ำ 1 ครั้ง แล้วให้ลองรุ่นอื่นต่อ
+            net_fail += 1
+            print(f"Gemini {model} ไม่ตอบ/เน็ตสะดุด ({e}) ครั้งที่ {net_fail}")
+            if net_fail < 2 and wait:
+                _t.sleep(wait)
+                continue
+            raise GeminiNetError(f"{model}: รอนานเกิน/เน็ตสะดุด ({e})") from e
     raise RuntimeError("unreachable")
 
 
