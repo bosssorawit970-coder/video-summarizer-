@@ -214,6 +214,8 @@ def encode(frame_iter, out: Path, W: int, H: int, fps: int = FPS) -> None:
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         for fr in frame_iter:
+            if fr.size != (W, H):  # กันเฟรมขนาดไม่ตรง (ไม่งั้นภาพออกมาเป็นลายเส้นเละ)
+                fr = fr.resize((W, H))
             p.stdin.write(fr.convert("RGB").tobytes())
         p.stdin.close()
     except BrokenPipeError:
@@ -384,7 +386,8 @@ def ai_frames(img, strength: str = "normal", seed: int = 0, progress=None):
     land = img.width >= img.height
     g = nvidia_gpu()
     small = bool(g and g["vram_gb"] < 10)  # การ์ดเกม 6-8 GB → ลดขนาดภาพ ไม่ให้หน่วยความจำเต็ม
-    w, h = ((768, 432) if small else (1024, 576)) if land else ((432, 768) if small else (576, 1024))
+    # ขนาดต้องหาร 64 ลงตัว (ไม่งั้นโมเดลให้ภาพเพี้ยน)
+    w, h = ((768, 448) if small else (1024, 576)) if land else ((448, 768) if small else (576, 1024))
     if abs(img.width / img.height - 1) < 0.15:
         w, h = (576, 576) if small else (768, 768)
     src = ImageOps.fit(img, (w, h), Image.LANCZOS)
@@ -404,7 +407,7 @@ def ai_frames(img, strength: str = "normal", seed: int = 0, progress=None):
             progress(msg)
         return kw
 
-    kw = dict(decode_chunk_size=1 if small else 2, generator=gen, num_frames=25, motion_bucket_id=motion,
+    kw = dict(height=h, width=w, decode_chunk_size=1 if small else 2, generator=gen, num_frames=25, motion_bucket_id=motion,
               noise_aug_strength=0.02, fps=12, num_inference_steps=steps)
     try:
         res = pipe(src, callback_on_step_end=on_step, **kw)
@@ -412,8 +415,18 @@ def ai_frames(img, strength: str = "normal", seed: int = 0, progress=None):
         res = pipe(src, **kw)
     if progress:
         progress("AI สร้างเสร็จแล้ว กำลังถอดเป็นภาพทีละเฟรม…")
-    out = res.frames[0]
-    return out, (w, h)
+    out = list(res.frames[0])
+    if out and not hasattr(out[0], "size"):  # numpy → PIL
+        out = [Image.fromarray((f * 255).clip(0, 255).astype("uint8") if f.dtype != "uint8" else f) for f in out]
+    try:  # ภาพดำ/สีเดียวทั้งภาพ = การ์ดคำนวณพัง (NaN) → ไม่ส่งของเสียให้ผู้ใช้
+        import numpy as np
+        if float(np.asarray(out[len(out) // 2].convert("L")).std()) < 2:
+            raise RuntimeError("AI ให้ภาพว่างเปล่า (การ์ดจอคำนวณผิดพลาด)")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+    return out, out[0].size if out else (w, h)
 
 
 def ai_video(img, out: Path, W: int, H: int, seconds: float, strength: str, loop: bool, progress=None) -> None:
