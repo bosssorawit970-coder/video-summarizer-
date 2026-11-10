@@ -246,7 +246,14 @@ def nvidia_gpu() -> dict | None:
         r = subprocess.run([exe, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
                            capture_output=True, text=True, timeout=15)
         name, mem = [x.strip() for x in r.stdout.strip().splitlines()[0].split(",")[:2]]
-        return {"name": name, "vram_gb": round(float(mem) / 1024, 1)}
+        cap = 0.0
+        try:  # รุ่นสถาปัตยกรรมการ์ด (ไดรเวอร์เก่าไม่มีคำสั่งนี้)
+            c = subprocess.run([exe, "--query-gpu=compute_cap", "--format=csv,noheader"],
+                               capture_output=True, text=True, timeout=15)
+            cap = float(c.stdout.strip().splitlines()[0])
+        except Exception:
+            pass
+        return {"name": name, "vram_gb": round(float(mem) / 1024, 1), "cap": cap}
     except Exception:
         return None
 
@@ -257,7 +264,16 @@ def _torch_cuda() -> bool | None:
         import torch
     except Exception:
         return None
-    return bool(torch.cuda.is_available())
+    if not torch.cuda.is_available():
+        return False
+    try:  # torch รุ่นเก่ากับการ์ดใหม่ (เช่น RTX 50) → is_available() ได้ True แต่รันจริงไม่ได้
+        major, minor = torch.cuda.get_device_capability(0)
+        archs = torch.cuda.get_arch_list()
+        if archs and f"sm_{major}{minor}" not in archs and not any(a.startswith(f"sm_{major}") for a in archs):
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def ai_available() -> bool:
@@ -287,8 +303,13 @@ def _ensure_torch(progress=None) -> None:
         pass
     if progress:
         progress("กำลังติดตั้ง PyTorch สำหรับการ์ดจอ (ครั้งแรกครั้งเดียว ~2.5 GB อาจใช้ 5-20 นาที)")
+    g = nvidia_gpu() or {}
+    # การ์ดใหม่ (RTX 20 ขึ้นไป รวม RTX 50 ซีรีส์ Blackwell) → PyTorch CUDA 12.8 (RTX 50 ใช้ได้แค่รุ่นนี้ขึ้นไป)
+    # การ์ดเก่า (GTX 10/16 ซีรีส์ Pascal/Volta) → CUDA 12.6 ที่ยังรองรับ
+    cap = g.get("cap") or (12.0 if "RTX 50" in g.get("name", "") else 7.5)
+    cu = "cu128" if cap >= 7.5 else "cu126"
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "torch", "--index-url",
-           "https://download.pytorch.org/whl/cu124"]
+           f"https://download.pytorch.org/whl/{cu}"]
     if st is False:
         cmd.insert(5, "--force-reinstall")
     r = subprocess.run(cmd, capture_output=True, text=True)
