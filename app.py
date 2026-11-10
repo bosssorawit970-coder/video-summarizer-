@@ -50,6 +50,7 @@ import voice as V  # noqa: E402
 import graphics as G2  # noqa: E402
 import source as SRC  # noqa: E402
 import product as PR  # noqa: E402
+import motion as MO  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -505,6 +506,8 @@ async def config(_: Request):
         "gpu": P.has_gpu(),
         "vision": ST.vision_ready(),
         "videos": imagegen.videos_available(),
+        "motion_effects": MO.EFFECTS,
+        "motion_aspects": MO.ASPECTS,
     })
 
 
@@ -1385,6 +1388,123 @@ async def cancel_job(req: Request):
     return JSONResponse({"ok": True})
 
 
+# ───────────────────────── 🎞️ ภาพนิ่ง → ภาพเคลื่อนไหว ─────────────────────────
+MOTION_DIR = JOBS_DIR / "_motion"
+motion_jobs: dict[str, dict] = {}
+motion_exec = ThreadPoolExecutor(max_workers=1)  # เอฟเฟกต์กล้อง (CPU) ไม่ต้องรอคิวงานตัดต่อ
+IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".heic", ".heif", ".avif"}
+
+
+def _motion_save(mid: str) -> None:
+    m = motion_jobs[mid]
+    (MOTION_DIR / mid / "job.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+
+def do_motion(mid: str) -> None:
+    m = motion_jobs[mid]
+    d = MOTION_DIR / mid
+    o = m["opts"]
+    m["status"] = "working"
+    for k, it in enumerate(m["items"]):
+        def prog(msg, k=k):
+            m["message"] = f"ภาพ {k + 1}/{len(m['items'])}: {msg}"
+        it["status"] = "working"
+        prog("เริ่ม")
+        try:
+            out = d / f"{Path(it['src']).stem}.mp4"
+            r = MO.animate(d / it["src"], out, o["effect"], o["seconds"], o["aspect"], o["strength"],
+                           o["loop"], o["gif"], prog)
+            it.update(status="done", video=out.name, gif=out.with_suffix(".gif").name if o["gif"] else "",
+                      effect=MO.EFFECTS.get(r["effect"], r["effect"]), note=r["note"], size=f"{r['width']}×{r['height']}")
+        except Exception as e:
+            traceback.print_exc()
+            it.update(status="error", note=f"ทำไม่สำเร็จ: {str(e)[-300:]}")
+        _motion_save(mid)
+    if o["effect"] == "ai":
+        MO.release_ai()  # คืนการ์ดจอให้งานวาดภาพ/ตัดต่อ
+    m.update(status="done", message="")
+    _motion_save(mid)
+
+
+async def create_motion(req: Request):
+    form = await req.form(max_files=30, max_part_size=40 * 1024 ** 2)
+    ups = [u for u in form.getlist("images") if getattr(u, "filename", "")]
+    if not ups:
+        return JSONResponse({"error": "เลือกรูปก่อน"}, status_code=400)
+    if len(ups) > 20:
+        return JSONResponse({"error": "ทำได้ครั้งละไม่เกิน 20 รูป"}, status_code=400)
+    effect = str(form.get("effect") or "auto")
+    if effect not in MO.EFFECTS:
+        effect = "auto"
+    aspect = str(form.get("aspect") or "original")
+    opts = {"effect": effect, "seconds": min(6.0, max(1.0, _num(form.get("seconds"), 2))),
+            "aspect": aspect if aspect in MO.ASPECTS else "original",
+            "strength": str(form.get("strength") or "normal") if form.get("strength") in MO.STRENGTH else "normal",
+            "loop": _bool(form.get("loop"), False), "gif": _bool(form.get("gif"), False)}
+    mid = uuid.uuid4().hex[:10]
+    d = MOTION_DIR / mid
+    d.mkdir(parents=True, exist_ok=True)
+    items = []
+    for i, up in enumerate(ups):
+        ext = Path(up.filename).suffix.lower()
+        if ext not in IMG_EXT:
+            continue
+        name = f"img{i + 1:02}{ext}"
+        with open(d / name, "wb") as f:
+            shutil.copyfileobj(up.file, f, 1024 * 1024)
+        if ext in (".heic", ".heif", ".avif", ".gif", ".webp", ".bmp"):  # แปลงเป็น PNG ให้ PIL เปิดได้แน่นอน
+            try:
+                P.run(["ffmpeg", "-y", "-hide_banner", "-i", str(d / name), "-frames:v", "1", str(d / f"img{i + 1:02}.png")])
+                (d / name).unlink(missing_ok=True)
+                name = f"img{i + 1:02}.png"
+            except Exception:
+                pass
+        items.append({"src": name, "title": Path(up.filename).stem[:60], "status": "queued"})
+    if not items:
+        return JSONResponse({"error": "ไฟล์ต้องเป็นรูปภาพ (JPG, PNG, WEBP …)"}, status_code=400)
+    motion_jobs[mid] = {"id": mid, "status": "queued", "message": "รอคิว…", "opts": opts, "items": items,
+                        "created": time.time()}
+    _motion_save(mid)
+    # AI ใช้การ์ดจอ → เข้าคิวเดียวกับงานตัดต่อ (ไม่แย่งการ์ดจอกัน) · เอฟเฟกต์กล้องทำได้ทันที
+    (executor if effect == "ai" else motion_exec).submit(do_motion, mid)
+    return JSONResponse({"id": mid})
+
+
+async def get_motion(req: Request):
+    m = motion_jobs.get(req.path_params["mid"])
+    if not m:
+        return JSONResponse({"error": "ไม่พบงานนี้"}, status_code=404)
+    return JSONResponse(m)
+
+
+async def motion_file(req: Request):
+    mid, name = req.path_params["mid"], req.path_params["name"]
+    if mid not in motion_jobs or not re.fullmatch(r"[\w\-]+\.(mp4|gif|png|jpe?g|webp|bmp)", name):
+        return JSONResponse({"error": "ไม่พบไฟล์"}, status_code=404)
+    f = MOTION_DIR / mid / name
+    if not f.exists():
+        return JSONResponse({"error": "ไม่พบไฟล์"}, status_code=404)
+    dl = req.query_params.get("dl")
+    return FileResponse(f, filename=f"motion_{name}" if dl else None)
+
+
+def load_motion() -> None:
+    for f in MOTION_DIR.glob("*/job.json") if MOTION_DIR.exists() else []:
+        try:
+            m = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if m.get("status") in ("queued", "working"):
+            m.update(status="done", message="")
+            for it in m["items"]:
+                if it.get("status") in ("queued", "working"):
+                    it.update(status="error", note="ถูกหยุดเพราะปิดโปรแกรมระหว่างทำ")
+        motion_jobs[m["id"]] = m
+
+
+load_motion()
+
+
 load_existing()
 for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
     try:
@@ -1417,6 +1537,9 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes-rank", rank_scenes, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/videos", video_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
+    Route("/api/motion", create_motion, methods=["POST"]),
+    Route("/api/motion/{mid}", get_motion),
+    Route("/api/motion/{mid}/{name}", motion_file),
     Route("/api/voices", upload_voice, methods=["POST"]),
     Route("/api/voices/{name}", delete_voice, methods=["DELETE"]),
     Route("/api/voices/{name}/sample", voice_sample),

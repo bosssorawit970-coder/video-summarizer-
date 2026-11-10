@@ -98,6 +98,13 @@ video{width:100%;border-radius:10px;background:#000;display:block}
 .brow.cmp{background:var(--accent-soft);border-radius:10px;padding:10px;border:0}
 #storyText{font-size:16px;line-height:1.6;min-height:150px}
 .seg.mode{flex-wrap:wrap}
+#s-upload.motion > :not(#modeSeg):not(#modeHint):not(.motionOnly){display:none!important}
+.mthumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.mthumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px}
+.mres{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:12px}
+.mres .it{border:1px solid var(--line,#ddd);border-radius:12px;padding:8px;font-size:13px}
+.mres video{width:100%;border-radius:8px;background:#000;max-height:360px}
+.mres .dlr{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}.mres .dlr a{flex:1}.mres .dlr button{width:100%;padding:6px 8px;font-size:13px}
+
 @media(max-width:600px){.seg.mode{flex-direction:column}.seg.mode label{justify-content:flex-start}}
 .scene{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--bg);display:grid;grid-template-columns:96px 1fr;gap:12px}
 .scene .pic{position:relative}
@@ -161,6 +168,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <label><input type="radio" name="mode" value="game"> 🎮 ไฮไลต์เกม MLBB</label>
       <label><input type="radio" name="mode" value="story"> 📝 ข้อความ → คลิป</label>
       <label><input type="radio" name="mode" value="product"> 🛒 ป้ายยาสินค้า</label>
+      <label><input type="radio" name="mode" value="motion"> 🎞️ ภาพนิ่ง → ภาพเคลื่อนไหว</label>
     </div>
     <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
     <div class="storyOnly hidden">
@@ -234,6 +242,44 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       </select>
       <div class="seg" style="margin-top:10px"><label><input type="checkbox" id="pGraphics" checked> 📊 กราฟิกราคา/จุดเด่น</label></div>
       <div class="hint" style="margin-top:8px;background:#fff4d6;color:#7a5200;padding:8px;border-radius:8px">✅ คลิปแอนิเมชันไม่มีภาพสินค้าจริง — คนดูจะกดลิงก์ไปดูของจริงเอง · AI เขียนจากข้อมูลจริงเท่านั้น ไม่แต่งรีวิว/ประสบการณ์ใช้ · แคปชันบอกว่าเป็นลิงก์ affiliate ให้ · งานขายของใช้เสียงโคลนไม่ได้ (สัญญาอนุญาตห้ามเชิงพาณิชย์) — แนะนำเสียง ✨ Gemini</div>
+    </div>
+    <div class="motionOnly hidden">
+      <h2>1. เลือกรูป</h2>
+      <div class="drop" id="mDrop">
+        <b id="mDropTitle">ลากรูปมาวาง หรือคลิกเพื่อเลือก</b>
+        <span class="hint">JPG, PNG, WEBP, HEIC — เลือกหลายรูปพร้อมกันได้ (สูงสุด 20)</span>
+        <input type="file" id="mFiles" accept="image/*" multiple hidden>
+      </div>
+      <div id="mThumbs" class="mthumbs"></div>
+      <label class="f">แบบการเคลื่อนไหว</label>
+      <select id="mEffect"></select>
+      <div class="hint" id="mEffHint" style="margin-top:4px"></div>
+      <div class="opts" style="margin-top:6px">
+        <div>
+          <label class="f">ความยาว: <span id="mSecV" class="stat">2</span> วินาที</label>
+          <input type="range" id="mSec" min="1" max="6" step="0.5" value="2">
+        </div>
+        <div>
+          <label class="f">สัดส่วน</label>
+          <select id="mAspect"></select>
+        </div>
+      </div>
+      <label class="f">ความแรง</label>
+      <div class="seg">
+        <label><input type="radio" name="mstr" value="soft"> เบาๆ</label>
+        <label><input type="radio" name="mstr" value="normal" checked> ปกติ</label>
+        <label><input type="radio" name="mstr" value="strong"> แรง</label>
+      </div>
+      <div class="seg" style="margin-top:10px">
+        <label><input type="checkbox" id="mLoop"> 🔁 วนลูปเนียน (ไป-กลับ เหมาะทำพื้นหลัง/สติกเกอร์)</label>
+        <label><input type="checkbox" id="mGif"> 🖼️ ทำไฟล์ GIF ด้วย</label>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <span class="hint" id="mInfo"></span><span class="spacer"></span>
+        <button class="primary" id="mGo" disabled>🎞️ ทำภาพเคลื่อนไหว</button>
+      </div>
+      <div id="mStatus" class="hint" style="margin-top:10px"></div>
+      <div id="mResults" class="mres"></div>
     </div>
     <div class="mediaOnly">
     <h2>1. ใส่ลิงก์คลิป</h2>
@@ -574,11 +620,101 @@ async function init() {
   $("#srcSeg").onchange = () => $("#styleBox").classList.toggle("hidden", document.querySelector("input[name=image_source]:checked").value !== "ai");
   if (!cfg.imagegen) $("#storyHint").textContent = "⚠️ เครื่องนี้ยังวาดภาพด้วย AI ไม่ได้ (ต้องใช้ Colab การ์ดจอ) — จะใช้ภาพพื้นหลังไล่สีแทน";
   fillVoices(cfg.voices);
+  motionSetup();
   $("#tone").innerHTML = Object.entries(cfg.tones || {}).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#vSentence").textContent = cfg.ref_sentence || "";
   loadJobs();
   loadAssets();
-  const id = location.hash.slice(1); if (id.startsWith("b=")) openBatch(id.slice(2)); else if (id) openJob(id);
+  const id = location.hash.slice(1);
+  if (id.startsWith("m=")) { document.querySelector("input[name=mode][value=motion]").checked = true; modeChanged(); mWatch(id.slice(2)); }
+  else if (id.startsWith("b=")) openBatch(id.slice(2)); else if (id) openJob(id);
+}
+
+// ───── 🎞️ ภาพนิ่ง → ภาพเคลื่อนไหว ─────
+let mFiles = [], mPoll = null;
+const M_HINT = {
+  auto: "มีคน/สัตว์/สินค้าเด่นๆ → แยกฉากหน้าออกมาขยับแบบ 3 มิติ · ภาพวิว/ไม่มีตัวเด่น → ซูมเข้าช้าๆ",
+  parallax: "ตัดตัวเด่นออกจากฉากหลัง แล้วขยับคนละจังหวะ → ดูมีมิติเหมือนถ่ายด้วยกล้องจริง (ครั้งแรกโหลดโมเดลตัดพื้นหลัง ~1 นาที)",
+  light: "แถบแสงวิ่งพาดผ่าน + ซูมเบาๆ — เหมาะกับรูปสินค้า",
+  handheld: "สั่นไหวเบาๆ เหมือนถือมือถือถ่าย ทำให้ภาพนิ่งดูเป็นวิดีโอจริง",
+  breathe: "ซูมเข้า-ออกนิดเดียว เริ่มกับจบเหมือนกัน วนลูปไม่สะดุด",
+  ai: "AI (Stable Video Diffusion) ทำให้ของในภาพขยับเอง เช่น ผมปลิว น้ำไหล เมฆลอย คนขยับ — ใช้เวลา ~2-4 นาที/ภาพบน Colab การ์ดจอ · ผลลัพธ์สุ่ม บางทีภาพเพี้ยน ลองใหม่ได้ · ใช้งานเชิงพาณิชย์ได้ถ้ารายได้ไม่ถึง 1 ล้านดอลลาร์/ปี (สัญญาอนุญาต Stability AI Community)",
+};
+function motionSetup() {
+  const sel = $("#mEffect");
+  sel.innerHTML = Object.entries(cfg.motion_effects || {}).map(([k, v]) =>
+    `<option value="${k}" ${k === "ai" && !cfg.gpu ? "disabled" : ""}>${esc(v)}${k === "ai" && !cfg.gpu ? " — เครื่องนี้ไม่มีการ์ดจอ" : ""}</option>`).join("");
+  $("#mAspect").innerHTML = Object.entries(cfg.motion_aspects || {}).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  const hint = () => { $("#mEffHint").textContent = M_HINT[sel.value] || ""; };
+  sel.onchange = hint; hint();
+}
+$("#mSec").oninput = e => $("#mSecV").textContent = e.target.value;
+$("#mDrop").onclick = () => $("#mFiles").click();
+$("#mDrop").ondragover = e => { e.preventDefault(); $("#mDrop").classList.add("over"); };
+$("#mDrop").ondragleave = () => $("#mDrop").classList.remove("over");
+$("#mDrop").ondrop = e => { e.preventDefault(); $("#mDrop").classList.remove("over"); mPick(e.dataTransfer.files); };
+$("#mFiles").onchange = e => mPick(e.target.files);
+if (matchMedia("(pointer:coarse)").matches) $("#mDropTitle").textContent = "แตะเพื่อเลือกรูปจากเครื่อง";
+function mPick(list) {
+  mFiles = [...list].filter(f => f.type.startsWith("image/") || /\.(heic|heif|avif)$/i.test(f.name)).slice(0, 20);
+  $("#mThumbs").innerHTML = "";
+  for (const f of mFiles) { const im = document.createElement("img"); im.src = URL.createObjectURL(f); $("#mThumbs").appendChild(im); }
+  $("#mInfo").textContent = mFiles.length ? `${mFiles.length} รูป` : "";
+  $("#mGo").disabled = !mFiles.length;
+}
+$("#mGo").onclick = async () => {
+  const fd = new FormData();
+  for (const f of mFiles) {
+    let b = f; try { b = await shrinkImage(f, 2400); } catch {}
+    fd.append("images", b, b.name || f.name);
+  }
+  fd.append("effect", $("#mEffect").value);
+  fd.append("seconds", $("#mSec").value);
+  fd.append("aspect", $("#mAspect").value);
+  fd.append("strength", document.querySelector("input[name=mstr]:checked").value);
+  fd.append("loop", $("#mLoop").checked ? "1" : "");
+  fd.append("gif", $("#mGif").checked ? "1" : "");
+  $("#mGo").disabled = true; $("#mStatus").textContent = "กำลังส่งรูป…"; $("#mResults").innerHTML = "";
+  try {
+    const r = await api("/api/motion", {method: "POST", body: fd});
+    location.hash = "m=" + r.id;
+    mWatch(r.id);
+  } catch (e) { $("#mStatus").textContent = "⚠️ " + e.message; $("#mGo").disabled = false; }
+};
+function mWatch(id) {
+  clearTimeout(mPoll);
+  const tick = async () => {
+    let m;
+    try { m = await api(`/api/motion/${id}`); } catch (e) { $("#mStatus").textContent = "⚠️ " + e.message; mPoll = setTimeout(tick, 4000); return; }
+    mShow(m);
+    if (m.status !== "done") mPoll = setTimeout(tick, 1500);
+    else { $("#mGo").disabled = !mFiles.length; }
+  };
+  tick();
+}
+function mShow(m) {
+  const done = m.items.filter(i => i.status === "done").length;
+  $("#mStatus").textContent = m.status === "done" ? `✅ เสร็จ ${done}/${m.items.length} รูป — กดดาวน์โหลดได้เลย` : (m.message || "รอคิว…");
+  const box = $("#mResults");
+  m.items.forEach((it, k) => {
+    let el = box.children[k];
+    if (!el) { el = document.createElement("div"); el.className = "it"; box.appendChild(el); }
+    const key = it.status + (it.video || "");
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    const base = `/api/motion/${m.id}/`;
+    if (it.status === "done") {
+      el.innerHTML = `<video src="${base}${it.video}" autoplay loop muted playsinline></video>
+        <div class="hint">${esc(it.effect || "")} · ${esc(it.size || "")}</div>
+        ${it.note ? `<div class="hint" style="color:#b45309">${esc(it.note)}</div>` : ""}
+        <div class="dlr"><a href="${base}${it.video}?dl=1" download><button>⬇️ MP4</button></a>
+        ${it.gif ? `<a href="${base}${it.gif}?dl=1" download><button>⬇️ GIF</button></a>` : ""}</div>`;
+    } else if (it.status === "error") {
+      el.innerHTML = `<img src="${base}${it.src}" style="width:100%;border-radius:8px;opacity:.5"><div class="hint" style="color:#b91c1c">${esc(it.note || "ทำไม่สำเร็จ")}</div>`;
+    } else {
+      el.innerHTML = `<img src="${base}${it.src}" style="width:100%;border-radius:8px;opacity:.6"><div class="hint">${it.status === "working" ? "⏳ กำลังทำ…" : "รอคิว"}</div>`;
+    }
+  });
 }
 
 if (matchMedia("(pointer:coarse)").matches) $("#dropTitle").textContent = "แตะเพื่อเลือกคลิปจากเครื่อง";
@@ -586,6 +722,7 @@ const MODE_HINT = {
   product: "ใส่ข้อมูลสินค้า + รูป/วิดีโอที่ถ่ายเอง → AI เขียนบทป้ายยา (ฮุก → ปัญหา → จุดเด่น → ราคา → ชวนกดตะกร้า) ใส่กราฟิกราคา พากย์เสียง และแคปชัน affiliate ให้",
   story: "พิมพ์หรือวางข้อความ → AI เขียนบทคลิปสั้น แบ่งฉาก วาดภาพประกอบ ทำแอนิเมชัน และพากย์เสียงไทยให้",
   talk: "ถอดคำพูดในคลิป ให้ AI สรุปเนื้อหา เลือกช่วงสำคัญ แล้วพากย์เสียงไทยทับ",
+  motion: "ใส่รูป → ได้วิดีโอสั้น 1-6 วินาทีที่ขยับนิดๆ (ซูม · เลื่อนกล้อง · 3D ลอยมิติ · แสงวิ้ง) — หรือให้ AI ขยับของในภาพ (ต้องมีการ์ดจอ) · เอาไปใช้เป็นฉากในคลิป/สตอรี่/โพสต์ได้เลย",
   game: "หาช็อตเด็ดจากเสียงประกาศในเกม (Double Kill, Maniac, Savage, Lord…) ใส่ป้ายตัวใหญ่ + พากย์แบบแคสเตอร์ · ตอนอัดหน้าจอต้องเปิดเสียงเกมด้วย",
 };
 function mode() { return document.querySelector("input[name=mode]:checked").value; }
@@ -596,6 +733,9 @@ function modeChanged() {
   document.querySelectorAll(".talkOnly").forEach(e => e.classList.toggle("hidden", g || st));
   document.querySelectorAll(".storyOnly").forEach(e => e.classList.toggle("hidden", mode() !== "story"));
   document.querySelectorAll(".productOnly").forEach(e => e.classList.toggle("hidden", !pr));
+  const mo = mode() === "motion";
+  document.querySelectorAll(".motionOnly").forEach(e => e.classList.toggle("hidden", !mo));
+  $("#s-upload").classList.toggle("motion", mo);
   document.querySelectorAll(".mediaOnly").forEach(e => e.classList.toggle("hidden", st));
   if (pr && cfg) { if (cfg.gemini_tts) $("#voice0").value = "gemini:Leda";
     else if (($("#voice0").value || "").startsWith("clone:")) $("#voice0").value = cfg.voices[0].id; }
