@@ -950,6 +950,9 @@ class Ass:
         # กล่องสีพอดีข้อความ (BorderStyle 3) สำหรับโมชันกราฟิก "คำสำคัญ"
         self.style("GBox", f, u * 0.04, _ass_color("1A1A1A"), _ass_color("FFD43B"), _ass_color("FFD43B"), 1, 3, 18, 0, 5,
                    40, 40, 0)
+        self.style("Top", f, u * 0.05, white, black, _ass_color("000000", 0x50), 1, 1, 6, 3, 8, 30, 30, 0)
+        self.style("TopBox", f, u * 0.05, white, _ass_color("000000", 0x40), _ass_color("000000", 0x40),
+                   1, 3, 14, 0, 8, 30, 30, 0)
         self.style("Title", f, u * 0.05, white, black, _ass_color("000000", 0x70), 1, 3, 22, 0, 2,
                    50, 50, int(H * (0.2 if vertical else 0.12)))
 
@@ -998,6 +1001,24 @@ class Ass:
         """หัวข้อกล่องสี เลื่อนขึ้น + จางเข้า"""
         x = self.W // 2
         self.add("Head", t0, t1, text, f"\\an8\\move({x},{y + 70},{x},{y},0,450)\\fad(350,200)")
+
+    def toptext(self, text: str, t1: float, x: int, y: int, align: int = 8, box: bool = False) -> None:
+        """ข้อความหัวเรื่องกลางจอด้านบน (เช่น "Soul Eater | ตอนที่ 2") — | หรือขึ้นบรรทัด = บรรทัดใหม่ บรรทัดที่ 2 สีเหลือง"""
+        lines = [ln.strip() for ln in re.split(r"\s*(?:\||\n)\s*", text) if ln.strip()][:3]
+        if not lines:
+            return
+        vertical = self.H > self.W
+        base = (self.H if vertical else self.H * 1.25) * 0.05
+        # ตัวไทยมีสระ/วรรณยุกต์ที่ไม่กินที่แนวนอน → ไม่นับ
+        vis = max(len(re.sub(r"[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]", "", ln)) for ln in lines)
+        size = int(max(self.H * 0.022, min(base, self.W * 0.9 / max(1, vis * 0.56))))
+        yellow = _ass_color("FFD43B")
+        body = "\\N".join(ass_text(ln) if k == 0 else "{\\c" + yellow + "&}" + ass_text(ln) + "{\\r}"
+                           for k, ln in enumerate(lines))
+        bs = "\\bord6\\shad3" if not box else "\\bord14\\shad0"
+        # ไม่ใส่เฟด — ขึ้นค้างตลอดทุกช่วง (เฟดทุกช่วงจะดูกะพริบตอนต่อคลิป)
+        self.events.append(f"Dialogue: 1,{_ass_time(0)},{_ass_time(t1)},{'TopBox' if box else 'Top'},,0,0,0,,"
+                           f"{{\\an{align}\\pos({x},{y})\\fs{size}{bs}}}{body}")
 
     def brand(self, text: str, t1: float, x: int = 40) -> None:
         self.add("Brand", 0, t1, text, f"\\an7\\pos({x},{int(self.H * (0.065 if self.H > self.W else 0.035))})")
@@ -1380,6 +1401,20 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
     ass = Ass(W, H)
     if text:
         ass.brand(text, length, x=(40 + logo_h + 18) if logo else 40)
+    top = (brand.get("top") or "").strip() if extras else ""
+    if top:
+        if layout == "vertical_blur":  # วางชิดเหนือภาพหลัก (ในพื้นที่เบลอด้านบน)
+            sw, sh = float(info.get("width") or 1920), float(info.get("height") or 1080)
+            fh = 1080 * sh / max(1.0, min(sw, sh * 1.15))
+            y0 = (1920 - fh) / 2 - 80
+            if y0 > 260:
+                ass.toptext(top, length, W // 2, int(y0 - 28), align=2)
+            else:
+                ass.toptext(top, length, W // 2, int(H * 0.1), align=8, box=True)
+        elif vertical:  # ครอปเต็มจอ → กล่องดำโปร่งให้อ่านง่าย
+            ass.toptext(top, length, W // 2, int(H * 0.1), align=8, box=True)
+        else:
+            ass.toptext(top, length, W // 2, int(H * 0.04), align=8)
     if extras and subtitles and narr:
         ass.subs(clip["narration"], LEAD_IN, narr_dur, 22 if vertical else 40, pop=subtitles == "pop")
     if ass.write(workdir / "text.ass"):

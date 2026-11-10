@@ -356,6 +356,11 @@ video{width:100%;border-radius:10px;background:#000;display:block}
           <label class="f">ชื่อช่อง (มุมซ้ายบน)</label>
           <input type="text" id="channel0" maxlength="40" placeholder="เช่น @ช่องของบอส">
         </div>
+        <div class="topTextBox">
+          <label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label>
+          <input type="text" id="toptext0" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2">
+          <div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่ — บรรทัดที่ 2 เป็นสีเหลือง · ขึ้นค้างตลอดคลิป</div>
+        </div>
         <div>
           <label class="f">โลโก้</label>
           <div class="urlrow"><select id="logo0"></select><button data-up="logo">+ เพิ่มโลโก้</button></div>
@@ -441,6 +446,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">สัดส่วนวิดีโอ</label><select id="layout"></select></div>
             <div><label class="f">เพลงประกอบ</label><select id="music"></select></div>
             <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
+            <div class="noStory"><label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label><input type="text" id="toptext" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2"><div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่</div></div>
             <div><label class="f">ตกแต่ง</label>
               <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label></div></div>
             <div><label class="f">ซับไตเติล</label>
@@ -735,6 +741,7 @@ function modeChanged() {
   document.querySelectorAll(".storyOnly").forEach(e => e.classList.toggle("hidden", mode() !== "story"));
   document.querySelectorAll(".productOnly").forEach(e => e.classList.toggle("hidden", !pr));
   const mo = mode() === "motion";
+  document.querySelectorAll(".topTextBox").forEach(e => e.classList.toggle("hidden", st));
   document.querySelectorAll(".motionOnly").forEach(e => e.classList.toggle("hidden", !mo));
   $("#s-upload").classList.toggle("motion", mo);
   document.querySelectorAll(".mediaOnly").forEach(e => e.classList.toggle("hidden", st));
@@ -849,6 +856,7 @@ function decorSummary() {
   if (mode() === "game" && $("#fx0").checked) bits.push("เอฟเฟกต์");
   if ($("#music0").value) bits.push("เพลง");
   if ($("#channel0").value.trim()) bits.push("ชื่อช่อง");
+  if ($("#toptext0").value.trim() && (mode() === "talk" || mode() === "game")) bits.push("หัวเรื่อง");
   if ($("#logo0").value) bits.push("โลโก้");
   if ($("#cover0").checked) bits.push("ภาพปก");
   $("#decorSum").textContent = bits.length ? "· " + bits.join(", ") : "";
@@ -914,6 +922,7 @@ function commonFields(fd) {
   fd.append("music", $("#music0").value);
   fd.append("music_volume", $("#mvol0").value / 100);
   fd.append("channel", $("#channel0").value.trim());
+  if (mode() === "talk" || mode() === "game") fd.append("toptext", $("#toptext0").value.trim());
   fd.append("logo", $("#logo0").value);
   fd.append("cover", $("#cover0").checked ? "1" : "");
   return fd;
@@ -1075,7 +1084,7 @@ function enterReview() {
   $("#s-review .card.sticky").classList.toggle("hidden", multi);
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
-  if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || "";
+  if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#toptext").value = r.toptext || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
@@ -1348,7 +1357,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked})});
+      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };

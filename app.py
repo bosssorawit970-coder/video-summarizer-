@@ -327,7 +327,8 @@ def analyze_talk(jid: str, src: Path, info: dict) -> dict:
 
 
 def _brand(r: dict) -> dict:
-    return {"text": r.get("channel") or "", "logo": asset_path("logo", r.get("logo") or "")}
+    return {"text": r.get("channel") or "", "logo": asset_path("logo", r.get("logo") or ""),
+            "top": r.get("toptext") or ""}
 
 
 def _best_clip(clips: list[dict]) -> dict:
@@ -798,12 +799,13 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
         "music_volume": max(0.0, min(1.0, _num(body.get("music_volume"), 0.25))),
         "channel": str(body.get("channel") or "").strip()[:40],
+        "toptext": str(body.get("toptext") or "").strip()[:100],
         "logo": str(body.get("logo") or "") if asset_path("logo", str(body.get("logo") or "")) else "",
     }
 
 
 RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "fx", "cover", "music",
-               "music_volume", "channel", "logo")
+               "music_volume", "channel", "logo", "toptext")
 
 
 def _subs(r: dict):
