@@ -29,10 +29,11 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
   ห้ามใส่ชื่อคนจริง คนดัง ตัวละครหรือโลโก้ที่มีลิขสิทธิ์ — ให้บรรยายแบบทั่วไปแทน และห้ามให้มีตัวหนังสือในภาพ
 - search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ (เช่น "black coffee cup", "woman jogging park")
 {graphic_rules}
+{mood_rules}
 
 ตอบเป็น JSON อย่างเดียว:
 {{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
- "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null}}]}}
+ "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm"}}]}}
 
 ข้อมูล:
 {text}"""
@@ -51,11 +52,12 @@ Step 2 — for EACH scene write:
   No text or letters in the image. No real people's names, celebrities, brands or copyrighted characters — describe them generically.
 - "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
 {graphic_rules}
+{mood_rules}
 
 Reply with JSON only:
 {{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty",
  "title": "catchy Thai title (1-2 emoji ok)", "summary": "Thai caption 1-2 sentences + 3-5 hashtags",
- "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null}}]}}
+ "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm"}}]}}
 "scenes" must contain exactly {n} items, in order.
 
 Script:
@@ -71,6 +73,51 @@ The image must show exactly what THIS scene's narration is about, matching the s
 15-30 words: main subject first, then action, place, lighting, camera shot. No text in the image.
 No real people's names, celebrities, brands or copyrighted characters.
 Reply with JSON only: {{"image": "...", "search": "2-4 English words for a stock photo", "headline": "Thai 2-6 words"}}"""
+
+MOOD_RULES = """- "mood": the feeling of this scene, so the animation can match it. One of:
+  "hook" (attention-grabbing opener — usually scene 1), "calm", "info" (explaining facts/numbers),
+  "exciting" (action, fast, competition), "shock" (surprise, twist, danger), "sad" (sad, serious, loss),
+  "happy" (fun, good news, success, friendly ending). Vary it with the story — not the same mood everywhere."""
+
+MOODS = {"hook": "⚡ เปิดแรง", "calm": "🌿 สบายๆ", "info": "💡 ให้ข้อมูล", "exciting": "🔥 ตื่นเต้น",
+         "shock": "😱 ช็อก/หักมุม", "sad": "🥀 เศร้า/จริงจัง", "happy": "😄 สนุก/ดีใจ"}
+
+# อารมณ์ฉาก → กล้อง · ทรานซิชันเข้าฉาก · แฟลชตอนเปิด · เสียงเอฟเฟกต์ · โทนสี
+MOOD_STYLE = {
+    "hook": {"cam": ["punch"], "tr": "circleopen", "flash": True, "sfx": "whoosh"},
+    "calm": {"cam": ["zoom_in", "pan_right", "pan_left"], "tr": "fade"},
+    "info": {"cam": ["zoom_in", "pan_up", "pan_right"], "tr": "slideup"},
+    "exciting": {"cam": ["pan_shake"], "tr": "slideleft", "sfx": "whoosh",
+                 "color": "eq=contrast=1.08:saturation=1.15"},
+    "shock": {"cam": ["punch_shake"], "tr": "fadewhite", "flash": True, "sfx": "hit",
+              "color": "eq=contrast=1.12"},
+    "sad": {"cam": ["zoom_out"], "tr": "fadeblack", "color": "eq=saturation=0.65:brightness=-0.03"},
+    "happy": {"cam": ["pan_up", "zoom_in"], "tr": "smoothleft", "color": "eq=saturation=1.18:brightness=0.02"},
+}
+
+
+def guess_mood(text: str, i: int, n: int) -> str:
+    """AI ไม่ได้บอกอารมณ์ฉาก → เดาจากคำในบท"""
+    t = text or ""
+    if i == 0:
+        return "hook"
+    if re.search(r"ตกใจ|ช็อก|ไม่น่าเชื่อ|อันตราย|หักมุม|แต่แล้ว|ทันใดนั้น|ระเบิด|สยอง|น่ากลัว|เตือน", t):
+        return "shock"
+    if re.search(r"เศร้า|เสียใจ|สูญเสีย|เสียชีวิต|ร้องไห้|น่าเสียดาย|โศก|ล้มเหลว|เจ็บปวด", t):
+        return "sad"
+    if re.search(r"เร็ว|แข่ง|บุก|วิ่ง|สู้|มันส์|ระทึก|พุ่ง|ไล่ล่า|ทะยาน", t):
+        return "exciting"
+    if re.search(r"ดีใจ|สนุก|สำเร็จ|ชนะ|ยินดี|ตลก|ฮา|มีความสุข|ว้าว", t) or i == n - 1:
+        return "happy"
+    if re.search(r"\d", t):
+        return "info"
+    return "calm" if i % 2 else "info"
+
+
+def clean_mood(v, text: str, i: int, n: int) -> str:
+    v = str(v or "").strip().lower()
+    return v if v in MOODS else guess_mood(text, i, n)
+
 
 GENERIC_IMAGES = [
     "soft glowing abstract background, bokeh lights, calm atmosphere",
@@ -89,7 +136,13 @@ def _graphic_rules() -> str:
     return G.GRAPHIC_RULES if GRAPHICS_ON else '- "graphic": always null'
 
 
+def finish_moods(scenes: list[dict]) -> None:
+    for i, sc in enumerate(scenes):
+        sc["mood"] = clean_mood(sc.get("mood"), sc.get("narration", ""), i, len(scenes))
+
+
 def finish_graphics(scenes: list[dict]) -> None:
+    finish_moods(scenes)
     """ไม่ให้กราฟิกรกเกินไป (ไม่เกินครึ่งหนึ่งของฉาก ไม่ซ้ำแบบติดกัน) + ฉากไม่มี AI → เดาจากตัวเลขในบท"""
     if not GRAPHICS_ON:
         for s in scenes:
@@ -222,7 +275,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
     scenes = plan["scenes"]
     topic = characters = ""
     try:
-        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), graphic_rules=_graphic_rules(), scenes="\n".join(
+        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES, scenes="\n".join(
             f"Scene {i + 1}: {s['narration']}" for i, s in enumerate(scenes))))
         topic = str(data.get("topic") or "")[:300]
         characters = str(data.get("characters") or "")[:300]
@@ -233,6 +286,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
                 s["image"] = str(v.get("image", "")).strip()[:400]
                 s["search"] = str(v.get("search", "")).strip()[:60]
                 s["graphic"] = G.clean(v.get("graphic"), s["narration"])
+                s["mood"] = str(v.get("mood") or "")
         plan["title"] = str(data.get("title") or plan["title"])
         plan["summary"] = str(data.get("summary") or "")
     except Exception as e:
@@ -304,7 +358,7 @@ def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> d
     n = max(3, min(15, round(target / 7)))
     budget = speech_budget(target)
     try:
-        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(),
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES,
                                      extra=extra, budget=budget, per_scene=max(40, min(110, budget // n)))
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
@@ -315,7 +369,7 @@ def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> d
                 scenes.append({"narration": narr, "headline": P.clean_text(str(s.get("headline", "")))[:40],
                                "image": str(s.get("image", "")).strip()[:300] or GENERIC_IMAGES[0], "img": "",
                                "search": str(s.get("search", "")).strip()[:60],
-                               "graphic": G.clean(s.get("graphic"), narr)})
+                               "graphic": G.clean(s.get("graphic"), narr), "mood": str(s.get("mood") or "")})
         if scenes:
             cut = fit_length(scenes, budget)
             plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
@@ -623,24 +677,44 @@ MOTIONS = ["zoom_in", "pan_right", "zoom_out", "pan_up"]
 TRANSITIONS = ["fade", "slideleft", "slideup", "circleopen", "smoothleft"]
 
 
-def _motion(kind: str, W: int, H: int, D: float) -> str:
-    """ภาพหลัก (สี่เหลี่ยมจัตุรัส) ค่อยๆ ซูม/เลื่อน วางบนพื้นหลังเบลอของภาพเดียวกัน → filter [0:v] → [mv]"""
+def _motion(kind: str, W: int, H: int, D: float, color: str = "") -> str:
+    """ภาพหลัก (สี่เหลี่ยมจัตุรัส) เคลื่อนกล้องตามอารมณ์ฉาก วางบนพื้นหลังเบลอของภาพเดียวกัน → filter [0:v] → [mv]
+    kind: zoom_in · zoom_out · pan_right/left/up/down · punch (กระชากซูมเข้า) · punch_shake (กระชาก+สั่น) · pan_shake (เลื่อน+สั่นเบาๆ)"""
     S = min(W, H)                        # ขนาดภาพหลัก: เต็มความกว้าง (แนวตั้ง) / เต็มความสูง (แนวนอน)
     y = (H - S) // 2 - (60 if H > W else 0)
     bg = (f"[b0]scale=270:270,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
           f"boxblur=10:2,eq=brightness=-0.18:saturation=1.2,setsar=1[bg]")
     fit = f"scale={S}:{S}:force_original_aspect_ratio=increase,crop={S}:{S},setsar=1"
-    if kind == "zoom_in":
-        fg = f"{fit},scale=w='{S}*(1+0.10*t/{D:.3f})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
-    elif kind == "zoom_out":
-        fg = f"{fit},scale=w='{S}*(1.10-0.10*t/{D:.3f})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
-    elif kind == "pan_right":
-        big = int(S * 1.12) // 2 * 2
-        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x='(iw-{S})*t/{D:.3f}':y=(ih-{S})/2"
-    else:
-        big = int(S * 1.12) // 2 * 2
-        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x=(iw-{S})/2:y='(ih-{S})*(1-t/{D:.3f})'"
+    D3 = f"{D:.3f}"
+    big = int(S * 1.12) // 2 * 2
+    if kind == "zoom_out":
+        fg = f"{fit},scale=w='{S}*(1.10-0.10*t/{D3})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
+    elif kind in ("pan_right", "pan_left"):
+        x = f"(iw-{S})*t/{D3}" if kind == "pan_right" else f"(iw-{S})*(1-t/{D3})"
+        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x='{x}':y=(ih-{S})/2"
+    elif kind in ("pan_up", "pan_down"):
+        yy = f"(ih-{S})*(1-t/{D3})" if kind == "pan_up" else f"(ih-{S})*t/{D3}"
+        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x=(iw-{S})/2:y='{yy}'"
+    elif kind in ("punch", "punch_shake"):
+        # กระชากซูมเข้าใน 0.3 วิแรก แล้วซูมช้าๆ ต่อ (+สั่นช่วงแรก ถ้าเป็นฉากช็อก)
+        a = 22 if kind == "punch_shake" else 0
+        fg = (f"{fit},scale=w='{S}*(1.06+0.12*min(t/0.3,1)+0.04*t/{D3})':h=-2:eval=frame,"
+              f"crop={S}:{S}:x='(iw-{S})/2+{a}*sin(t*47)*max(0,1-t/0.8)':y='(ih-{S})/2+{a}*cos(t*41)*max(0,1-t/0.8)'")
+    elif kind == "pan_shake":
+        bigger = int(S * 1.18) // 2 * 2
+        fg = (f"{fit},scale={bigger}:{bigger},crop={S}:{S}:x='(iw-{S})*(0.15+0.7*t/{D3})+5*sin(t*23)':"
+              f"y='(ih-{S})/2+5*sin(t*17)'")
+    else:  # zoom_in
+        fg = f"{fit},scale=w='{S}*(1+0.10*t/{D3})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
+    if color:
+        fg += "," + color
     return f"[0:v]split[b0][f0];{bg};[f0]{fg}[fg];[bg][fg]overlay=(W-w)/2:{y}[mv]"
+
+
+def scene_style(scene: dict, i: int) -> dict:
+    mood = scene.get("mood") if scene.get("mood") in MOOD_STYLE else "calm"
+    st = MOOD_STYLE[mood]
+    return {**st, "mood": mood, "cam": st["cam"][i % len(st["cam"])]}
 
 
 def _video_layout(video: Path, W: int, H: int) -> str:
@@ -670,13 +744,16 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     nd = P.probe(narr)["duration"] if narr else 0.0
     D = max(2.5, nd + LEAD + TAIL)
     video = is_video(img.name)
+    sty = scene_style(scene, i)
     anim = img.name.startswith("anim_")  # ฉากแอนิเมชันกราฟิก (ไม่มีภาพจริง): พื้นหลังเต็มจอลอยช้าๆ
     if anim:
         motion = (f"[0:v]crop={W}:{H}:x='(iw-{W})/2+(iw-{W})/2*sin(t*0.5)':"
                   f"y='(ih-{H})/2+(ih-{H})/2*cos(t*0.4)',setsar=1[mv]")
     else:
-        motion = _video_layout(img, W, H) if video else _motion(MOTIONS[i % len(MOTIONS)], W, H, D)
+        motion = _video_layout(img, W, H) if video else _motion(sty["cam"], W, H, D, sty.get("color", ""))
     vf = ["fps=30"]
+    if sty.get("flash") and extras:  # เปิดฉากด้วยแฟลชขาว (ฉากเปิด/ช็อก)
+        vf.append("fade=t=in:st=0:d=0.22:color=white")
 
     # ข้อความไทยทั้งหมด (หัวข้อ, ชื่อช่อง, ซับ) วาดด้วย libass ให้สระ/วรรณยุกต์ถูกตำแหน่ง
     ass = P.Ass(W, H)
@@ -700,6 +777,8 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
                         bottom=0.47 if studio and vertical else 0.69)
     else:
         cues = []
+    if sty.get("sfx") and extras:  # เสียงเอฟเฟกต์ตามอารมณ์ฉาก (ฟิ้ว/ตึง) ตอนเปิดฉาก
+        cues = [(0.02, sty["sfx"])] + cues
     cues = sorted(kin_cues + cues)
     brand = brand or {}
     text = (brand.get("text") or "").strip() if extras else ""
@@ -791,7 +870,8 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     return D
 
 
-def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -> None:
+def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path,
+               trans: list[str] | None = None) -> None:
     """ต่อฉากด้วยทรานซิชัน (ถ้าไม่ได้ ใช้ต่อธรรมดา)"""
     if len(files) == 1:
         P.concat(files, out, workdir)
@@ -802,7 +882,7 @@ def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -
     vlast, alast, off = "[0:v]", "[0:a]", 0.0
     for k in range(1, len(files)):
         off += durs[k - 1] - XF
-        tr = TRANSITIONS[(k - 1) % len(TRANSITIONS)]
+        tr = (trans[k] if trans and k < len(trans) and trans[k] else TRANSITIONS[(k - 1) % len(TRANSITIONS)])
         parts.append(f"{vlast}[{k}:v]xfade=transition={tr}:duration={XF}:offset={off:.3f}[v{k}]")
         parts.append(f"{alast}[{k}:a]acrossfade=d={XF}[a{k}]")
         vlast, alast = f"[v{k}]", f"[a{k}]"
@@ -816,10 +896,46 @@ def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path) -
         P.concat(files, out, workdir)
 
 
+def ai_animate(scenes: list[dict], scene_dir: Path, progress) -> dict:
+    """🤖 ให้ AI (การ์ดจอ) ขยับภาพนิ่งทุกฉากให้เป็นวิดีโอสั้น วนลูปได้ — เก็บไว้ใช้ซ้ำตอนตัดต่อใหม่
+    คืน {ลำดับฉาก: ไฟล์วิดีโอ}  ทำไม่ได้ → ฉากนั้นใช้ภาพนิ่ง + กล้องตามอารมณ์แทน"""
+    import motion as MO
+    if not MO.ai_available():
+        P.TTS_NOTES.append("ไม่พบการ์ดจอ NVIDIA — ข้าม AI ขยับภาพ ใช้กล้องเคลื่อนตามอารมณ์ฉากแทน")
+        return {}
+    todo = [(i, s) for i, s in enumerate(scenes)
+            if s.get("img") and not is_video(s["img"]) and not s["img"].startswith("anim_")]
+    out, fails = {}, 0
+    strength = {"calm": "soft", "sad": "soft", "info": "soft", "exciting": "strong", "shock": "strong"}
+    try:
+        for k, (i, s) in enumerate(todo):
+            src = scene_dir / s["img"]
+            mv = scene_dir / f"{src.stem}_aimove_{s.get('mood', 'calm')}.mp4"
+            if not mv.exists():
+                def prog(m, k=k, i=i):
+                    progress(30, f"🤖 AI ขยับภาพฉากที่ {i + 1} ({k + 1}/{len(todo)}): {m}")
+                try:
+                    img, (w, h) = MO.load(src, "original")
+                    MO.ai_video(img, mv, w, h, 3.0, strength.get(s.get("mood"), "normal"), True, prog)
+                except Exception as e:
+                    fails += 1
+                    mv.unlink(missing_ok=True)
+                    print(f"AI ขยับภาพฉาก {i + 1} ไม่สำเร็จ:", str(e)[-300:])
+                    if fails >= 2 and not out:  # พังติดกัน (การ์ดจอ/หน่วยความจำ) → เลิกลอง
+                        break
+                    continue
+            out[i] = mv
+    finally:
+        MO.release_ai()  # คืนการ์ดจอให้ขั้นตัดต่อ
+    if fails:
+        P.TTS_NOTES.append(f"AI ขยับภาพไม่สำเร็จ {fails} ฉาก — ฉากเหล่านั้นใช้กล้องเคลื่อนตามอารมณ์แทน")
+    return out
+
+
 def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
                  cover: Path | None = None, clean: bool = False, style: str = "cinematic",
-                 tone: str = "story", sfx: bool = True) -> list[Path]:
+                 tone: str = "story", sfx: bool = True, ai_motion: bool = False) -> list[Path]:
     scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     scenes = plan["scenes"]
@@ -829,24 +945,27 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
     if missing:  # ฉากที่เพิ่มใหม่/ภาพหาย → วาดก่อน
         draw_images(plan, scene_dir, layout, style, lambda p, m: progress(0, m))
     n, files, durs = len(scenes), [], []
+    finish_moods(scenes)  # ทุกฉากต้องมีอารมณ์ (กำหนดกล้อง/ทรานซิชัน/เสียงให้เข้ากับเนื้อหา)
     texts = [P.clean_text(s.get("narration", "")) for s in scenes]
     narrs = P.tts_all(texts, workdir, voice, rate, tone, progress, total=30)
+    moving = ai_animate(scenes, scene_dir, progress) if ai_motion else {}
     for i, s in enumerate(scenes):
         text, narr = texts[i], narrs[i]
-        progress(30 + (i + 0.5) / n * 65, f"ทำแอนิเมชันฉากที่ {i + 1}/{n}")
+        progress(30 + (i + 0.5) / n * 65, f"ทำแอนิเมชันฉากที่ {i + 1}/{n} ({MOODS.get(s.get('mood'), '')})")
         f = workdir / f"scene_{i:03}.mp4"
         sc = {**s, "narration": text}
+        src = moving.get(i) or scene_dir / s["img"]
         try:
-            d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, subtitles,
+            d = render_scene(src, sc, i, narr, f, workdir, layout, subtitles,
                              not clean, None if clean else brand, sfx=sfx and not clean)
         except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
             print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
-            d = render_scene(scene_dir / s["img"], sc, i, narr, f, workdir, layout, False, False, None)
+            d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None)
         files.append(f)
         durs.append(d)
     progress(97, "ต่อฉากพร้อมทรานซิชัน")
     joined = workdir / "joined.mp4"
-    join_xfade(files, durs, joined, workdir)
+    join_xfade(files, durs, joined, workdir, [scene_style(s, i)["tr"] for i, s in enumerate(scenes)])
     seq = [joined]
     if cover and not clean and Path(cover).exists():
         cv = workdir / "cover.mp4"

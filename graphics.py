@@ -197,6 +197,7 @@ SFX = {
     "pop": ("aevalsrc='sin(2*PI*(520*t+4200*t*t))*exp(-38*t)':d=0.12:s=44100", "lowpass=f=4000", 0.38),
     "tick": ("aevalsrc='sin(2*PI*2300*t)*exp(-260*t)':d=0.03:s=44100", "highpass=f=900", 0.18),
     "ding": ("aevalsrc='(0.6*sin(2*PI*1320*t)+0.4*sin(2*PI*1980*t))*exp(-5.5*t)':d=0.7:s=44100", "anull", 0.22),
+    "hit": ("aevalsrc='sin(2*PI*(110-70*t)*t)*exp(-7*t)+0.25*sin(2*PI*55*t)*exp(-4*t)':d=0.6:s=44100", "lowpass=f=900", 0.7),
     "rise": ("aevalsrc='sin(2*PI*(260*t+700*t*t))*min(1,t*12)*exp(-2.6*t)':d=0.65:s=44100", "lowpass=f=2500", 0.25),
 }
 

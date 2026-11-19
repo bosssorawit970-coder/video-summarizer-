@@ -415,7 +415,7 @@ def do_render_story(jid: str) -> None:
             except Exception as e:
                 print("ทำภาพปกไม่ได้:", e)
         ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
-                        sfx=r.get("gfx_sfx", True),
+                        sfx=r.get("gfx_sfx", True), ai_motion=bool(r.get("ai_motion")),
                         subtitles=_subs(r), brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
@@ -512,6 +512,7 @@ async def config(_: Request):
         "motion_effects": MO.EFFECTS,
         "motion_aspects": MO.ASPECTS,
         "motion_ai": MO.ai_available(),
+        "moods": ST.MOODS,
         "motion_ai_status": MO.ai_status(),
     })
 
@@ -816,6 +817,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
         else ("classic" if mode == "talk" and layout == "original" else "pop"),
         "fx": _bool(body.get("fx"), game),
         "gfx_sfx": _bool(body.get("gfx_sfx"), True),
+        "ai_motion": _bool(body.get("ai_motion"), False),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
         "music_volume": max(0.0, min(1.0, _num(body.get("music_volume"), 0.25))),
@@ -825,7 +827,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "fx", "cover", "music",
                "music_volume", "channel", "logo", "toptext")
 
 
@@ -901,6 +903,7 @@ async def render_job(req: Request):
                 scenes.append({"narration": narr[:300], "headline": str(s.get("headline") or "")[:40],
                                "image": str(s.get("image") or "")[:300], "img": img,
                                "search": str(s.get("search") or "")[:60], "options": opts_,
+                               "mood": s.get("mood") if s.get("mood") in ST.MOODS else "",
                                "graphic": G2.clean(s.get("graphic"), "", strict=False) if isinstance(s.get("graphic"), dict)
                                and not s["graphic"].get("off") else None})
         if not scenes:

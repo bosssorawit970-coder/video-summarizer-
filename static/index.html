@@ -448,7 +448,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
             <div class="noStory"><label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label><input type="text" id="toptext" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2"><div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่</div></div>
             <div><label class="f">ตกแต่ง</label>
-              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label></div></div>
+              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label><label class="storyRv aiMoBox"><input type="checkbox" id="aiMotion"> 🤖 AI ขยับภาพจริงทุกฉาก (การ์ดจอ ~3 นาที/ฉาก)</label></div></div>
             <div><label class="f">ซับไตเติล</label>
               <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div>
               <div class="seg" id="subStyle" style="margin-top:6px">
@@ -627,6 +627,7 @@ async function init() {
   if (!cfg.imagegen) $("#storyHint").textContent = "⚠️ เครื่องนี้ยังวาดภาพด้วย AI ไม่ได้ (ต้องใช้ Colab การ์ดจอ) — จะใช้ภาพพื้นหลังไล่สีแทน";
   fillVoices(cfg.voices);
   motionSetup();
+  document.querySelectorAll(".aiMoBox").forEach(e => e.style.display = cfg.motion_ai ? "" : "none");
   $("#tone").innerHTML = Object.entries(cfg.tones || {}).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#vSentence").textContent = cfg.ref_sentence || "";
   loadJobs();
@@ -1085,7 +1086,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#toptext").value = r.toptext || "";
-           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; }
+           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
@@ -1129,6 +1130,8 @@ function drawScenes() {
           <select data-g="type" style="width:auto;flex:none">${Object.entries(GFX).map(([k, v]) => `<option value="${k}" ${(c.graphic?.type || "") === k ? "selected" : ""}>${v[0]}</option>`).join("")}</select>
           <input type="text" data-g="text" style="flex:1;min-width:0" placeholder="${esc((GFX[c.graphic?.type || ""] || GFX[""])[1])}" value="${esc(gfxText(c.graphic))}" ${c.graphic ? "" : "disabled"}>
         </div>
+        <div class="row" style="gap:6px;margin-top:6px;align-items:center"><span class="hint" style="flex:none">อารมณ์ฉาก:</span>
+          <select data-k="mood" style="flex:1" title="กำหนดการเคลื่อนกล้อง ทรานซิชัน แฟลช เสียงเอฟเฟกต์ และโทนสีของฉากนี้">${Object.entries(cfg.moods || {}).map(([k, v]) => `<option value="${k}" ${c.mood === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
       </div>
       <div class="opts-row">
         ${c.generic ? `<div class="warn" style="margin-bottom:6px">⚠️ AI คิดภาพให้ฉากนี้ไม่ได้ ภาพอาจไม่เกี่ยวกับบท — เปิด "คำบรรยายภาพ" ด้านล่าง พิมพ์ภาพที่อยากได้ (อังกฤษ) แล้วกด 🎲</div>` : ""}
@@ -1357,7 +1360,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked})});
+      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };
