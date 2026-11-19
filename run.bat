@@ -67,6 +67,19 @@ if not exist .venv\installed.ok (
   echo ok> .venv\installed.ok
 )
 
+rem == 5) NVIDIA card: CUDA libraries so speech-to-text runs on the GPU (much faster) ==
+if not exist .venv\gpu.ok (
+  where nvidia-smi >nul 2>nul && (
+    echo NVIDIA card found - installing GPU libraries for faster speech-to-text, one time only...
+    .venv\Scripts\python -m pip install "nvidia-cublas-cu12" "nvidia-cudnn-cu12>=9,<10" && echo ok> .venv\gpu.ok
+  )
+)
+
+echo.
+echo  Program is running. You can close the browser tab - jobs keep going.
+echo  Open again any time: http://localhost:8000
+echo  Do NOT close this black window while a job is running.
+echo.
 start "" http://localhost:8000
 .venv\Scripts\python app.py
 pause

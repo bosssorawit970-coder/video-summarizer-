@@ -1531,6 +1531,32 @@ load_motion()
 
 
 load_existing()
+
+
+def _keep_awake() -> None:
+    """Windows: ระหว่างมีงานทำอยู่ ห้ามคอมเข้าโหมดพัก (Sleep) — ปิดแท็บ/ปิดจอไปได้ งานยังทำต่อ
+    (จอดับได้ตามปกติ แต่เครื่องไม่หลับ) งานเสร็จหมดแล้วคืนค่าให้พักได้ตามปกติ"""
+    if os.name != "nt":
+        return
+    import ctypes
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+    awake = False
+    while True:
+        try:
+            busy = any(j.get("status") in ("queued", "analyzing", "rendering") or
+                       (j.get("capcut") or {}).get("status") == "working" for j in list(jobs.values())) or \
+                any(m.get("status") in ("queued", "working") for m in list(motion_jobs.values()))
+            if busy != awake:
+                ctypes.windll.kernel32.SetThreadExecutionState(
+                    ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if busy else 0))
+                awake = busy
+                print("มีงานกำลังทำ — กันคอมเข้าโหมดพัก" if busy else "งานเสร็จหมดแล้ว — คอมพักได้ตามปกติ")
+        except Exception:
+            pass
+        time.sleep(20)
+
+
+threading.Thread(target=_keep_awake, daemon=True).start()
 for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
     try:
         _b = json.loads(_f.read_text(encoding="utf-8"))

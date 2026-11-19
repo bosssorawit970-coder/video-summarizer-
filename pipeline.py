@@ -32,7 +32,42 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL") or "http://localhost:11434"
 
 # ───────────────────────── ffmpeg helpers ─────────────────────────
 
+def _to_nvenc(cmd: list[str]) -> list[str] | None:
+    """แปลงคำสั่ง libx264 → h264_nvenc (การ์ดจอ NVIDIA เข้ารหัสเร็วกว่า CPU หลายเท่า)"""
+    if "libx264" not in cmd or not _has_nvenc():
+        return None
+    out, crf, skip = [], 21, False
+    for k, a in enumerate(cmd):
+        if skip:
+            skip = False
+            continue
+        if a in ("-preset", "-tune", "-crf") and k + 1 < len(cmd):
+            if a == "-crf":
+                try:
+                    crf = int(float(cmd[k + 1]))
+                except ValueError:
+                    pass
+            skip = True
+            continue
+        if a == "libx264":
+            out[-1:] = ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "__CQ__", "-b:v", "0"]
+            continue
+        out.append(a)
+    return [str(crf + 1) if a == "__CQ__" else a for a in out]
+
+
+_nvenc_fail = 0
+
+
 def run(cmd: list[str], cwd: str | Path | None = None) -> str:
+    global _nvenc_fail
+    nv = _to_nvenc(cmd) if _nvenc_fail < 3 else None
+    if nv:
+        p = subprocess.run(nv, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if p.returncode == 0:
+            return p.stdout
+        _nvenc_fail += 1  # การ์ดจอเข้ารหัสไม่ได้ → ใช้ CPU (พลาด 3 ครั้งเลิกใช้การ์ดจอ)
+        print("เข้ารหัสด้วยการ์ดจอไม่ได้ ใช้ CPU แทน:", p.stderr.strip().splitlines()[-1:] if p.stderr else "")
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if p.returncode != 0:
@@ -183,7 +218,12 @@ def _has_nvenc() -> bool:
         try:
             enc = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
                                  capture_output=True, text=True).stdout
-            _nvenc = "h264_nvenc" in enc and has_gpu()
+            # ลองเข้ารหัสจริงสั้นๆ (ffmpeg มี nvenc แต่ไม่มีการ์ด/ไดรเวอร์เก่า = ใช้ไม่ได้)
+            _nvenc = "h264_nvenc" in enc and subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=256x256:d=0.2",
+                 "-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-f", "null", "-"],
+                capture_output=True, timeout=60).returncode == 0
+            print("เข้ารหัสวิดีโอด้วยการ์ดจอ (NVENC):", "ใช้ได้ ⚡" if _nvenc else "ไม่มี ใช้ CPU")
         except Exception:
             _nvenc = False
     return _nvenc
@@ -247,6 +287,25 @@ def extract_audio(video: Path, wav: Path) -> None:
 _whisper_cache: dict = {}
 
 
+def _win_cuda_dlls() -> None:
+    """Windows: ไลบรารี CUDA ที่ติดตั้งผ่าน pip (nvidia-cublas-cu12, nvidia-cudnn-cu12) อยู่ใน site-packages/nvidia/*/bin
+    ต้องบอก Windows ให้หาเจอ ไม่งั้นถอดเสียงด้วยการ์ดจอไม่ได้"""
+    if os.name != "nt":
+        return
+    import site
+    for sp in {*site.getsitepackages(), site.getusersitepackages()}:
+        for b in Path(sp).glob("nvidia/*/bin"):
+            try:
+                os.add_dll_directory(str(b))
+            except Exception:
+                pass
+            os.environ["PATH"] = str(b) + os.pathsep + os.environ.get("PATH", "")
+
+
+_win_cuda_dlls()
+_whisper_gpu_bad = False
+
+
 def has_gpu() -> bool:
     try:
         import ctranslate2
@@ -260,23 +319,25 @@ def _load_whisper(name: str, force_cpu: bool = False):
     if key in _whisper_cache:
         return _whisper_cache[key]
     from faster_whisper import WhisperModel
-    if has_gpu() and not force_cpu:
+    if has_gpu() and not force_cpu and not _whisper_gpu_bad:
         model = WhisperModel(name, device="cuda", compute_type="float16")
-    else:
-        model = WhisperModel(name, device="cpu", compute_type="int8")
+    else:  # ใช้ CPU ทุกคอร์ (ค่าเริ่มต้นใช้แค่ 4)
+        model = WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=max(4, os.cpu_count() or 4))
     _whisper_cache[key] = model
     return model
 
 
 def transcribe(wav: Path, model_name: str, duration: float,
                progress: Progress) -> list[dict]:
+    global _whisper_gpu_bad
     progress(0, f"กำลังโหลดโมเดลถอดเสียง ({model_name}) — ครั้งแรกจะดาวน์โหลดนานหน่อย")
     try:
         return _transcribe(_load_whisper(model_name), wav, duration, progress)
     except Exception as e:
-        if not has_gpu():
+        if not has_gpu() or _whisper_gpu_bad:
             raise
-        # ไลบรารี CUDA/cuDNN ไม่ตรงรุ่น → ถอดเสียงด้วย CPU แทน (ช้ากว่าแต่ใช้ได้)
+        # ไลบรารี CUDA/cuDNN ไม่ตรงรุ่น → ถอดเสียงด้วย CPU แทน (ช้ากว่าแต่ใช้ได้) และจำไว้ งานถัดไปไม่ต้องลองการ์ดจออีก
+        _whisper_gpu_bad = True
         print("GPU ใช้ไม่ได้ เปลี่ยนเป็น CPU:", e)
         progress(0, "การ์ดจอใช้ไม่ได้ กำลังถอดเสียงด้วย CPU (ช้ากว่า)")
         return _transcribe(_load_whisper(model_name, force_cpu=True), wav, duration, progress)
