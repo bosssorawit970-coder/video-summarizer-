@@ -371,7 +371,7 @@ def do_render(jid: str) -> None:
         except Exception as e:
             print("ทำภาพปกไม่ได้:", e)
         P.render(src, clips, work, out,
-                 voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"],
+                 voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"], orig_mode=r.get("orig_mode", "all"),
                  subtitles=_subs(r), layout=r.get("layout", "original"),
                  fx=r.get("fx", False), brand=brand,
                  cover=thumb if r.get("cover") and thumb.exists() else None,
@@ -457,7 +457,7 @@ def do_capcut(jid: str) -> None:
         else:
             src = _resolve(j["source"]) if j.get("multi") else d / j["source"]
             parts = P.render(src, j["plan"]["clips"], work, full,
-                             voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"],
+                             voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"], orig_mode=r.get("orig_mode", "all"),
                              subtitles=False, layout=r.get("layout", "original"),
                              progress=prog, clean=True, src_resolver=_resolve)
             prefix, labels = "ช็อต", [c.get("label") or "" for c in j["plan"]["clips"]]
@@ -812,6 +812,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "rate": max(-50, min(50, int(_num(body.get("rate"), 15 if game else 10)))),
         # โหมดเกม: เสียงเกมดังกว่า (ระบบลดลงให้เองตอนมีเสียงพากย์)
         "orig_volume": max(0.0, min(1.0, _num(body.get("orig_volume"), 0.7 if game else 0.15))),
+        "orig_mode": body.get("orig_mode") if body.get("orig_mode") in ("key", "all", "none") else ("all" if game else "key"),
         "layout": layout if layout in P.LAYOUTS else ("vertical_blur" if game else "vertical_crop" if mode == "story" else "original"),
         "subtitles": _bool(body.get("subtitles"), True),
         "sub_style": body.get("sub_style") if body.get("sub_style") in ("pop", "classic")
@@ -830,7 +831,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "frame", "less_text", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "orig_mode", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "frame", "less_text", "fx", "cover", "music",
                "music_volume", "channel", "logo", "toptext")
 
 
@@ -937,6 +938,7 @@ async def render_job(req: Request):
                           "label": str(c.get("label") or "")[:20],
                           "mark": _num(c.get("mark"), s), "score": _num(c.get("score"), 0),
                           "desc": str(c.get("desc") or "")[:100],
+                          **({"keep_audio": True} if c.get("keep_audio") else {}),
                           **({"src": src} if src else {})})
     if not clips:
         return JSONResponse({"error": "ต้องมีอย่างน้อย 1 ช่วงที่ยาวกว่า 0.5 วินาที"},

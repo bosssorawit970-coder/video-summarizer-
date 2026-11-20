@@ -441,7 +441,13 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div id="toneBox" class="hidden"><label class="f">อารมณ์เสียง (Gemini)</label><select id="tone"></select></div>
             <div><label class="f">ความเร็วการพูด: <span id="rateV" class="stat">0%</span></label>
               <input type="range" id="rate" min="-30" max="40" step="5" value="10"></div>
-            <div class="noStory"><label class="f">เสียงต้นฉบับเบื้องหลัง: <span id="volV" class="stat">15%</span></label>
+            <div class="noStory"><label class="f">เสียงจากวิดีโอต้นฉบับ</label>
+              <select id="origMode">
+                <option value="key">🔊 เฉพาะฉากสำคัญ — ที่เหลือพากย์อย่างเดียว (แนะนำ)</option>
+                <option value="all">เบาๆ ใต้เสียงพากย์ทั้งคลิป (แบบเดิม)</option>
+                <option value="none">ปิดเสียงต้นฉบับทั้งหมด</option></select>
+              <p class="hint" id="origHint"></p></div>
+            <div class="noStory volBox"><label class="f">ความดังเสียงต้นฉบับเบื้องหลัง: <span id="volV" class="stat">15%</span></label>
               <input type="range" id="vol" min="0" max="100" step="5" value="15"></div>
             <div><label class="f">สัดส่วนวิดีโอ</label><select id="layout"></select></div>
             <div><label class="f">เพลงประกอบ</label><select id="music"></select></div>
@@ -1087,7 +1093,7 @@ function enterReview() {
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#toptext").value = r.toptext || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; $("#frameFull").checked = r.frame !== "square"; $("#lessText").checked = r.less_text !== false; }
-  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
+  if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#origMode").value = r.orig_mode || (isGame() ? "all" : "key"); origChanged(); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
 
@@ -1208,16 +1214,32 @@ function drawClips() {
         <button class="ghost" data-a="up" title="เลื่อนขึ้น">↑</button><button class="ghost" data-a="del" title="ลบ">ลบ</button></div>
       ${job?.multi ? "" : `<div class="row" style="margin-bottom:6px"><button class="tset" data-a="setStart">⏱ เริ่ม = ตำแหน่งวิดีโอ</button><button class="tset" data-a="setEnd">⏱ จบ = ตำแหน่งวิดีโอ</button>${isGame() ? `<button class="tset" data-a="setMark">⭐ จังหวะเด็ด = ตำแหน่งวิดีโอ${c.mark != null ? ` (${fmt(c.mark)})` : ""}</button>` : ""}</div>`}
       ${c.desc ? `<p class="hint">🤖 AI เห็นในภาพ: ${esc(c.desc)}</p>` : ""}
-      <textarea data-k="narration" rows="3" placeholder="บทพากย์ช่วงนี้ (เว้นว่าง = ใช้เสียงต้นฉบับ)">${esc(c.narration)}</textarea>
+      ${isGame() ? "" : `<label class="hint" style="display:flex;gap:6px;align-items:center;margin:0 0 4px"><input type="checkbox" data-keep ${c.keep_audio ? "checked" : ""}> 🔊 ฉากสำคัญ: เปิดเสียงต้นฉบับเต็มๆ (ไม่พากย์ทับ)</label>`}
+      <textarea data-k="narration" rows="3" placeholder="บทพากย์ช่วงนี้ (เว้นว่าง = ใช้เสียงต้นฉบับ)" ${c.keep_audio ? 'style="opacity:.45"' : ""}>${esc(c.narration)}</textarea>
       ${need > len + 0.5 ? `<div class="warn">บทยาวกว่าช่วงคลิป (~${need.toFixed(0)} วิ) — ภาพจะยืดต่อให้อัตโนมัติ หรือตัดบทให้สั้นลง</div>` : ""}
     </div>`;
   }).join("") || `<p class="hint">ยังไม่มีช่วง — หยุดวิดีโอตรงจุดที่ต้องการแล้วกด "เพิ่มช่วงตรงนี้"</p>`;
   $("#totalLen").textContent = clips.reduce((s, c) => s + Math.max(c.end - c.start, c.narration.replace(/\s/g,"").length/11), 0).toFixed(0);
+  origChanged();
 }
+function origChanged() {
+  const m = $("#origMode")?.value || "key";
+  document.querySelectorAll(".volBox").forEach(e => e.classList.toggle("hidden", m !== "all" || isStory()));
+  if (!$("#origHint")) return;
+  if (m === "key" && !isStory() && !isGame()) {
+    const tot = clips.reduce((s, c) => s + Math.max(c.end - c.start, (c.narration || "").replace(/\s/g, "").length / 11), 0) || 1;
+    const keep = clips.filter(c => c.keep_audio || !(c.narration || "").trim()).reduce((s, c) => s + (c.end - c.start), 0);
+    const pct = Math.round(keep / tot * 100);
+    $("#origHint").textContent = `ฉากที่ติ๊ก 🔊 หรือไม่มีบทพากย์ = เปิดเสียงต้นฉบับ (ตอนนี้ ${pct}% ของคลิป${pct > 25 ? " — เยอะไป แนะนำไม่เกิน 20%" : ""}) · ฉากอื่นได้ยินแต่เสียงพากย์`;
+  } else $("#origHint").textContent = m === "none" ? "ทุกฉากได้ยินแต่เสียงพากย์ (ฉากที่ไม่มีบทจะเงียบ)" : "";
+}
+$("#origMode").onchange = origChanged;
 
 $("#clips").addEventListener("change", e => {
   if (isStory()) { const el = e.target, i = +el.closest(".scene")?.dataset.i; if (!isNaN(i) && el.dataset.k) clips[i][el.dataset.k] = el.value; return; }
-  const el = e.target, i = +el.closest(".clip")?.dataset.i, k = el.dataset.k; if (isNaN(i) || !k) return;
+  const el = e.target, i = +el.closest(".clip")?.dataset.i, k = el.dataset.k;
+  if (!isNaN(i) && el.hasAttribute("data-keep")) { clips[i].keep_audio = el.checked; if (el.checked) clips[i].narration = ""; return drawClips(); }
+  if (isNaN(i) || !k) return;
   if (k === "label") { const c = clips[i]; c.label = el.value;
     if (!c.narration.trim() || Object.values(GAME_LINES).flat().includes(c.narration)) c.narration = gameLine(c.label);
     return drawClips(); }
@@ -1359,7 +1381,7 @@ $("#renderBtn").onclick = async () => {
   try {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
-      rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
+      rate: +$("#rate").value, orig_volume: $("#vol").value / 100, orig_mode: $("#origMode").value, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
       music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameFull").checked ? "full" : "square", less_text: $("#lessText").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }

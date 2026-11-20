@@ -368,9 +368,13 @@ PLAN_PROMPT = """คุณเป็นบรรณาธิการวิดี
 2. เลือกช่วงไฮไลต์ที่สำคัญที่สุด เรียงตามเวลา ไม่ทับกัน รวมความยาวประมาณ {target} วินาที (แต่ละช่วงยาว 5-20 วินาที)
 3. เขียนบทพากย์ภาษาไทยสำหรับแต่ละช่วง เป็นภาษาพูดที่เป็นธรรมชาติ เล่าเรื่องต่อเนื่องกันเมื่ออ่านเรียงกัน
    ความยาวบทพากย์ต้องอ่านจบทันในช่วงนั้น (ประมาณ 10-12 ตัวอักษรต่อวินาที) ห้ามใส่อีโมจิหรือสัญลักษณ์
+4. คลิปสรุปจะพากย์ทับเป็นหลัก และเปิดเสียงต้นฉบับเฉพาะ "ฉากสำคัญ" 1-3 ฉากเท่านั้น
+   เช่น ประโยคเด็ด/ประโยคดัง จุดไคลแมกซ์ ฉากซึ้ง ฉากหักมุม ที่ต้องได้ยินเสียงจริงถึงจะอิน
+   ช่วงแบบนี้ให้ใส่ "keep_audio": true และ narration เป็น "" (ว่าง) ยาวช่วงละ 3-8 วินาที
+   และช่วงที่เปิดเสียงต้นฉบับรวมกันต้องไม่เกิน 20% ของความยาวทั้งหมด ช่วงอื่นทั้งหมดต้องมีบทพากย์
 
 ตอบเป็น JSON อย่างเดียว ไม่ต้องมีคำอธิบายอื่น ตามรูปแบบ:
-{{"title": "...", "summary": "...", "clips": [{{"start_seg": 3, "end_seg": 5, "narration": "..."}}]}}
+{{"title": "...", "summary": "...", "clips": [{{"start_seg": 3, "end_seg": 5, "narration": "..."}}, {{"start_seg": 6, "end_seg": 6, "narration": "", "keep_audio": true}}]}}
 start_seg และ end_seg คือหมายเลขท่อนแรกและท่อนสุดท้ายของช่วงนั้น (รวมทั้งสองท่อน)
 
 คำถอดเสียง:
@@ -736,6 +740,32 @@ def _plan_without_ai(segs: list[dict], target: float) -> dict:
     return {"title": "", "summary": "(โหมดไม่ใช้ AI — แก้บทพากย์ด้านล่างได้เลย)", "clips": clips}
 
 
+KEEP_MAX_SHARE = 0.22   # เสียงต้นฉบับรวมไม่เกินราว 1 ใน 5 ของคลิป (ที่เหลือพากย์ทับ)
+KEEP_MAX_LEN = 9.0
+
+
+def limit_original_audio(clips: list[dict]) -> None:
+    """ฉากเปิดเสียงต้นฉบับ: ยาวไม่เกิน KEEP_MAX_LEN วิ และรวมไม่เกิน KEEP_MAX_SHARE ของคลิป
+    (เกิน → ตัดฉากที่ยาวสุดทิ้ง) — ใช้เสียงจากต้นฉบับน้อยลง = คลิปเป็นงานสรุป/เล่าใหม่ของเราเองมากขึ้น"""
+    for c in clips:
+        if c.get("keep_audio") and c["end"] - c["start"] > KEEP_MAX_LEN:
+            c["end"] = c["start"] + KEEP_MAX_LEN
+    total = sum(c["end"] - c["start"] for c in clips) or 1
+    keep = sorted([c for c in clips if c.get("keep_audio")], key=lambda c: c["end"] - c["start"])
+    used = 0.0
+    for c in keep:
+        d = c["end"] - c["start"]
+        if used + d > total * KEEP_MAX_SHARE:
+            clips.remove(c)
+        else:
+            used += d
+
+
+def keeps_original(clip: dict) -> bool:
+    """ช่วงนี้เปิดเสียงต้นฉบับเต็มๆ ไหม (ติ๊ก 🔊 ไว้ หรือไม่มีบทพากย์)"""
+    return bool(clip.get("keep_audio")) or not clean_text(clip.get("narration", ""))
+
+
 def make_plan(segs: list[dict], provider: str, target: float,
               video_duration: float) -> dict:
     if not segs:
@@ -755,15 +785,18 @@ def make_plan(segs: list[dict], provider: str, target: float,
             b = max(a, min(int(c.get("end_seg", a)), len(segs) - 1))
         except (KeyError, ValueError, TypeError):
             continue
+        keep = bool(c.get("keep_audio"))
         clips.append({"start": segs[a]["start"],
                       "end": min(segs[b]["end"] + 0.3, video_duration),
-                      "narration": clean_text(str(c.get("narration", "")))})
+                      "narration": "" if keep else clean_text(str(c.get("narration", ""))),
+                      **({"keep_audio": True} if keep else {})})
     clips.sort(key=lambda c: c["start"])
     # กันช่วงทับกัน
     for prev, cur in zip(clips, clips[1:]):
         if cur["start"] < prev["end"]:
             prev["end"] = cur["start"]
     clips = [c for c in clips if c["end"] - c["start"] >= 1]
+    limit_original_audio(clips)
     if not clips:
         raise RuntimeError("AI ไม่ได้เลือกช่วงไฮไลต์ที่ใช้ได้ ลองใหม่อีกครั้ง")
     return {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")),
@@ -1525,7 +1558,7 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
 
     if narr:
         d = int(LEAD_IN * 1000)
-        parts.append(f"[{idx_narr}:a]{norm},adelay={d}|{d},apad,asplit=2[nar][key]")
+        parts.append(f"[{idx_narr}:a]{norm},adelay={d}|{d},apad" + (",asplit=2[nar][key]" if has_a else "[nar]"))
     if has_a:
         a_in = asrc if slow else f"{asrc}"
         pre = "" if slow else f"{norm},"
@@ -1539,7 +1572,6 @@ def _render_clip(src, info, clip, narr, out, orig_volume, subtitles, workdir,
         else:
             parts.append("[bg0]anull[mx]")
     elif narr:
-        parts.append("[key]anullsink")
         parts.append("[nar]anull[mx]")
     else:
         inputs += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]; idx_null = n_in; n_in += 1
@@ -1695,7 +1727,7 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
            voice: str, rate: int, orig_volume: float, subtitles: bool,
            progress: Progress, layout: str = "original", clean: bool = False,
            fx: bool = False, brand: dict | None = None, cover: Path | None = None,
-           src_resolver=None, tone: str = "natural") -> list[Path]:
+           src_resolver=None, tone: str = "natural", orig_mode: str = "all") -> list[Path]:
     """clean=True: สำหรับ CapCut — ไม่มีซับ ไม่มีป้าย/โลโก้ ไม่เฟดภาพ (ไปแต่งใน CapCut เอง)
     ช็อตที่มี "src" ใช้ต้นฉบับคนละไฟล์ได้ (คลิปรวมหลายเกม) — src_resolver แปลงเป็น path"""
     src, workdir, out = src.resolve(), workdir.resolve(), out.resolve()
@@ -1714,8 +1746,10 @@ def render(src: Path, plan_clips: list[dict], workdir: Path, out: Path, *,
         text, narr = texts[i], narrs[i]
         progress(30 + (i + 0.5) / n * 69, f"ตัดต่อช่วงที่ {i + 1}/{n}" + (" (สโลว์+เอฟเฟกต์)" if fx and not clean else ""))
         f = workdir / f"clip_{i:03}.mp4"
+        # orig_mode: "key" = เสียงต้นฉบับเฉพาะฉากสำคัญ (ฉากอื่นพากย์อย่างเดียว) · "all" = เบาๆ ทั้งคลิป · "none" = ปิด
+        vol = (1.0 if keeps_original(c) else 0.0) if orig_mode == "key" else (0.0 if orig_mode == "none" else orig_volume)
         render_clip(s_path, infos[s_path], {**c, "narration": text}, narr, f,
-                    orig_volume, (subtitles if not clean else False), workdir, layout=layout,
+                    vol, (subtitles if not clean else False), workdir, layout=layout,
                     extras=not clean, fades=not clean, fx=fx and not clean,
                     brand=None if clean else brand)
         files.append(f)
