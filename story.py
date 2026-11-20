@@ -18,7 +18,8 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 - สำคัญมาก: บทพากย์ทุกฉากรวมกันต้องไม่เกิน {budget} ตัวอักษร (ไม่นับช่องว่าง) เพื่อให้คลิปยาวไม่เกิน {target} วินาที
   ถ้าข้อมูลยาว ให้สรุปเฉพาะประเด็นที่น่าสนใจที่สุด ไม่ต้องเล่าทุกรายละเอียด
 - ฉากแรกต้องเปิดแรง ดึงความสนใจทันที (ตั้งคำถาม/ประโยคน่าตกใจ/สัญญาว่าจะได้อะไร)
-- เล่าต่อเนื่อง ภาษาพูดเป็นกันเอง กระชับ ฉากสุดท้ายสรุปและชวนกดติดตาม/คอมเมนต์
+- เล่าต่อเนื่อง ภาษาพูดเป็นกันเอง กระชับ
+- ฉากสุดท้ายต้องจบด้วยคำถามสั้นๆ 1 ข้อที่เกี่ยวกับเรื่องนี้ ชวนคนดูตอบในคอมเมนต์ (เช่น "แล้วคุณล่ะ เคยเจอแบบนี้ไหม? คอมเมนต์บอกหน่อย")
 - ยึดตามข้อมูลที่ให้มา ห้ามแต่งข้อเท็จจริง ตัวเลข หรือชื่อที่ไม่มีในข้อมูล
 - ถ้าข้อมูลเป็นภาษาอื่น (เช่น อังกฤษ) ให้แปลและเล่าเป็นภาษาไทยที่เป็นธรรมชาติ ไม่แข็งแบบแปลตรงตัว ชื่อคน/สถานที่/แบรนด์ให้ทับศัพท์
 {extra}
@@ -53,9 +54,11 @@ Step 2 — for EACH scene write:
 - "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
 {graphic_rules}
 {mood_rules}
+Also write "cta": ONE short, natural spoken Thai question (max 70 characters) about this topic that invites viewers to answer
+in the comments, ending with something like "คอมเมนต์บอกหน่อย" (e.g. "แล้วคุณล่ะ มีเพื่อนเป็นแฝดไหม? คอมเมนต์บอกหน่อย"). No emoji.
 
 Reply with JSON only:
-{{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty",
+{{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty", "cta": "...",
  "title": "catchy Thai title (1-2 emoji ok)", "summary": "Thai caption 1-2 sentences + 3-5 hashtags",
  "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm"}}]}}
 "scenes" must contain exactly {n} items, in order.
@@ -251,6 +254,12 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     plan = {"title": narrs[0][:40] if narrs else "", "summary": "", "scenes": scenes}
     if provider != "none":
         fill_visuals(plan, provider)
+    cta = plan.pop("cta", "")
+    if cta and scenes and not re.search(r"คอมเมน|คอมเม้น|ติดตาม|กดไลก์|กดไลค์|กดแชร์", scenes[-1]["narration"]):
+        # บทของผู้ใช้ไม่มีคำชวนคอมเมนต์ → เพิ่มฉากปิดท้ายสั้นๆ (ลบ/แก้ได้ในหน้าตรวจบท)
+        last = scenes[-1]
+        scenes.append({"narration": cta, "headline": "", "img": "", "image": last.get("image", ""),
+                       "search": last.get("search", ""), "graphic": None, "mood": "happy", "cta": True})
     for i, s in enumerate(scenes):  # AI คิดภาพให้ไม่ได้จริงๆ → ใช้ภาพทั่วไป แต่ทำเครื่องหมายเตือนไว้
         if not s["image"]:
             s["image"], s["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
@@ -289,6 +298,9 @@ def fill_visuals(plan: dict, provider: str) -> None:
                 s["mood"] = str(v.get("mood") or "")
         plan["title"] = str(data.get("title") or plan["title"])
         plan["summary"] = str(data.get("summary") or "")
+        cta = P.clean_text(str(data.get("cta") or ""))[:90]
+        if cta and thai_ratio(cta) > 0.5:
+            plan["cta"] = cta
     except Exception as e:
         print("AI คิดภาพทั้งเรื่องไม่สำเร็จ จะถามทีละฉาก:", e)
         plan["ai_error"] = P.error_text(e)
@@ -439,14 +451,15 @@ def video_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "")
     return [p.name for p in got]
 
 
-def ai_variants(s: dict, i: int, scene_dir: Path, style: str, n: int, progress=None) -> tuple[list[str], bool]:
+def ai_variants(s: dict, i: int, scene_dir: Path, style: str, n: int, progress=None,
+                tall: bool = False) -> tuple[list[str], bool]:
     """AI วาด n ภาพ (คนละแบบ) คืน (ชื่อไฟล์, วาดด้วย AI ได้ไหม)"""
     import random
     names, ai = [], True
     for k, p in enumerate(next_names(scene_dir, i, n)):
         if progress:
             progress(f"วาดภาพที่ {k + 1}/{n}")
-        ai = imagegen.generate(s.get("image") or GENERIC_IMAGES[0], p, 1024, 1024, style,
+        ai = imagegen.generate(s.get("image") or GENERIC_IMAGES[0], p, 1024, 1792 if tall else 1024, style,
                                seed=random.randint(1, 2**31 - 1), progress=progress) and ai
         names.append(p.name)
     return names, ai
@@ -582,6 +595,26 @@ def rank_photos(scenes: list[dict], scene_dir: Path, topic: str = "", progress=N
     return done
 
 
+def _rank_one(tmp: dict, scene_dir: Path, topic: str) -> float | None:
+    """เรียงตัวเลือกของฉากเดียว คืนคะแนนความตรงของตัวที่ดีที่สุด (None = AI ดูไม่ได้)"""
+    opts = [o for o in tmp["options"] if (scene_dir / poster(o)).exists()][:6]
+    parts = [{"text": f"Scene 1 narration (Thai): {tmp.get('narration', '')}"}]
+    for m, o in enumerate(opts, 1):
+        img = _thumb_part(scene_dir / poster(o))
+        if img:
+            parts += [{"text": f"Scene 1 - photo {m}:"}, img]
+    try:
+        data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic or tmp.get("narration", "")), parts))
+        r = (data.get("scenes") or [{}])[0]
+        order = [int(x) - 1 for x in r.get("order") or []]
+        best = [opts[x] for x in dict.fromkeys(order) if 0 <= x < len(opts)]
+        tmp["options"] = best + [o for o in tmp["options"] if o not in best]
+        return float(r.get("score") or 0)
+    except Exception as e:
+        print("AI ดูวิดีโอไม่ได้:", e)
+        return None
+
+
 def video_scenes(scenes: list[dict]) -> list[int]:
     """เลือกฉากที่จะแทรกวิดีโอ: ราว 1 ใน 3 กระจายทั้งเรื่อง (ฉากแรกด้วย = เปิดคลิปให้มีชีวิต)"""
     n = len(scenes)
@@ -607,11 +640,23 @@ def add_videos(plan: dict, scene_dir: Path, progress, idxs: list[int] | None = N
             break  # คีย์ผิด/โควตา → ไม่ต้องลองฉากอื่น
         if not vids:
             continue
-        tmp = {"narration": s.get("narration", ""), "options": vids}
-        if len(vids) > 1 and vision_ready():
-            rank_photos([tmp], scene_dir, plan.get("title") or "")
-        s["options"] = tmp["options"] + [o for o in s.get("options") or [] if o not in tmp["options"]]
-        s["img"] = tmp["options"][0]
+        cur = s.get("img") if s.get("img") and (scene_dir / s["img"]).exists() else ""
+        if vision_ready():
+            # ให้ AI ดูวิดีโอเทียบกับภาพเดิมของฉาก: ใส่วิดีโอเฉพาะเมื่อตรงบทกว่าภาพเดิม และตรงจริง (คะแนน ≥ 6/10)
+            tmp = {"narration": s.get("narration", ""), "options": vids + ([cur] if cur else [])}
+            score = _rank_one(tmp, scene_dir, plan.get("title") or "")
+            best = tmp["options"][0]
+            others = [o for o in s.get("options") or [] if o not in tmp["options"]]
+            s["options"] = tmp["options"] + others
+            if score is None or not is_video(best) or score < 6:
+                s["img"] = cur or best  # วิดีโอไม่ตรงพอ → คงภาพเดิม (วิดีโอยังอยู่ในตัวเลือก กดเลือกเองได้)
+                continue
+            s["img"] = best
+        else:  # ไม่มีคีย์ Gemini ดูภาพไม่ได้ → แทรกเฉพาะฉากที่ไม่ใช่ฉากเปิด (กันภาพแรกไม่ตรงเรื่อง)
+            s["options"] = vids + [o for o in s.get("options") or [] if o not in vids]
+            if i == 0 and cur:
+                continue
+            s["img"] = vids[0]
         done.append(s)
     return len(done)
 
@@ -645,7 +690,8 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
                 photo_err = P.error_text(e)
                 plan["note"] = f"หาภาพถ่ายไม่ได้ ({photo_err}) จึงให้ AI วาดแทน"
         progress(i / n * 100, f"วาดภาพฉากที่ {i + 1}/{n}")
-        names, ai = ai_variants(s, i, scene_dir, style, 1, lambda m: progress(i / n * 100, f"ฉากที่ {i + 1}/{n}: {m}"))
+        names, ai = ai_variants(s, i, scene_dir, style, 1, lambda m: progress(i / n * 100, f"ฉากที่ {i + 1}/{n}: {m}"),
+                                tall=layout != "original")
         if not ai and not photo_err:  # วาดไม่ได้ (ได้แค่ภาพไล่สี) → ลองภาพถ่ายฟรีแทน
             try:
                 got = photo_options(s, i, scene_dir, 6 if vision_ready() else 4)
@@ -677,38 +723,66 @@ MOTIONS = ["zoom_in", "pan_right", "zoom_out", "pan_up"]
 TRANSITIONS = ["fade", "slideleft", "slideup", "circleopen", "smoothleft"]
 
 
-def _motion(kind: str, W: int, H: int, D: float, color: str = "") -> str:
-    """ภาพหลัก (สี่เหลี่ยมจัตุรัส) เคลื่อนกล้องตามอารมณ์ฉาก วางบนพื้นหลังเบลอของภาพเดียวกัน → filter [0:v] → [mv]
-    kind: zoom_in · zoom_out · pan_right/left/up/down · punch (กระชากซูมเข้า) · punch_shake (กระชาก+สั่น) · pan_shake (เลื่อน+สั่นเบาๆ)"""
-    S = min(W, H)                        # ขนาดภาพหลัก: เต็มความกว้าง (แนวตั้ง) / เต็มความสูง (แนวนอน)
+SECOND_SHOT = 4.5  # ฉากยาวกว่านี้ (วินาที) → ครึ่งหลังตัดเป็นมุมใกล้ (เปลี่ยนภาพทุก 2-4 วิ ตามจังหวะ Shorts)
+
+
+def _motion(kind: str, W: int, H: int, D: float, color: str = "", full: bool = False) -> str:
+    """ภาพนิ่ง → กล้องเคลื่อนตามอารมณ์ฉาก → filter [0:v] → [mv]
+    full=True: ภาพเต็มจอ · False: ภาพจัตุรัสกลางจอบนพื้นหลังเบลอของภาพเดียวกัน
+    kind: zoom_in · zoom_out · pan_right/left/up/down · punch (กระชากซูมเข้า) · punch_shake (กระชาก+สั่น) · pan_shake (เลื่อน+สั่นเบาๆ)
+    ฉากยาว > SECOND_SHOT วิ: ครึ่งหลังตัดไปมุมใกล้ (ซูม 1.35 เท่า) ให้ภาพเปลี่ยนระหว่างฉาก"""
+    S = min(W, H)
+    OW, OH = (W, H) if full else (S, S)
+    D3 = f"{D:.3f}"
+    u = f"(t/{D3})"
+    # z = ซูม (≥1) · cx, cy = ตำแหน่งกล้อง 0..1 ของพื้นที่ที่เหลือ · sx, sy = สั่น (พิกเซล)
+    sx = sy = "0"
+    if kind == "zoom_out":
+        z, cx, cy = f"(1.12-0.12*{u})", "0.5", "0.5"
+    elif kind in ("pan_right", "pan_left"):
+        z, cy = "1.14", "0.5"
+        cx = u if kind == "pan_right" else f"(1-{u})"
+    elif kind in ("pan_up", "pan_down"):
+        z, cx = "1.14", "0.5"
+        cy = f"(1-{u})" if kind == "pan_up" else u
+    elif kind in ("punch", "punch_shake"):
+        z, cx, cy = f"(1.06+0.12*min(t/0.3,1)+0.04*{u})", "0.5", "0.5"
+        if kind == "punch_shake":
+            sx, sy = "22*sin(t*47)*max(0,1-t/0.8)", "22*cos(t*41)*max(0,1-t/0.8)"
+    elif kind == "pan_shake":
+        z, cx, cy = "1.18", f"(0.15+0.7*{u})", "0.5"
+        sx, sy = "5*sin(t*23)", "5*sin(t*17)"
+    else:  # zoom_in
+        z, cx, cy = f"(1+0.10*{u})", "0.5", "0.5"
+    if D > SECOND_SHOT:  # มุมที่ 2: ตัดไปภาพใกล้ช่วงครึ่งหลัง แล้วซูมช้าๆ ต่อ
+        M = f"{D * 0.5:.3f}"
+        z = f"if(lt(t,{M}),{z},1.35+0.05*(t-{M})/{D - D * 0.5:.3f})"
+        cx = f"if(lt(t,{M}),{cx},0.5)"
+        cy = f"if(lt(t,{M}),{cy},0.40)"  # ค่อนขึ้นบน (หน้าคน/ตัวเด่นมักอยู่ช่วงบน)
+    fg = (f"scale={OW}:{OH}:force_original_aspect_ratio=increase,crop={OW}:{OH},setsar=1,"
+          f"scale=w='{OW}*{z}':h=-2:eval=frame,"
+          f"crop={OW}:{OH}:x='clip((iw-{OW})*{cx}+{sx},0,iw-{OW})':y='clip((ih-{OH})*{cy}+{sy},0,ih-{OH})'")
+    if color:
+        fg += "," + color
+    if full:
+        return f"[0:v]{fg},setsar=1[mv]"
     y = (H - S) // 2 - (60 if H > W else 0)
     bg = (f"[b0]scale=270:270,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
           f"boxblur=10:2,eq=brightness=-0.18:saturation=1.2,setsar=1[bg]")
-    fit = f"scale={S}:{S}:force_original_aspect_ratio=increase,crop={S}:{S},setsar=1"
-    D3 = f"{D:.3f}"
-    big = int(S * 1.12) // 2 * 2
-    if kind == "zoom_out":
-        fg = f"{fit},scale=w='{S}*(1.10-0.10*t/{D3})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
-    elif kind in ("pan_right", "pan_left"):
-        x = f"(iw-{S})*t/{D3}" if kind == "pan_right" else f"(iw-{S})*(1-t/{D3})"
-        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x='{x}':y=(ih-{S})/2"
-    elif kind in ("pan_up", "pan_down"):
-        yy = f"(ih-{S})*(1-t/{D3})" if kind == "pan_up" else f"(ih-{S})*t/{D3}"
-        fg = f"{fit},scale={big}:{big},crop={S}:{S}:x=(iw-{S})/2:y='{yy}'"
-    elif kind in ("punch", "punch_shake"):
-        # กระชากซูมเข้าใน 0.3 วิแรก แล้วซูมช้าๆ ต่อ (+สั่นช่วงแรก ถ้าเป็นฉากช็อก)
-        a = 22 if kind == "punch_shake" else 0
-        fg = (f"{fit},scale=w='{S}*(1.06+0.12*min(t/0.3,1)+0.04*t/{D3})':h=-2:eval=frame,"
-              f"crop={S}:{S}:x='(iw-{S})/2+{a}*sin(t*47)*max(0,1-t/0.8)':y='(ih-{S})/2+{a}*cos(t*41)*max(0,1-t/0.8)'")
-    elif kind == "pan_shake":
-        bigger = int(S * 1.18) // 2 * 2
-        fg = (f"{fit},scale={bigger}:{bigger},crop={S}:{S}:x='(iw-{S})*(0.15+0.7*t/{D3})+5*sin(t*23)':"
-              f"y='(ih-{S})/2+5*sin(t*17)'")
-    else:  # zoom_in
-        fg = f"{fit},scale=w='{S}*(1+0.10*t/{D3})':h=-2:eval=frame,crop={S}:{S}:(iw-{S})/2:(ih-{S})/2"
-    if color:
-        fg += "," + color
     return f"[0:v]split[b0][f0];{bg};[f0]{fg}[fg];[bg][fg]overlay=(W-w)/2:{y}[mv]"
+
+
+def full_frame_ok(img: Path, W: int, H: int) -> bool:
+    """ใช้ภาพเต็มจอได้ไหม: จอแนวตั้ง + ภาพแนวตั้งหรือจัตุรัส (ภาพแนวนอนกว้างๆ ครอปแล้วเสียเนื้อหามาก → ใช้แบบมีขอบเบลอ)"""
+    if W >= H:
+        return True
+    try:
+        from PIL import Image
+        with Image.open(img) as im:
+            w, h = im.size
+        return w / max(1, h) <= 1.1
+    except Exception:
+        return False
 
 
 def scene_style(scene: dict, i: int) -> dict:
@@ -738,7 +812,8 @@ def _video_layout(video: Path, W: int, H: int) -> str:
 
 
 def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, workdir: Path,
-                 layout: str, subtitles: bool, extras: bool, brand: dict | None, sfx: bool = True) -> float:
+                 layout: str, subtitles: bool, extras: bool, brand: dict | None, sfx: bool = True,
+                 frame: str = "full", less_text: bool = True) -> float:
     W, H = size_for(layout)
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
@@ -750,7 +825,8 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
         motion = (f"[0:v]crop={W}:{H}:x='(iw-{W})/2+(iw-{W})/2*sin(t*0.5)':"
                   f"y='(ih-{H})/2+(ih-{H})/2*cos(t*0.4)',setsar=1[mv]")
     else:
-        motion = _video_layout(img, W, H) if video else _motion(sty["cam"], W, H, D, sty.get("color", ""))
+        full = frame == "full" and full_frame_ok(img, W, H)
+        motion = _video_layout(img, W, H) if video else _motion(sty["cam"], W, H, D, sty.get("color", ""), full)
     vf = ["fps=30"]
     if sty.get("flash") and extras:  # เปิดฉากด้วยแฟลชขาว (ฉากเปิด/ช็อก)
         vf.append("fade=t=in:st=0:d=0.22:color=white")
@@ -758,11 +834,18 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     # ข้อความไทยทั้งหมด (หัวข้อ, ชื่อช่อง, ซับ) วาดด้วย libass ให้สระ/วรรณยุกต์ถูกตำแหน่ง
     ass = P.Ass(W, H)
     head = (scene.get("headline") or "").strip() if extras else ""
+    # ตัวหนังสือน้อย: มีซับแล้ว → ไม่ใส่ป้ายหัวข้อ/ป้ายคำเด่นซ้ำ (เหลือซับ + กราฟิกตัวเลข/รายการที่ให้ข้อมูลเพิ่ม)
+    sub_on = bool(subtitles and narr and scene.get("narration"))
+    if less_text and sub_on and not anim:
+        head = ""
     kin_cues = []
     pcard = img.parent / scene["product_img"] if anim and extras and scene.get("product_img") else None
     if pcard is not None and not pcard.exists():
         pcard = None
-    has_g = bool(extras and scene.get("graphic") and not scene["graphic"].get("off"))
+    gfx = scene.get("graphic")
+    if less_text and sub_on and gfx and gfx.get("type") == "keyword":
+        gfx = None
+    has_g = bool(extras and gfx and not gfx.get("off"))
     studio = bool(pcard is not None and scene.get("studio"))
     if head and anim:  # ตัวหนังสือใหญ่เด้งกลางจอ + รูปทรงลอย (มีรูปสินค้า → ย้ายข้อความขึ้นบน)
         kin_cues = G.kinetic(ass, head, 0, D, i, cy=(0.15 if pcard is not None else None),
@@ -771,9 +854,9 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
     if studio and not has_g:  # ประกายวิ้งๆ รอบสินค้า
         G.sparkles(ass, 0.6, D, W / 2, H * 0.47, W * 0.3, i)
-    if extras and scene.get("graphic") and not scene["graphic"].get("off"):  # โมชันกราฟิกช่วยให้เข้าใจ
+    if has_g:  # โมชันกราฟิกช่วยให้เข้าใจ
         # ฉากสตูดิโอ: กรอบกราฟิกอยู่เหนือสินค้า (สินค้าวางบนแท่นด้านล่าง)
-        cues = G.render(ass, scene["graphic"], min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2,
+        cues = G.render(ass, gfx, min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2,
                         bottom=0.47 if studio and vertical else 0.69)
     else:
         cues = []
@@ -935,7 +1018,8 @@ def ai_animate(scenes: list[dict], scene_dir: Path, progress) -> dict:
 def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
                  cover: Path | None = None, clean: bool = False, style: str = "cinematic",
-                 tone: str = "story", sfx: bool = True, ai_motion: bool = False) -> list[Path]:
+                 tone: str = "story", sfx: bool = True, ai_motion: bool = False,
+                 frame: str = "full", less_text: bool = True) -> list[Path]:
     scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     scenes = plan["scenes"]
@@ -957,10 +1041,11 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         src = moving.get(i) or scene_dir / s["img"]
         try:
             d = render_scene(src, sc, i, narr, f, workdir, layout, subtitles,
-                             not clean, None if clean else brand, sfx=sfx and not clean)
+                             not clean, None if clean else brand, sfx=sfx and not clean,
+                             frame=frame, less_text=less_text)
         except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
             print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
-            d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None)
+            d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None, frame=frame)
         files.append(f)
         durs.append(d)
     progress(97, "ต่อฉากพร้อมทรานซิชัน")

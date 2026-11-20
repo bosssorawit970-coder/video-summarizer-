@@ -416,6 +416,7 @@ def do_render_story(jid: str) -> None:
                 print("ทำภาพปกไม่ได้:", e)
         ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
                         sfx=r.get("gfx_sfx", True), ai_motion=bool(r.get("ai_motion")),
+                        frame=r.get("frame", "full"), less_text=r.get("less_text", True),
                         subtitles=_subs(r), brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
@@ -451,7 +452,7 @@ def do_capcut(jid: str) -> None:
         if j["opts"].get("mode") == "story":
             parts = ST.render_story(j["plan"], d / "scenes", work, full, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"],
                                     layout="original" if r.get("layout") == "original" else "vertical_crop",
-                                    subtitles=False, progress=prog, clean=True)
+                                    subtitles=False, progress=prog, clean=True, frame=r.get("frame", "full"))
             prefix, labels = "ฉาก", ["" for _ in parts]
         else:
             src = _resolve(j["source"]) if j.get("multi") else d / j["source"]
@@ -818,6 +819,8 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "fx": _bool(body.get("fx"), game),
         "gfx_sfx": _bool(body.get("gfx_sfx"), True),
         "ai_motion": _bool(body.get("ai_motion"), False),
+        "frame": "square" if body.get("frame") == "square" else "full",
+        "less_text": _bool(body.get("less_text"), True),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
         "music_volume": max(0.0, min(1.0, _num(body.get("music_volume"), 0.25))),
@@ -827,7 +830,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
     }
 
 
-RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "fx", "cover", "music",
+RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "frame", "less_text", "fx", "cover", "music",
                "music_volume", "channel", "logo", "toptext")
 
 
@@ -1195,8 +1198,9 @@ async def regen_scene(req: Request):
     i = int(_num(req.path_params["i"], 0))
     d = job_dir(j["id"]) / "scenes"
     d.mkdir(parents=True, exist_ok=True)
+    lay = (j.get("render_opts") or j["opts"].get("render") or {}).get("layout", "vertical_crop")
     names, ai = await run_in_threadpool(ST.ai_variants, {"image": prompt}, i, d,
-                                        j["opts"].get("style", "cinematic"), n)
+                                        j["opts"].get("style", "cinematic"), n, None, lay != "original")
     return JSONResponse({"imgs": names, "ai": ai})
 
 

@@ -1573,6 +1573,15 @@ def _wrap(text: str, width: int) -> str:
     lines = [c for _, _, c in sub_chunks(text, 0, 1, width)]
     return "\n".join(lines[:3])
 
+def _fit_lines(text: str, width: int, max_lines: int = 4) -> tuple[str, float]:
+    """ตัดบรรทัดให้ข้อความครบทั้งหมด (ไม่ตัดทิ้ง): ยาวเกิน → บรรทัดยาวขึ้น + ตัวอักษรเล็กลง คืน (ข้อความ, อัตราย่อ)"""
+    for w in range(width, width * 3):
+        lines = [c for _, _, c in sub_chunks(text, 0, 1, w)]
+        if len(lines) <= max_lines:
+            return "\n".join(lines), width / w
+    return "\n".join(lines), width / (width * 3)
+
+
 def make_thumbnail(src: Path, t: float, layout: str, title: str, label: str,
                    out: Path, workdir: Path, brand: dict | None = None) -> None:
     """ภาพปกคลิป: เฟรมจังหวะเด็ด + ตัวหนังสือใหญ่"""
@@ -1593,7 +1602,8 @@ def make_thumbnail(src: Path, t: float, layout: str, title: str, label: str,
     ass = Ass(W, H)
     title = clean_text(title)
     if title:
-        ass.add("Title", 0, 10, _wrap(title, 13 if vertical else 24))
+        txt, k = _fit_lines(title, 13 if vertical else 24)
+        ass.add("Title", 0, 10, txt, f"\\fs{int((H if vertical else H * 1.25) * 0.05 * k)}" if k < 1 else "")
     text = ((brand or {}).get("text") or "").strip()
     if text:
         ass.add("Brand", 0, 10, text, f"\\an2\\pos({W // 2},{int(H * 0.95)})")

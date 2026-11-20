@@ -106,7 +106,7 @@ def available() -> bool:
 
 def generate(prompt: str, out: Path, width: int = 1024, height: int = 1024, style: str = "cinematic",
              seed: int | None = None, progress=None) -> bool:
-    """วาดภาพสี่เหลี่ยมจัตุรัส 1 ภาพ คืน True ถ้าวาดด้วย AI ได้ (False = ใช้ภาพไล่สีแทน)"""
+    """วาดภาพ 1 ภาพ (จัตุรัส หรือแนวตั้งถ้า height > width) คืน True ถ้าวาดด้วย AI ได้ (False = ใช้ภาพไล่สีแทน)"""
     prefix = STYLES.get(style, STYLES["cinematic"])[1]
     full = f"{prefix}, {prompt.strip()}, highly detailed, sharp focus"
     if seed is None:
@@ -117,14 +117,15 @@ def generate(prompt: str, out: Path, width: int = 1024, height: int = 1024, styl
             try:
                 import torch
                 g = torch.Generator(device=pipe.device).manual_seed(seed)
+                tall = height > width * 1.2  # ขอภาพแนวตั้ง (คลิปแนวตั้งเต็มจอ)
                 if _model == "lightning":
-                    size, steps = 1024, 4
+                    (pw, ph), steps = ((768, 1344) if tall else (1024, 1024)), 4
                 elif "sdxl" in _model:
-                    size, steps = 512, 4
+                    (pw, ph), steps = ((512, 896) if tall else (512, 512)), 4
                 else:
-                    size, steps = 512, 3
+                    (pw, ph), steps = ((512, 768) if tall else (512, 512)), 3
                 img = pipe(prompt=full, num_inference_steps=steps, guidance_scale=0.0,
-                           width=size, height=size, generator=g).images[0]
+                           width=pw, height=ph, generator=g).images[0]
                 img.save(out)
                 return True
             except Exception as e:

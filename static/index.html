@@ -448,7 +448,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
             <div class="noStory"><label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label><input type="text" id="toptext" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2"><div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่</div></div>
             <div><label class="f">ตกแต่ง</label>
-              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label><label class="storyRv aiMoBox"><input type="checkbox" id="aiMotion"> 🤖 AI ขยับภาพจริงทุกฉาก (การ์ดจอ ~3 นาที/ฉาก)</label></div></div>
+              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label><label class="storyRv"><input type="checkbox" id="frameFull" checked> 📱 ภาพเต็มจอ</label><label class="storyRv"><input type="checkbox" id="lessText" checked> ✂️ ตัวหนังสือน้อย (มีซับแล้วไม่ใส่ป้ายหัวข้อซ้ำ)</label><label class="storyRv aiMoBox"><input type="checkbox" id="aiMotion"> 🤖 AI ขยับภาพจริงทุกฉาก (การ์ดจอ ~3 นาที/ฉาก)</label></div></div>
             <div><label class="f">ซับไตเติล</label>
               <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div>
               <div class="seg" id="subStyle" style="margin-top:6px">
@@ -1086,7 +1086,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#toptext").value = r.toptext || "";
-           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; }
+           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; $("#frameFull").checked = r.frame !== "square"; $("#lessText").checked = r.less_text !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
@@ -1360,7 +1360,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai})});
+      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameFull").checked ? "full" : "square", less_text: $("#lessText").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };
