@@ -881,45 +881,59 @@ def _silence(out_mp3: Path, sec: float) -> None:
          "-c:a", "libmp3lame", "-q:a", "4", str(out_mp3)])
 
 
-def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int) -> None:
-    """Edge TTS + กันพัง: ล้างข้อความ → ลองซ้ำ (เซิร์ฟเวอร์ Microsoft สะดุดบ่อย) → ลองเสียงไทยตัวอื่น
-    → สุดท้ายใส่ช่วงเงียบแทน ไม่ให้งานทั้งคลิปพังเพราะท่อนเดียว"""
+GENDER = {"th-TH-PremwadeeNeural": "f", "th-TH-AcharaNeural": "f", "th-TH-NiwatNeural": "m"}
+
+
+def _edge_order(voice: str) -> list[str]:
+    """เสียงสำรอง: เพศเดียวกันก่อน (หญิง→หญิง) จะได้ไม่เปลี่ยนจากเสียงผู้หญิงเป็นผู้ชาย"""
+    rest = [x["id"] for x in THAI_VOICES if x["id"] != voice]
+    return [voice] + sorted(rest, key=lambda v: GENDER.get(v) != GENDER.get(voice))
+
+
+def _edge_tts(text: str, out_mp3: Path, voice: str, rate: int, switch: bool = True) -> str | None:
+    """Edge TTS + กันพัง: ล้างข้อความ → ลองซ้ำเสียงเดิม (เซิร์ฟเวอร์ Microsoft สะดุดบ่อย)
+    switch=True: ยังไม่ได้ → ลองเสียงไทยตัวอื่น → สุดท้ายใส่ช่วงเงียบ   switch=False: ไม่ได้ → คืน None
+    คืนชื่อเสียงที่ใช้จริง"""
     import time
     import edge_tts
 
     clean = _speakable(text)
     if not re.search(r"[0-9A-Za-z\u0E01-\u0E4E]", clean):
         _silence(out_mp3, 1.0)
-        return
+        return voice
 
     async def go(v: str, r: int):
         comm = edge_tts.Communicate(clean, v, rate=f"{r:+d}%")
         await comm.save(str(out_mp3))
 
-    voices = [voice] + [x["id"] for x in THAI_VOICES if x["id"] != voice]
+    voices = _edge_order(voice)
+    tries = [(voice, rate)] * 3 + [(voice, 0)] + ([(x, 0) for x in voices[1:]] if switch else [])
     last = None
-    for attempt, (v, r) in enumerate([(voices[0], rate), (voices[0], rate), (voices[0], 0)] +
-                                     [(x, 0) for x in voices[1:]]):
+    for attempt, (v, r) in enumerate(tries):
         try:
+            out_mp3.unlink(missing_ok=True)
             asyncio.run(go(v, r))
             if out_mp3.exists() and out_mp3.stat().st_size > 800:
-                if v != voice:
-                    _note(f"เสียง{VOICE_NAMES.get(voice, voice)}สร้างไม่ได้บางท่อน — ใช้เสียง{VOICE_NAMES.get(v, v)}แทน")
-                return
+                return v
         except Exception as e:
             last = e
             print(f"Edge TTS ลองครั้งที่ {attempt + 1} ไม่ได้ ({v}): {e}")
-        time.sleep(min(6, 1.5 * (attempt + 1)))
+        time.sleep(min(8, 2.0 * (attempt + 1)))
+    if not switch:
+        return None
     # ใช้ไม่ได้เลย (เน็ตหลุด/Microsoft บล็อกชั่วคราว) → ใส่เงียบตามความยาวประมาณ ไม่ให้คลิปพัง
     _note(f"สร้างเสียงพากย์บางท่อนไม่ได้ ({last}) — ใส่ช่วงเงียบแทน ลองกดทำใหม่อีกครั้งภายหลัง "
           "หรือถ้าเป็นทุกท่อน ให้อัปเดต edge-tts: .venv\\Scripts\\python -m pip install -U edge-tts")
     _silence(out_mp3, max(1.5, len(clean) / 11.5))
+    return voice
 
 
 def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
-        note: Callable[[str], None] | None = None) -> str:
-    """สร้างเสียงพากย์ 1 ท่อน คืนชื่อเสียงที่ใช้จริง (อาจเป็นเสียงสำรอง)"""
-    used = _tts_raw(text, out_mp3, voice, rate, tone, note) or voice
+        note: Callable[[str], None] | None = None, switch: bool = True) -> str | None:
+    """สร้างเสียงพากย์ 1 ท่อน คืนชื่อเสียงที่ใช้จริง (อาจเป็นเสียงสำรอง) — switch=False แล้วทำไม่ได้ คืน None"""
+    used = _tts_raw(text, out_mp3, voice, rate, tone, note, switch)
+    if used is None:
+        return None
     _tidy_voice(out_mp3)
     return used
 
@@ -929,30 +943,55 @@ VOICE_NAMES = {"th-TH-PremwadeeNeural": "เปรมวดี", "th-TH-NiwatNeu
 
 def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
             progress: Progress, total: float = 100) -> list[Path | None]:
-    """สร้างเสียงพากย์ทุกท่อนก่อนตัดต่อ — ถ้าเสียง Gemini/โคลนใช้ไม่ได้กลางทาง (โควตาหมด)
-    จะสร้างท่อนก่อนหน้าใหม่ด้วยเสียงสำรอง ให้ทั้งคลิปเป็นเสียงเดียวกัน ไม่สลับไปมา"""
+    """สร้างเสียงพากย์ทุกท่อนก่อนตัดต่อ — ทั้งคลิปต้องเป็นเสียงเดียวกันเสมอ:
+    ท่อนไหนสร้างไม่ได้ → ข้ามไปก่อน แล้ววนกลับมาลองเสียงเดิมอีกรอบ (เซิร์ฟเวอร์มักหายสะดุดเอง)
+    ยังไม่ได้จริงๆ → เปลี่ยนเป็นเสียงสำรองทั้งคลิป (ทำทุกท่อนใหม่) ไม่สลับเสียงไปมากลางคลิป"""
+    import time
     n = max(1, len(texts))
-    outs: list[Path | None] = []
-    used: list[str] = []
+    outs: list[Path | None] = [None] * len(texts)
+    used: list[str] = [""] * len(texts)
+    failed: list[int] = []
+    cur = voice
     for i, text in enumerate(texts):
         if not text:
-            outs.append(None)
-            used.append("")
             continue
         progress(i / n * total, f"สร้างเสียงพากย์ท่อนที่ {i + 1}/{n}")
-        f = workdir / f"narr_{i:03}.mp3"
-        v = voice
-        if used and any(u and u != voice for u in used):  # สลับไปเสียงสำรองแล้ว → ใช้ต่อทั้งคลิป
-            v = next(u for u in used if u and u != voice)
-        used.append(tts(text, f, v, rate, tone, note=lambda m, i=i: progress(i / n * total, m)))
-        outs.append(f)
-    backup = next((u for u in used if u and u != voice), None)
-    redo = [k for k, u in enumerate(used) if u == voice]
-    if backup and redo:
-        for j, k in enumerate(redo):
-            progress(total, f"เสียงหลักใช้ไม่ได้กลางคลิป — ทำเสียงท่อนแรกๆ ใหม่ให้เป็นเสียงเดียวกัน ({j + 1}/{len(redo)})")
-            tts(texts[k], outs[k], backup, rate, tone)
-        _note(f"ทั้งคลิปใช้เสียง{VOICE_NAMES.get(backup, backup)}แทน เพื่อไม่ให้เสียงสลับกลางคลิป")
+        outs[i] = workdir / f"narr_{i:03}.mp3"
+        u = tts(text, outs[i], cur, rate, tone, note=lambda m, i=i: progress(i / n * total, m), switch=False)
+        if u is None:
+            failed.append(i)
+        else:
+            used[i] = u
+            if u != cur:  # เสียง Gemini/โคลนใช้ไม่ได้ ถอยไปเสียงสำรองแล้ว → ใช้เสียงสำรองนั้นต่อทั้งคลิป
+                cur = u
+    for rnd in range(2):  # วนกลับมาลองท่อนที่พลาดด้วยเสียงเดิม
+        if not failed:
+            break
+        progress(total, f"บางท่อนสร้างเสียงไม่ได้ — รอแล้วลองใหม่ด้วยเสียงเดิม ({len(failed)} ท่อน)")
+        time.sleep(10 * (rnd + 1))
+        again = []
+        for i in failed:
+            u = tts(texts[i], outs[i], cur, rate, tone, switch=False)
+            if u is None:
+                again.append(i)
+            else:
+                used[i] = u
+        failed = again
+    if failed:  # เสียงนี้ใช้ไม่ได้จริงๆ → หาเสียงสำรองที่ใช้ได้ แล้วใช้ทั้งคลิป
+        i0 = failed[0]
+        backup = tts(texts[i0], outs[i0], cur, rate, tone, switch=True) or cur
+        used[i0] = backup
+        failed = failed[1:]
+    else:
+        backup = None
+    want = backup or cur
+    redo = [k for k, u in enumerate(used) if texts[k] and (u != want or k in failed)]
+    for j, k in enumerate(redo):
+        progress(total, f"ทำเสียงท่อนอื่นใหม่ให้เป็นเสียงเดียวกันทั้งคลิป ({j + 1}/{len(redo)})")
+        used[k] = tts(texts[k], outs[k], want, rate, tone, switch=True) or want
+    if want != voice:
+        _note(f"ทั้งคลิปใช้เสียง{VOICE_NAMES.get(want, want)}แทน{VOICE_NAMES.get(voice, '')} "
+              "เพราะเสียงที่เลือกสร้างไม่ได้ช่วงนี้ — เสียงไม่สลับกลางคลิป")
     return outs
 
 
@@ -974,7 +1013,7 @@ def _tidy_voice(f: Path) -> None:
 
 
 def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
-             note: Callable[[str], None] | None = None) -> None:
+             note: Callable[[str], None] | None = None, switch: bool = True) -> str | None:
     """voice: th-TH-…Neural (Edge) | gemini:<ชื่อ> | clone:<ชื่อเสียงตัวอย่าง>
     ถ้าเสียง Gemini/โคลนใช้ไม่ได้ จะถอยไปใช้ Edge TTS ให้อัตโนมัติ (งานไม่พัง)"""
     import voice as V
@@ -1005,8 +1044,7 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
         voice = fallback
     else:
         fallback = voice
-    _edge_tts(text, out_mp3, fallback, rate)
-    return fallback
+    return _edge_tts(text, out_mp3, fallback, rate, switch)
 
 
 # ───────────────────────── 4) ตัดต่อ ─────────────────────────
