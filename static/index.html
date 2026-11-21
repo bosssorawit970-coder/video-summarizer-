@@ -177,6 +177,13 @@ video{width:100%;border-radius:10px;background:#000;display:block}
       <h2>1. ใส่ข้อความ / ข้อมูล</h2>
       <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
       <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
+      <label class="f">🎯 รูปตัวอย่าง <span class="hint">(ไม่บังคับ · สูงสุด 10 รูป)</span></label>
+      <input type="file" id="refImgs" accept="image/*" multiple>
+      <div class="hint" id="refHint" style="margin:6px 2px 0">ส่งรูปที่ "อยากได้ประมาณนี้" มาพร้อมบท — AI จะดูว่ารูปไหนตรงกับฉากไหน แล้วใช้รูปนั้นเป็นแนวให้ฉากนั้นเอง</div>
+      <div class="seg hidden" id="refSeg" style="margin-top:6px">
+        <label><input type="radio" name="ref_use" value="similar" checked> 🎨 ทำภาพใหม่ให้คล้ายรูป</label>
+        <label><input type="radio" name="ref_use" value="direct"> 🖼 ใช้รูปที่ส่งในคลิปเลย</label>
+      </div>
       <label class="f" id="scriptLbl">ใช้ข้อความยังไง</label>
       <div class="seg" id="scriptSeg">
         <label><input type="radio" name="script_mode" value="verbatim" checked> 📜 พากย์ตามบทที่ใส่ทุกคำ</label>
@@ -955,19 +962,25 @@ function commonFields(fd) {
   fd.append("cover", $("#cover0").checked ? "1" : "");
   return fd;
 }
+$("#refImgs").onchange = () => {
+  const n = $("#refImgs").files.length;
+  $("#refSeg").classList.toggle("hidden", !n);
+  $("#refHint").textContent = n ? `เลือกแล้ว ${Math.min(n, 10)} รูป — AI จะจับคู่รูปกับฉากที่เนื้อหาตรงกัน${cfg.vision ? "" : " (ไม่มีคีย์ Gemini: จะเรียงรูปตามลำดับเรื่องแทน และใช้รูปตรงๆ)"}`
+    : 'ส่งรูปที่ "อยากได้ประมาณนี้" มาพร้อมบท — AI จะดูว่ารูปไหนตรงกับฉากไหน แล้วใช้รูปนั้นเป็นแนวให้ฉากนั้นเอง';
+};
 $("#go").onclick = async () => {
   job = null;
   const urls = links(), n = urls.length + files.length;
   show("s-progress"); $("#errRow").classList.add("hidden"); $("#bar").style.width = "0";
   const msg = $("#msg"), bar = $("#bar");
   try {
+    const up = async (list, tag) => { const ids = [];
+      for (const [k, f0] of [...list].entries()) {
+        const f = f0.type.startsWith("image/") ? await shrinkImage(f0) : f0;
+        ids.push(await uploadFile(f, pct => { msg.textContent = `อัปโหลด${tag} ${k + 1}/${list.length} — ${pct.toFixed(0)}%`; bar.style.width = pct + "%"; }));
+      } return ids; };
     if (mode() === "product") {
       setSteps("plan", "story");
-      const up = async (list, tag) => { const ids = [];
-        for (const [k, f0] of [...list].entries()) {
-          const f = await shrinkImage(f0);
-          ids.push(await uploadFile(f, pct => { msg.textContent = `อัปโหลด${tag} ${k + 1}/${list.length} — ${pct.toFixed(0)}%`; bar.style.width = pct + "%"; }));
-        } return ids; };
       const media = document.querySelector("input[name=pvis]:checked").value === "media" ? [...$("#pMedia").files].slice(0, 12) : [], shots = [...$("#pShots").files].slice(0, 4);
       const mids = await up(media, "รูป/วิดีโอสินค้า"), sids = await up(shots, "ภาพหน้าจอ");
       const fd = commonFields(new FormData());
@@ -989,6 +1002,11 @@ $("#go").onclick = async () => {
       fd.append("image_source", document.querySelector("input[name=image_source]:checked").value);
       fd.append("graphics", $("#graphics").checked ? "1" : "0");
       fd.append("videos", cfg.videos && $("#videos").checked ? "1" : "0");
+      const refs = [...$("#refImgs").files].filter(f => f.type.startsWith("image/")).slice(0, 10);
+      if (refs.length) {
+        fd.append("ref_ids", (await up(refs, "รูปตัวอย่าง")).join(","));
+        fd.append("ref_use", document.querySelector("input[name=ref_use]:checked").value);
+      }
       const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
     }
     if (n > 1) {  // หลายคลิป → ชุดงาน
@@ -1171,6 +1189,7 @@ function drawScenes() {
           ${cfg.vision ? `<button data-a="ref" title="อัปรูปตัวอย่างว่าอยากได้ประมาณนี้ → AI หาภาพถ่าย วิดีโอ และวาดภาพใหม่ให้คล้ายๆ แล้วเลือกตัวที่ใกล้ที่สุด">🎯 รูปตัวอย่าง</button>` : ""}
           ${cfg.vision ? `<button data-a="smart" title="AI ดูภาพเทียบกับบท ไม่ตรง → เขียนคำสั่งวาดใหม่ + หาภาพถ่ายจริง แล้วเลือกตัวที่ตรงที่สุด">🧠 หาภาพที่ตรงบท</button>` : ""}
         </div>
+        ${c.ref ? `<div class="hint">🎯 ฉากนี้ใช้รูปตัวอย่างที่ ${c.ref} (รูปที่ส่งอยู่ในแถวตัวเลือก)</div>` : ""}
         ${c.fit != null ? `<div class="hint">🧠 ความตรงกับบท: ${c.fit}/10${c.fit < 6 ? " — ยังไม่ค่อยตรง ลองพิมพ์คำบรรยายภาพเองแล้วกด 🎲" : ""}</div>` : ""}
         <details><summary>คำบรรยายภาพ / คำค้น (ไทยหรืออังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
           <label class="hint">ให้ AI วาด:</label><input type="text" data-k="image" maxlength="300" value="${esc(c.image || "")}">

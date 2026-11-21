@@ -687,6 +687,84 @@ def from_reference(s: dict, i: int, scene_dir: Path, ref: Path, layout: str, sty
     return cands
 
 
+MATCH_PROMPT = """The user wrote a Thai short-video script and uploaded {n} REFERENCE images ("I want pictures like these").
+Match the references to the scenes. For each scene give the number of the reference whose subject best fits
+what that scene's narration talks about, or 0 if no reference fits. One reference may fit several scenes.
+Try to use every reference at least once (put it on the scene it fits best). Do not give a reference to a scene
+about something clearly different.
+Scenes:
+{scenes}
+Reply JSON only: {{"scenes": [{{"id": 1, "ref": 2}}]}} with one item per scene."""
+
+
+def match_refs(scenes: list[dict], refs: list[Path], topic: str = "") -> dict[int, int]:
+    """จับคู่รูปตัวอย่างกับฉาก → {ฉาก: ลำดับรูป}  (ไม่มีคีย์ Gemini → กระจายรูปตามลำดับเรื่อง)"""
+    n = len(scenes)
+    if not refs or not n:
+        return {}
+    spread = {min(n - 1, round(k * n / len(refs))): k for k in range(len(refs))}
+    if not vision_ready():
+        return spread
+    parts = []
+    for k, r in enumerate(refs, 1):
+        img = _thumb_part(r)
+        if img:
+            parts += [{"text": f"Reference {k}:"}, img]
+    lines = "\n".join(f"{i + 1}. {s.get('narration', '')[:200]}" for i, s in enumerate(scenes))
+    try:
+        data = P._parse_json(P._ask_gemini(MATCH_PROMPT.format(n=len(refs), scenes=lines), parts))
+        out = {}
+        for r in data.get("scenes") or []:
+            i, k = int(r.get("id") or 0) - 1, int(r.get("ref") or 0) - 1
+            if 0 <= i < n and 0 <= k < len(refs):
+                out[i] = k
+        for k in range(len(refs)):  # รูปที่ AI ไม่ได้ใช้ → ใส่ฉากที่ยังว่างใกล้ตำแหน่งตามลำดับ
+            if k not in out.values():
+                want = min(n - 1, round(k * n / len(refs)))
+                free = sorted((i for i in range(n) if i not in out), key=lambda i: abs(i - want))
+                if free:
+                    out[free[0]] = k
+        return out or spread
+    except Exception as e:
+        print("AI จับคู่รูปตัวอย่างไม่ได้:", e)
+        return spread
+
+
+def apply_refs(plan: dict, refs: list[Path], scene_dir: Path, layout: str, style: str, use: str,
+               progress, want_video: bool = True) -> int:
+    """🎯 รูปตัวอย่างที่ส่งมาพร้อมบท: จับคู่กับฉาก แล้ว
+    use="direct" → ใช้รูปนั้นเป็นภาพฉากเลย / "similar" → ทำ/หาภาพใหม่ให้คล้ายรูป (รูปเดิมอยู่ในตัวเลือก)
+    ฉากที่ได้รูปจะล็อกไว้ (AI ตรวจภาพ/แทรกวิดีโอไม่เปลี่ยนทับ) คืนจำนวนฉากที่ใช้รูปตัวอย่าง"""
+    from PIL import Image
+    scenes = plan["scenes"]
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    progress(0, "🎯 AI กำลังจับคู่รูปตัวอย่างกับฉาก")
+    pairs = match_refs(scenes, refs, plan.get("title") or "")
+    topic = plan.get("title") or ""
+    for m, (i, k) in enumerate(sorted(pairs.items())):
+        s = scenes[i]
+        copy = next_names(scene_dir, i, 1)[0]
+        try:
+            Image.open(refs[k]).convert("RGB").save(copy)
+        except Exception as e:
+            print("เปิดรูปตัวอย่างไม่ได้:", e)
+            continue
+        old = [o for o in s.get("options") or ([s["img"]] if s.get("img") else [])]
+        names = [copy.name]
+        if use != "direct" and vision_ready():
+            progress(m / max(1, len(pairs)) * 100, f"🎯 ทำภาพฉากที่ {i + 1} ให้คล้ายรูปตัวอย่าง {k + 1} ({m + 1}/{len(pairs)})")
+            try:
+                got = from_reference(s, i, scene_dir, copy, layout, style, topic, want_video)
+                names = [n for n in got if n != copy.name] + [copy.name]
+            except Exception as e:
+                print("ทำภาพตามรูปตัวอย่างไม่ได้:", e)
+        s["img"] = names[0]
+        s["options"] = list(dict.fromkeys(names + old))
+        s["img_locked"] = True
+        s["ref"] = k + 1
+    return len(pairs)
+
+
 def vision_ready() -> bool:
     import os
     return bool((os.environ.get("GEMINI_API_KEY") or "").strip())

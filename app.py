@@ -250,6 +250,15 @@ def analyze_story(jid: str) -> dict:
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                         lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.7, message=msg),
                         source=o.get("image_source", "ai"))
+    refs = sorted(Path(o["ref_dir"]).glob("ref_*")) if o.get("ref_dir") else []
+    if refs:  # 🎯 รูปตัวอย่าง → จับคู่กับฉาก แล้วใช้ตรงๆ หรือทำภาพให้คล้าย
+        nr = ST.apply_refs(plan, refs, d / "scenes", o["render"].get("layout", "vertical_crop"),
+                           o.get("style", "cinematic"), o.get("ref_use", "similar"),
+                           lambda pct, msg: save(jid, step="images", progress=90 + pct * 0.05, message=msg),
+                           want_video=bool(o.get("videos")))
+        if nr:
+            plan["note"] = ((plan.get("note") or "") + f" · 🎯 ใช้รูปตัวอย่างใน {nr} ฉาก (ฉากที่มี 🎯)").strip(" ·")
+            ok = max(ok, 1)
     if o.get("verify", True) and ST.vision_ready():  # 🧠 ตรวจว่าภาพตรงบท ไม่ตรง → หาภาพ/วาดใหม่
         nf = ST.verify_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                               lambda pct, msg: save(jid, step="images", progress=90 + pct * 0.07, message=msg))
@@ -257,7 +266,8 @@ def analyze_story(jid: str) -> dict:
             plan["note"] = ((plan.get("note") or "") + f" · 🧠 AI ตรวจแล้วเปลี่ยนภาพที่ไม่ตรงบท {nf} ฉาก").strip(" ·")
     if o.get("videos"):  # แทรกวิดีโอฟรีบางฉาก
         nv = ST.add_videos(plan, d / "scenes",
-                           lambda pct, msg: save(jid, step="images", progress=97, message=msg))
+                           lambda pct, msg: save(jid, step="images", progress=97, message=msg),
+                           [i for i in ST.video_scenes(plan["scenes"]) if not plan["scenes"][i].get("img_locked")])
         if nv:
             plan["note"] = ((plan.get("note") or "") + f" · แทรกวิดีโอฟรีแล้ว {nv} ฉาก (▶) — ภาพนิ่งเดิมยังเลือกกลับได้").strip(" ·")
     if ok == 0 and not plan.get("note"):
@@ -765,7 +775,18 @@ async def create_job(req: Request):
         name = re.sub(r"\s+", " ", text)[:40] + ("…" if len(text) > 40 else "")
         if SRC.find_url(text):
             name = "🔗 " + urllib.parse.urlparse(SRC.find_url(text)).netloc.replace("www.", "")
-        return JSONResponse({"id": new_job(name, "", None, job_opts(form))})
+        opts = job_opts(form)
+        rids = [u for u in str(form.get("ref_ids") or "").split(",") if u][:10]
+        if rids:  # 🎯 รูปตัวอย่างที่ส่งมาพร้อมบท
+            ref_dir = UPLOADS / f"refs_{uuid.uuid4().hex}"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            for k, rid in enumerate(rids):
+                part = _upload_part(rid)
+                if part:
+                    shutil.move(str(part), ref_dir / f"ref_{k + 1:02}.jpg")
+            opts["ref_dir"] = str(ref_dir)
+            opts["ref_use"] = "direct" if form.get("ref_use") == "direct" else "similar"
+        return JSONResponse({"id": new_job(name, "", None, opts)})
     if url:
         m = re.search(r"https?://\S+", url)  # รองรับข้อความที่แชร์มาแล้วมีลิงก์ปนอยู่
         if not m:
