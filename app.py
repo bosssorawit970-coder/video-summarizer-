@@ -492,6 +492,9 @@ def do_render_story(jid: str) -> None:
                         subtitles=_subs(r), brand=brand, style=j["opts"].get("style", "cinematic"),
                         cover=thumb if r.get("cover") and thumb.exists() else None,
                         progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
+        # เครดิตภาพสัญญาอนุญาตเสรี (Wikimedia Commons) ที่ใช้จริง → ใส่ในคำอธิบายคลิป
+        plan["credits"] = list(dict.fromkeys(
+            c for c in (imagegen.credit_of(d / "scenes" / s_["img"]) for s_ in plan["scenes"] if s_.get("img")) if c))
         save(jid, plan=plan)  # ภาพที่วาดเพิ่มระหว่างตัดต่อ
         music = asset_path("music", r.get("music") or "")
         if music:
@@ -892,7 +895,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "fx": _bool(body.get("fx"), game),
         "gfx_sfx": _bool(body.get("gfx_sfx"), True),
         "ai_motion": _bool(body.get("ai_motion"), False),
-        "frame": "square" if body.get("frame") == "square" else "full",
+        "frame": body.get("frame") if body.get("frame") in ("square", "card") else "full",
         "less_text": _bool(body.get("less_text"), True),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",
@@ -981,6 +984,8 @@ async def render_job(req: Request):
                                "image": str(s.get("image") or "")[:300], "img": img,
                                "search": str(s.get("search") or "")[:60], "options": opts_,
                                "mood": s.get("mood") if s.get("mood") in ST.MOODS else "",
+                               "badge": str(s.get("badge") or "")[:36], "quote": str(s.get("quote") or "")[:40],
+                               "real": bool(s.get("real")),
                                "graphic": G2.clean(s.get("graphic"), "", strict=False) if isinstance(s.get("graphic"), dict)
                                and not s["graphic"].get("off") else None})
         if not scenes:

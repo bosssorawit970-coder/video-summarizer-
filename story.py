@@ -31,10 +31,11 @@ STORY_PROMPT = """คุณเป็นครีเอเตอร์คลิ�
 - search: คำค้นภาพถ่ายในคลังภาพ ภาษาอังกฤษ 2-4 คำ (เช่น "black coffee cup", "woman jogging park")
 {graphic_rules}
 {mood_rules}
+{badge_rules}
 
 ตอบเป็น JSON อย่างเดียว:
 {{"title": "ชื่อคลิปดึงดูด (อีโมจิได้ 1-2 ตัว)", "summary": "แคปชัน 1-2 ประโยค + แฮชแท็ก 3-5 อัน",
- "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm"}}]}}
+ "scenes": [{{"narration": "...", "headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm", "badge": "", "quote": "", "real": false}}]}}
 
 ข้อมูล:
 {text}"""
@@ -54,13 +55,14 @@ Step 2 — for EACH scene write:
 - "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
 {graphic_rules}
 {mood_rules}
+{badge_rules}
 Also write "cta": ONE short, natural spoken Thai question (max 70 characters) about this topic that invites viewers to answer
 in the comments, ending with something like "คอมเมนต์บอกหน่อย" (e.g. "แล้วคุณล่ะ มีเพื่อนเป็นแฝดไหม? คอมเมนต์บอกหน่อย"). No emoji.
 
 Reply with JSON only:
 {{"topic": "one English sentence: what the story is about", "characters": "English description of main characters, or empty", "cta": "...",
  "title": "catchy Thai title (1-2 emoji ok)", "summary": "Thai caption 1-2 sentences + 3-5 hashtags",
- "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm"}}]}}
+ "scenes": [{{"headline": "...", "image": "...", "search": "...", "graphic": null, "mood": "calm", "badge": "", "quote": "", "real": false}}]}}
 "scenes" must contain exactly {n} items, in order.
 
 Script:
@@ -82,6 +84,12 @@ MOOD_RULES = """- "mood": the feeling of this scene, so the animation can match 
   "exciting" (action, fast, competition), "shock" (surprise, twist, danger), "sad" (sad, serious, loss),
   "happy" (fun, good news, success, friendly ending). Vary it with the story — not the same mood everywhere."""
 
+BADGE_RULES = """- "badge": ONLY for true stories (history, sports, news, real people/places): a short Thai date/place tag for this scene,
+  like "1 พ.ค. 2019 · คัมป์นู" or "ปี 1969 · ดวงจันทร์". Use only facts you are sure of; otherwise "". Fiction/general topics: "".
+- "quote": a short famous line really said in this moment (max 30 characters, Thai or original language), e.g. "Never Give Up".
+  Only if it is a well-known real quote; otherwise "". Never invent quotes.
+- "real": true if the scene shows real, specific people, teams, places or events (so real photos should be searched), else false."""
+
 MOODS = {"hook": "⚡ เปิดแรง", "calm": "🌿 สบายๆ", "info": "💡 ให้ข้อมูล", "exciting": "🔥 ตื่นเต้น",
          "shock": "😱 ช็อก/หักมุม", "sad": "🥀 เศร้า/จริงจัง", "happy": "😄 สนุก/ดีใจ"}
 
@@ -97,6 +105,13 @@ MOOD_STYLE = {
     "sad": {"cam": ["zoom_out"], "tr": "fadeblack", "color": "eq=saturation=0.65:brightness=-0.03"},
     "happy": {"cam": ["pan_up", "zoom_in"], "tr": "smoothleft", "color": "eq=saturation=1.18:brightness=0.02"},
 }
+
+
+def _badges(v: dict) -> dict:
+    """ป้ายวันที่/สถานที่ + คำพูดดัง จากคำตอบ AI (ตัดให้สั้น ไม่มีอีโมจิ)"""
+    b = P.clean_text(str(v.get("badge") or ""))[:36]
+    q = P.clean_text(str(v.get("quote") or "")).strip('"“”')[:40]
+    return {"badge": b, "quote": q, "real": bool(v.get("real") or b)}
 
 
 def guess_mood(text: str, i: int, n: int) -> str:
@@ -284,7 +299,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
     scenes = plan["scenes"]
     topic = characters = ""
     try:
-        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES, scenes="\n".join(
+        data = _ask(provider, VISUAL_PROMPT.format(n=len(scenes), graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES, badge_rules=BADGE_RULES, scenes="\n".join(
             f"Scene {i + 1}: {s['narration']}" for i, s in enumerate(scenes))))
         topic = str(data.get("topic") or "")[:300]
         characters = str(data.get("characters") or "")[:300]
@@ -296,6 +311,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
                 s["search"] = str(v.get("search", "")).strip()[:60]
                 s["graphic"] = G.clean(v.get("graphic"), s["narration"])
                 s["mood"] = str(v.get("mood") or "")
+                s.update(_badges(v))
         plan["title"] = str(data.get("title") or plan["title"])
         plan["summary"] = str(data.get("summary") or "")
         cta = P.clean_text(str(data.get("cta") or ""))[:90]
@@ -370,7 +386,7 @@ def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> d
     n = max(3, min(15, round(target / 7)))
     budget = speech_budget(target)
     try:
-        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES,
+        prompt = STORY_PROMPT.format(target=int(target), n=n, text=text, graphic_rules=_graphic_rules(), mood_rules=MOOD_RULES, badge_rules=BADGE_RULES,
                                      extra=extra, budget=budget, per_scene=max(40, min(110, budget // n)))
         raw = P.ask_ai(provider, prompt)
         data = P._parse_json(raw)
@@ -381,7 +397,8 @@ def _rewrite_once(text: str, provider: str, target: float, extra: str = "") -> d
                 scenes.append({"narration": narr, "headline": P.clean_text(str(s.get("headline", "")))[:40],
                                "image": str(s.get("image", "")).strip()[:300] or GENERIC_IMAGES[0], "img": "",
                                "search": str(s.get("search", "")).strip()[:60],
-                               "graphic": G.clean(s.get("graphic"), narr), "mood": str(s.get("mood") or "")})
+                               "graphic": G.clean(s.get("graphic"), narr), "mood": str(s.get("mood") or ""),
+                               **_badges(s)})
         if scenes:
             cut = fit_length(scenes, budget)
             plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "scenes": scenes}
@@ -513,12 +530,22 @@ def photo_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "")
             lang = "th" if re.search(r"[ก-๙]", query) else "en"
     else:
         query, lang = scene_query(s)
-    got = imagegen.search_photos(query, next_names(scene_dir, i, n), lang)
-    if not got and lang == "en" and s.get("narration"):  # ภาษาอังกฤษไม่เจอ → ลองค้นภาษาไทยตรงๆ
+    names = next_names(scene_dir, i, n + 3)
+    real = bool(s.get("badge") or s.get("real"))  # ฉากเหตุการณ์/บุคคล/สถานที่จริง
+    commons = []
+    if lang == "en":  # ภาพจริงจาก Wikimedia Commons (ฉากเหตุการณ์จริงเอามาก่อน)
+        commons = imagegen.commons_photos(query, names[n:n + (3 if real else 2)])
+    try:
+        got = imagegen.search_photos(query, names[:n], lang)
+    except RuntimeError:
+        if not commons:
+            raise
+        got = []
+    if not got and not commons and lang == "en" and s.get("narration"):  # ภาษาอังกฤษไม่เจอ → ลองค้นภาษาไทยตรงๆ
         th = thai_keywords(s["narration"])
         if th:
-            got = imagegen.search_photos(th, next_names(scene_dir, i, n), "th")
-    return [p.name for p in got]
+            got = imagegen.search_photos(th, names[:n], "th")
+    return [p.name for p in (commons + got if real else got[:1] + commons + got[1:])]
 
 
 PICK_PROMPT = """You are a video editor choosing stock photos for a Thai short vertical video.
@@ -675,8 +702,9 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         if only_missing and s.get("img") and (scene_dir / s["img"]).exists():
             continue
         # AI คิดภาพไม่ได้ (ภาพทั่วไปไม่เกี่ยวกับเรื่อง) → ใช้ภาพถ่ายฟรีจากคำสำคัญในบทแทนการวาด
-        if (source == "photo" or s.get("generic")) and not photo_err:
-            progress(i / n * 100, f"หาภาพถ่ายฉากที่ {i + 1}/{n}")
+        # ฉากเหตุการณ์/บุคคล/สถานที่จริง → ภาพจริง (Wikimedia Commons ก่อน) ดีกว่าให้ AI วาดหน้าคนจริง
+        if (source == "photo" or s.get("generic") or s.get("real")) and not photo_err:
+            progress(i / n * 100, f"หาภาพ{'จริง' if s.get('real') else 'ถ่าย'}ฉากที่ {i + 1}/{n}")
             try:
                 names = photo_options(s, i, scene_dir, 6 if vision_ready() else 4)
                 if names:
@@ -726,13 +754,14 @@ TRANSITIONS = ["fade", "slideleft", "slideup", "circleopen", "smoothleft"]
 SECOND_SHOT = 4.5  # ฉากยาวกว่านี้ (วินาที) → ครึ่งหลังตัดเป็นมุมใกล้ (เปลี่ยนภาพทุก 2-4 วิ ตามจังหวะ Shorts)
 
 
-def _motion(kind: str, W: int, H: int, D: float, color: str = "", full: bool = False) -> str:
+def _motion(kind: str, W: int, H: int, D: float, color: str = "", full: bool = False,
+            card: tuple[int, int] | None = None) -> str:
     """ภาพนิ่ง → กล้องเคลื่อนตามอารมณ์ฉาก → filter [0:v] → [mv]
     full=True: ภาพเต็มจอ · False: ภาพจัตุรัสกลางจอบนพื้นหลังเบลอของภาพเดียวกัน
     kind: zoom_in · zoom_out · pan_right/left/up/down · punch (กระชากซูมเข้า) · punch_shake (กระชาก+สั่น) · pan_shake (เลื่อน+สั่นเบาๆ)
     ฉากยาว > SECOND_SHOT วิ: ครึ่งหลังตัดไปมุมใกล้ (ซูม 1.35 เท่า) ให้ภาพเปลี่ยนระหว่างฉาก"""
     S = min(W, H)
-    OW, OH = (W, H) if full else (S, S)
+    OW, OH = card or ((W, H) if full else (S, S))
     D3 = f"{D:.3f}"
     u = f"(t/{D3})"
     # z = ซูม (≥1) · cx, cy = ตำแหน่งกล้อง 0..1 ของพื้นที่ที่เหลือ · sx, sy = สั่น (พิกเซล)
@@ -764,12 +793,65 @@ def _motion(kind: str, W: int, H: int, D: float, color: str = "", full: bool = F
           f"crop={OW}:{OH}:x='clip((iw-{OW})*{cx}+{sx},0,iw-{OW})':y='clip((ih-{OH})*{cy}+{sy},0,ih-{OH})'")
     if color:
         fg += "," + color
+    if card:
+        return fg
     if full:
         return f"[0:v]{fg},setsar=1[mv]"
     y = (H - S) // 2 - (60 if H > W else 0)
     bg = (f"[b0]scale=270:270,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
           f"boxblur=10:2,eq=brightness=-0.18:saturation=1.2,setsar=1[bg]")
     return f"[0:v]split[b0][f0];{bg};[f0]{fg}[fg];[bg][fg]overlay=(W-w)/2:{y}[mv]"
+
+
+PAPER, GRID = "0xF4F0E6", "0xE4DED1"
+CARD_PAD = 16
+
+
+def card_geom(img: Path, W: int, H: int, left: bool = False) -> tuple[int, int, int, int]:
+    """สไตล์การ์ดสารคดี: ขนาด/ตำแหน่งภาพในการ์ด (cw, ch, x, y) ตามสัดส่วนภาพจริง"""
+    r = 16 / 9
+    try:
+        if is_video(img.name):
+            info = P.probe(img)
+            r = float(info["width"]) / float(info["height"])
+        else:
+            from PIL import Image
+            with Image.open(img) as im:
+                r = im.width / im.height
+    except Exception:
+        pass
+    if H > W:  # แนวตั้ง: การ์ดกว้างเกือบเต็มจอ ช่วงบน (ซับอยู่ล่าง) · ภาพแนวตั้งครอปเป็นจัตุรัส
+        r = max(r, 1.0)
+        cw = int(W * 0.86)
+        ch = int(min(max(cw / r, cw * 9 / 16), H * 0.38))
+        cw = int(min(cw, ch * r)) if ch >= H * 0.38 else cw
+        y = int(H * 0.33 - ch / 2)
+    else:
+        ch = int(H * 0.68)
+        cw = int(min(ch * r, W * 0.62))
+        ch = int(min(ch, cw / r))
+        y = int(H * 0.44 - ch / 2)
+    cw, ch = cw // 2 * 2, ch // 2 * 2
+    if left and W > H:  # แนวนอน + มีกราฟิกมุมขวา → การ์ดชิดซ้าย ไม่ทับกัน
+        return cw, ch, int(W * 0.05), y
+    return cw, ch, (W - cw) // 2, y
+
+
+def _card_layout(img: Path, kind: str, W: int, H: int, D: float, color: str, video: bool, left: bool = False) -> str:
+    """พื้นกระดาษตาราง + ภาพ/วิดีโอในการ์ดขาวมีเงา เลื่อนขึ้นมาตอนเปิดฉาก แล้วลอยเบาๆ → [mv]"""
+    cw, ch, x, y = card_geom(img, W, H, left)
+    b = CARD_PAD
+    if video:
+        media = f"setpts=PTS-STARTPTS,scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch},setsar=1"
+    else:
+        media = _motion(kind, W, H, D, color, card=(cw, ch))
+    fy = f"{y - b}+max(0,0.35-t)*700+5*sin(t*1.4)"
+    return (f"color=c={PAPER}:s={W}x{H}:r=30:d={D:.3f},drawgrid=w=48:h=48:t=2:c={GRID},format=rgba[pp];"
+            f"[0:v]{media},pad={cw + 2 * b}:{ch + 2 * b}:{b}:{b}:color=white,format=rgba,split[c1][c2];"
+            f"[c2]colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0:aa=0.32,"
+            f"pad=iw+60:ih+60:30:30:color=black@0,boxblur=14:2[sh];"
+            f"[pp][sh]overlay=x={x - b - 30 + 10}:y='{fy}-30+16':format=auto[p1];"
+            f"[p1][c1]overlay=x={x - b}:y='{fy}':format=auto,format=yuv420p[mv]")
 
 
 def full_frame_ok(img: Path, W: int, H: int) -> bool:
@@ -824,6 +906,9 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     if anim:
         motion = (f"[0:v]crop={W}:{H}:x='(iw-{W})/2+(iw-{W})/2*sin(t*0.5)':"
                   f"y='(ih-{H})/2+(ih-{H})/2*cos(t*0.4)',setsar=1[mv]")
+    elif frame == "card":
+        g_on = bool(extras and scene.get("graphic") and not scene["graphic"].get("off"))
+        motion = _card_layout(img, sty["cam"], W, H, D, sty.get("color", ""), video, g_on)
     else:
         full = frame == "full" and full_frame_ok(img, W, H)
         motion = _video_layout(img, W, H) if video else _motion(sty["cam"], W, H, D, sty.get("color", ""), full)
@@ -852,16 +937,36 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
                              shapes=not studio)
     elif head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
+    if extras and not anim and (scene.get("badge") or scene.get("quote")):
+        # ป้ายวันที่·สถานที่ (เหลือง มุมล่างซ้ายของภาพ) + คำพูดดัง (ส้ม บนภาพ) — แบบคลิปสารคดี
+        if frame == "card":
+            cw, ch, cx0, cy0 = card_geom(img, W, H, bool(gfx and not gfx.get("off")))
+        else:
+            cw, ch, cx0, cy0 = W - 80, int(H * (0.5 if vertical else 0.8)), 40, int(H * (0.16 if vertical else 0.08))
+        u = min(W, H) / 1080 * (1.0 if vertical else 1.25)
+        if scene.get("badge"):
+            ass.events.append(f"Dialogue: 2,{P._ass_time(0.45)},{P._ass_time(D)},GBox,,0,0,0,,"
+                              f"{{\\an4\\pos({cx0 + int(28 * u)},{cy0 + ch - int(20 * u)})\\fs{int(34 * u)}\\bord{int(12 * u)}"
+                              f"\\fscx60\\fscy60\\t(0,160,\\fscx100\\fscy100)\\fad(150,200)}}{P.ass_text(scene['badge'])}")
+        if scene.get("quote"):
+            ass.events.append(f"Dialogue: 2,{P._ass_time(0.8)},{P._ass_time(D)},Head,,0,0,0,,"
+                              f"{{\\an5\\pos({W // 2},{cy0 + int(20 * u)})\\fs{int(44 * u)}\\frz2"
+                              f"\\fscx50\\fscy50\\t(0,180,\\fscx108\\fscy108)\\t(180,300,\\fscx100\\fscy100)\\fad(150,200)}}"
+                              f"“{P.ass_text(scene['quote'])}”")
     if studio and not has_g:  # ประกายวิ้งๆ รอบสินค้า
         G.sparkles(ass, 0.6, D, W / 2, H * 0.47, W * 0.3, i)
     if has_g:  # โมชันกราฟิกช่วยให้เข้าใจ
         # ฉากสตูดิโอ: กรอบกราฟิกอยู่เหนือสินค้า (สินค้าวางบนแท่นด้านล่าง)
         cues = G.render(ass, gfx, min(0.4, D / 4) + (0.5 if kin_cues else 0), D - 0.2,
-                        bottom=0.47 if studio and vertical else 0.69)
+                        bottom=0.47 if studio and vertical else 0.70 if frame == "card" else 0.69)
     else:
         cues = []
     if sty.get("sfx") and extras:  # เสียงเอฟเฟกต์ตามอารมณ์ฉาก (ฟิ้ว/ตึง) ตอนเปิดฉาก
         cues = [(0.02, sty["sfx"])] + cues
+    elif frame == "card" and extras and not anim:  # การ์ดเลื่อนขึ้นมา = เสียงฟิ้วเบาๆ
+        cues = [(0.02, "whoosh")] + cues
+    if extras and not anim and scene.get("quote") and D > 1.5:
+        cues = cues + [(0.8, "pop")]
     cues = sorted(kin_cues + cues)
     brand = brand or {}
     text = (brand.get("text") or "").strip() if extras else ""

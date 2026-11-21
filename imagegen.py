@@ -187,6 +187,58 @@ def _openverse_urls(query: str, n: int, lang: str = "en") -> list[str]:
     return [r["url"] for r in res if r.get("url")]
 
 
+def commons_photos(query: str, outs: list[Path]) -> list[Path]:
+    """ภาพจริงจาก Wikimedia Commons (สนาม นักกีฬา สถานที่ เหตุการณ์ บุคคลสำคัญ) — สัญญาอนุญาตเสรี ต้องให้เครดิต
+    บันทึกเป็น PNG + ไฟล์ .credit (ผู้ถ่าย · สัญญาอนุญาต · ลิงก์) ไว้ใส่ในคำอธิบายคลิป"""
+    from PIL import Image
+    q = " ".join(query.split()[:6])
+    if not q or not outs:
+        return []
+    params = {"action": "query", "format": "json", "generator": "search", "gsrnamespace": 6,
+              "gsrsearch": f"{q} filetype:bitmap", "gsrlimit": max(6, len(outs) * 3), "prop": "imageinfo",
+              "iiprop": "url|extmetadata|mime|size", "iiurlwidth": 1600}
+    try:
+        pages = (_get_json("https://commons.wikimedia.org/w/api.php?" + urllib.parse.urlencode(params))
+                 .get("query") or {}).get("pages") or {}
+    except Exception as e:
+        print("ค้น Wikimedia Commons ไม่ได้:", e)
+        return []
+    got = []
+    for pg in sorted(pages.values(), key=lambda x: x.get("index", 99)):
+        if len(got) >= len(outs):
+            break
+        ii = (pg.get("imageinfo") or [{}])[0]
+        meta = ii.get("extmetadata") or {}
+        lic = re.sub(r"<[^>]+>", "", (meta.get("LicenseShortName") or {}).get("value", "")).strip()
+        if ii.get("mime") not in ("image/jpeg", "image/png") or min(ii.get("width", 0), ii.get("height", 0)) < 500:
+            continue
+        if not lic or re.search(r"fair use|non-free", lic, re.I):
+            continue
+        artist = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", ""))).strip()[:60]
+        out = outs[len(got)]
+        try:
+            req = urllib.request.Request(ii.get("thumburl") or ii["url"], headers=UA)
+            tmp = out.with_suffix(".dl")
+            with urllib.request.urlopen(req, timeout=30) as r:
+                tmp.write_bytes(r.read())
+            im = Image.open(tmp).convert("RGB")
+            im.thumbnail((2048, 2048))
+            im.save(out)
+            out.with_suffix(".credit").write_text(
+                f"{artist or 'ไม่ระบุชื่อ'} · {lic} · {ii.get('descriptionurl', '')}", encoding="utf-8")
+            got.append(out)
+        except Exception:
+            pass
+        finally:
+            out.with_suffix(".dl").unlink(missing_ok=True)
+    return got
+
+
+def credit_of(path: Path) -> str:
+    c = path.with_suffix(".credit")
+    return c.read_text(encoding="utf-8").strip() if c.exists() else ""
+
+
 def translate_th_en(text: str) -> str:
     """แปลคำค้นไทยสั้นๆ เป็นอังกฤษ (MyMemory ฟรี ไม่ต้องมีคีย์) — คลังภาพส่วนใหญ่ค้นภาษาอังกฤษได้แม่นกว่า"""
     text = text.strip()[:200]

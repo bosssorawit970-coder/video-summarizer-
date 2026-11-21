@@ -12,7 +12,8 @@ import re
 
 import pipeline as P
 
-TYPES = {"stat": "ตัวเลขเด่น", "compare": "แท่งเปรียบเทียบ", "list": "หัวข้อย่อย", "keyword": "คำสำคัญ"}
+TYPES = {"stat": "ตัวเลขเด่น", "compare": "แท่งเปรียบเทียบ", "list": "หัวข้อย่อย", "keyword": "คำสำคัญ",
+         "score": "ป้ายสกอร์"}
 ACCENTS = ["FFD43B", "4DD4FF", "FF7AB6", "7CF29A"]
 CARD, WHITE, DARK = "101828", "FFFFFF", "1A1A1A"
 
@@ -22,7 +23,8 @@ GRAPHIC_RULES = """- "graphic": an optional small motion graphic that helps view
   {"type":"stat","value":"1","unit":"มม./ปี","label":"ฝนเฉลี่ยต่อปี"}   (one key number from the narration)
   {"type":"compare","unit":"มม.","items":[{"label":"อาตากามา","value":1},{"label":"กรุงเทพฯ","value":1500}]}   (2-4 numbers stated in the narration)
   {"type":"list","items":["ไม่มีฝน","ไม่มีพืช","คล้ายดาวอังคาร"]}   (2-4 points, 2-5 words each)
-  {"type":"keyword","text":"แห้งแล้งที่สุดในโลก"}   (one key phrase, 2-6 words)"""
+  {"type":"keyword","text":"แห้งแล้งที่สุดในโลก"}   (one key phrase, 2-6 words)
+  {"type":"score","left":"บาร์ซ่า","right":"ลิเวอร์พูล","a":3,"b":0}   (a match/vote result stated in the narration, short side names)"""
 
 
 def _num(v) -> float | None:
@@ -65,6 +67,14 @@ def clean(g, narration: str = "", strict: bool = True) -> dict | None:
     if t == "keyword":
         text = txt(g.get("text"), 30)
         return {"type": "keyword", "text": text} if text else None
+    if t == "score":
+        a, b = _num(g.get("a")), _num(g.get("b"))
+        left, right = txt(g.get("left"), 14), txt(g.get("right"), 14)
+        if a is None or b is None or not left or not right or a < 0 or b < 0:
+            return None
+        if strict and not ({f"{a:g}", f"{b:g}"} <= nums | {"0"}):
+            return None  # สกอร์ไม่มีในบท = AI แต่งเอง
+        return {"type": "score", "left": left, "right": right, "a": int(a), "b": int(b)}
     return None
 
 
@@ -121,6 +131,8 @@ def summary(g: dict | None) -> str:
         return " vs ".join(f"{i['label']} {i['value']:g}" for i in g.get("items", []))
     if t == "list":
         return " · ".join(g.get("items", []))
+    if t == "score":
+        return f"{g.get('left')} {g.get('a')} - {g.get('b')} {g.get('right')}"
     return g.get("text", "")
 
 
@@ -296,6 +308,19 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float, bottom: float = 0
                                f"\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)"
                                f"\\frz-3{fade}", P.ass_text(g["text"]), style="GBox")
         cues.append((t0 + 0.25, "pop"))
+    elif t == "score":
+        x0, y0, w, h = d.card(230)
+        cues.append((t0, "whoosh"))
+        cx, cy = x0 + w / 2, y0 + 70 * s
+        d.text(2, t0 + 0.2, t1, x0 + w * 0.17, cy, g["left"], 46, WHITE, 8, fade)
+        d.text(2, t0 + 0.2, t1, x0 + w * 0.83, cy, g["right"], 46, WHITE, 8, fade)
+        for k, (v, x) in enumerate(((g["a"], cx - 95 * s), (g["b"], cx + 95 * s))):
+            a = t0 + 0.45 + 0.35 * k
+            d.text(3, a, t1, x, cy + 90 * s, str(v), 140, ACCENTS[0], 5,
+                   "\\fscx40\\fscy40\\t(0,180,\\fscx115\\fscy115)\\t(180,300,\\fscx100\\fscy100)" + fade)
+            cues.append((a, "pop"))
+        d.text(3, t0 + 0.45, t1, cx, cy + 90 * s, "-", 110, WHITE, 5, fade)
+        cues.append((t0 + 1.2, "ding"))
     return [(round(max(0.0, c), 3), n) for c, n in cues if c < t1 - 0.1]
 
 

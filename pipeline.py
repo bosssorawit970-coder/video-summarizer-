@@ -602,6 +602,15 @@ def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
             body, _, tags = yt["description"].rpartition("\n\n")
             yt["description"] = f"{body or yt['description']}\n📌 ที่มา: {src['site']} {src.get('url', '')}".strip() + \
                 (f"\n\n{tags}" if body else "")
+    credits = plan.get("credits") or []
+    if credits:  # ภาพ Wikimedia Commons ต้องให้เครดิตผู้ถ่าย + สัญญาอนุญาต
+        post["caption"] = post["caption"].rstrip() + "\n📷 ภาพบางส่วน: Wikimedia Commons (เครดิตเต็มในคำอธิบาย YouTube)"
+        if post.get("youtube"):
+            yt = post["youtube"]
+            body, _, tags = yt["description"].rpartition("\n\n")
+            lines = "\n".join(f"- {c}" for c in credits[:15])
+            yt["description"] = f"{body or yt['description']}\n\n📷 ภาพประกอบ (Wikimedia Commons):\n{lines}" + \
+                (f"\n\n{tags}" if body else "")
     return post
 
 
