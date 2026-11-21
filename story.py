@@ -569,6 +569,14 @@ name the specific object/creature/action as the main subject first, use a close-
 describe its shape, colour and where it is. Photo-realistic, no text. Also give 2-4 English stock-photo search words.
 Reply JSON only: {{"image": "...", "search": "..."}}"""
 
+REF_PROMPT = """The user uploaded a REFERENCE image showing roughly what they want for one scene of a Thai short video.
+Scene narration (Thai): {narration}
+Story topic: {topic}
+Look at the reference and reply JSON only:
+{{"desc": "one English sentence: what the reference shows (subject, framing, mood, style)",
+ "image": "English image prompt, 15-35 words: the narration's subject shown the way the reference looks (framing, lighting, style). No text, no logos.",
+ "search": "2-4 English words to find similar stock photos/videos"}}"""
+
 FIT_OK = 6  # คะแนนความตรงขั้นต่ำ (0-10) ที่ยอมรับภาพ
 
 
@@ -625,6 +633,58 @@ def verify_images(plan: dict, scene_dir: Path, layout: str, style: str, progress
             changed += 1
         s["options"] = list(dict.fromkeys(tmp["options"] + cands))
     return changed
+
+
+def from_reference(s: dict, i: int, scene_dir: Path, ref: Path, layout: str, style: str, topic: str = "",
+                   want_video: bool = True, progress=None) -> list[str]:
+    """🎯 รูปตัวอย่าง → หาภาพ/วิดีโอ "ประมาณนี้" ให้ฉาก: AI ดูรูปตัวอย่าง → คำสั่งวาด + คำค้น
+    → Gemini วาดตามรูปตัวอย่าง + AI ในเครื่องวาด + ภาพถ่าย + วิดีโอฟรี → AI เลือกตัวที่ใกล้ที่สุด
+    คืนรายชื่อไฟล์เรียงจากดีสุด (รูปตัวอย่างเองอยู่ท้ายสุด เผื่อจะใช้ตรงๆ)"""
+    tall = layout != "original"
+    say = progress or (lambda m: None)
+    part = _thumb_part(ref)
+    data = P._parse_json(P._ask_gemini(REF_PROMPT.format(narration=s.get("narration", ""), topic=topic),
+                                       [part] if part else None))
+    desc = str(data.get("desc") or "")[:200]
+    if data.get("image"):
+        s["image"] = str(data["image"])[:300]
+    if data.get("search"):
+        s["search"] = str(data["search"])[:60]
+    cands: list[str] = []
+    say("Gemini กำลังทำภาพตามรูปตัวอย่าง")
+    try:
+        out = next_names(scene_dir, i, 1)[0]
+        if imagegen.gemini_image(s["image"], out, tall=tall, ref=ref):
+            cands.append(out.name)
+    except Exception as e:
+        print("Gemini ทำภาพตามรูปตัวอย่างไม่ได้:", e)
+    if imagegen.available():
+        say("AI ในเครื่องกำลังวาด")
+        try:
+            names, ai = ai_variants(s, i, scene_dir, style, 1, tall=tall)
+            if ai:
+                cands += names
+        except Exception as e:
+            print("วาดในเครื่องไม่ได้:", e)
+    say("ค้นภาพถ่ายที่คล้ายกัน")
+    try:
+        cands += [o for o in photo_options(s, i, scene_dir, 4) if o not in cands]
+    except Exception as e:
+        print("ค้นภาพถ่ายไม่ได้:", e)
+    if want_video and imagegen.videos_available():
+        say("ค้นวิดีโอที่คล้ายกัน")
+        try:
+            cands += [o for o in video_options(s, i, scene_dir, 3, s.get("search", "")) if o not in cands]
+        except Exception as e:
+            print("ค้นวิดีโอไม่ได้:", e)
+    if len(cands) > 1:
+        say("AI กำลังเลือกตัวที่ใกล้รูปตัวอย่างที่สุด")
+        tmp = {"narration": f"{s.get('narration', '')}\n(The user wants it to look like: {desc})", "options": cands[:6]}
+        fit = _rank_one(tmp, scene_dir, topic)
+        cands = list(dict.fromkeys(tmp["options"] + cands))
+        if fit is not None:
+            s["fit"] = fit
+    return cands
 
 
 def vision_ready() -> bool:

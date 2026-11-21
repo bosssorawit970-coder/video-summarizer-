@@ -1432,6 +1432,47 @@ async def video_scene(req: Request):
     return JSONResponse({"imgs": names})
 
 
+async def ref_scene(req: Request):
+    """🎯 อัปรูปตัวอย่าง "อยากได้ประมาณนี้" → AI หาภาพถ่าย/วิดีโอ/วาดภาพใหม่ให้คล้ายรูปตัวอย่าง + ตรงบท"""
+    from starlette.concurrency import run_in_threadpool
+    j, err = _get(req.path_params["jid"])
+    if err:
+        return err
+    if not ST.vision_ready():
+        return JSONResponse({"error": "ต้องใส่คีย์ Gemini ก่อน AI ถึงจะดูรูปตัวอย่างได้"}, status_code=400)
+    form = await req.form(max_part_size=40 * 1024 ** 2)
+    up = form.get("file")
+    if up is None or not getattr(up, "filename", ""):
+        return JSONResponse({"error": "เลือกรูปตัวอย่างก่อน"}, status_code=400)
+    i = int(_num(req.path_params["i"], 0))
+    d = job_dir(j["id"]) / "scenes"
+    d.mkdir(parents=True, exist_ok=True)
+    ref = ST.next_names(d, i, 1)[0]  # รูปตัวอย่างเก็บเป็นตัวเลือกของฉากด้วย (เลือกใช้ตรงๆ ได้)
+    raw = d / f"upload_{uuid.uuid4().hex}{Path(up.filename).suffix.lower()[:6]}"
+    with open(raw, "wb") as f:
+        shutil.copyfileobj(up.file, f, 1024 * 1024)
+    try:
+        P.run(["ffmpeg", "-y", "-hide_banner", "-i", str(raw), "-frames:v", "1", "-vf", "scale='min(2048,iw)':-2", str(ref)])
+    except Exception:
+        return JSONResponse({"error": "เปิดรูปนี้ไม่ได้ ลองใช้ไฟล์ JPG หรือ PNG"}, status_code=400)
+    finally:
+        raw.unlink(missing_ok=True)
+    scenes = (j.get("plan") or {}).get("scenes") or []
+    scene = dict(scenes[i]) if 0 <= i < len(scenes) else {}
+    for key in ("narration", "image", "search"):
+        if form.get(key):
+            scene[key] = str(form.get(key))[:300]
+    lay = (j.get("render_opts") or j["opts"].get("render") or {}).get("layout", "vertical_crop")
+    try:
+        names = await run_in_threadpool(ST.from_reference, scene, i, d, ref, lay, j["opts"].get("style", "cinematic"),
+                                        (j.get("plan") or {}).get("title", ""), str(form.get("video") or "1") == "1")
+    except Exception as e:
+        return JSONResponse({"error": f"AI ดูรูปตัวอย่างไม่ได้: {P.error_text(e)}"}, status_code=400)
+    names = [n for n in names if n != ref.name] + [ref.name]  # รูปตัวอย่างเองไว้ท้ายสุด (เลือกใช้ตรงๆ ได้)
+    return JSONResponse({"imgs": names, "image": scene.get("image", ""), "search": scene.get("search", ""),
+                         "fit": scene.get("fit")})
+
+
 async def smart_scene(req: Request):
     """🧠 หาภาพที่ตรงบทที่สุดให้ฉากนี้: AI เขียนคำสั่งวาดใหม่ + หาภาพถ่ายจริง แล้วให้ AI ดูเลือกตัวที่ตรงที่สุด"""
     from starlette.concurrency import run_in_threadpool
@@ -1790,6 +1831,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/photos", photo_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes-rank", rank_scenes, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/smart", smart_scene, methods=["POST"]),
+    Route("/api/jobs/{jid}/scenes/{i}/ref", ref_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/videos", video_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
     Route("/api/motion", create_motion, methods=["POST"]),

@@ -139,7 +139,7 @@ def generate(prompt: str, out: Path, width: int = 1024, height: int = 1024, styl
 UA = {"User-Agent": "sarupclip/1.0 (personal short-video maker)"}
 
 
-def gemini_image(prompt: str, out: Path, tall: bool = False) -> bool:
+def gemini_image(prompt: str, out: Path, tall: bool = False, ref: Path | None = None) -> bool:
     """วาดภาพด้วย Gemini (รุ่นทำภาพ) — เข้าใจคำสั่งละเอียดกว่าโมเดลในเครื่องมาก (วาดของชิ้นเล็กๆ เฉพาะเจาะจงได้)
     ใช้ได้เมื่อคีย์มีสิทธิ์/โควตารุ่นทำภาพ ไม่งั้นคืน False"""
     import base64
@@ -157,10 +157,21 @@ def gemini_image(prompt: str, out: Path, tall: bool = False) -> bool:
         return False
     text = (f"Create one photo-realistic image (no text, no letters, no watermark): {prompt}. "
             f"{'Vertical 9:16 composition.' if tall else 'Square composition.'}")
+    parts = [{"text": text}]
+    if ref:  # รูปตัวอย่างจากผู้ใช้: ทำภาพใหม่ "ประมาณนี้" (มุมกล้อง/บรรยากาศ/สไตล์) ไม่ใช่ลอกทั้งภาพ
+        from PIL import Image
+        im = Image.open(ref).convert("RGB")
+        im.thumbnail((1024, 1024))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=90)
+        parts = [{"text": text + " Use the attached reference image as a guide for the subject's look, framing, "
+                                 "lighting and mood, but create a NEW original image (do not copy it exactly, "
+                                 "remove any logos, watermarks or text)."},
+                 {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}}]
     for model in models[:2]:
         for cfg in ({"responseModalities": ["TEXT", "IMAGE"], "imageConfig": {"aspectRatio": "9:16" if tall else "1:1"}},
                     {"responseModalities": ["TEXT", "IMAGE"]}):
-            body = _json.dumps({"contents": [{"role": "user", "parts": [{"text": text}]}],
+            body = _json.dumps({"contents": [{"role": "user", "parts": parts}],
                                 "generationConfig": cfg}).encode()
             try:
                 data = P._gemini_post(model, body, key)

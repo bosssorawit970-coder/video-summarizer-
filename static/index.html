@@ -1168,6 +1168,7 @@ function drawScenes() {
           ${cfg.pexels ? `<button data-a="photo">📷 ภาพถ่ายจริง</button>` : ""}
           ${cfg.videos ? `<button data-a="video">📹 วิดีโอ</button>` : ""}
           <button data-a="mine">📁 รูปของฉัน</button>
+          ${cfg.vision ? `<button data-a="ref" title="อัปรูปตัวอย่างว่าอยากได้ประมาณนี้ → AI หาภาพถ่าย วิดีโอ และวาดภาพใหม่ให้คล้ายๆ แล้วเลือกตัวที่ใกล้ที่สุด">🎯 รูปตัวอย่าง</button>` : ""}
           ${cfg.vision ? `<button data-a="smart" title="AI ดูภาพเทียบกับบท ไม่ตรง → เขียนคำสั่งวาดใหม่ + หาภาพถ่ายจริง แล้วเลือกตัวที่ตรงที่สุด">🧠 หาภาพที่ตรงบท</button>` : ""}
         </div>
         ${c.fit != null ? `<div class="hint">🧠 ความตรงกับบท: ${c.fit}/10${c.fit < 6 ? " — ยังไม่ค่อยตรง ลองพิมพ์คำบรรยายภาพเองแล้วกด 🎲" : ""}</div>` : ""}
@@ -1301,6 +1302,27 @@ $("#clips").addEventListener("click", async e => {
     } catch (err) { alert(err.message); }
     b.textContent = label;
     return drawScenes();
+  }
+  if (isStory() && a === "ref") {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      const card = e.target.closest(".scene"), b = e.target, label = b.textContent;
+      card.querySelectorAll(".imgbtns button").forEach(x => x.disabled = true);
+      b.textContent = "🎯 AI กำลังดูรูปตัวอย่างแล้วหาภาพ (~1-2 นาที)…"; card.querySelector(".pic img, .pic video")?.classList.add("busy");
+      try {
+        const c = clips[i];
+        const fd = new FormData(); fd.append("file", await shrinkImage(f));
+        fd.append("narration", c.narration || ""); fd.append("video", cfg.videos ? "1" : "");
+        const r = await api(`/api/jobs/${job.id}/scenes/${i}/ref`, {method: "POST", body: fd});
+        c.options = [...new Set([...r.imgs, ...(c.options || []), ...(c.img ? [c.img] : [])])];
+        Object.assign(c, {img: r.imgs[0], image: r.image || c.image, search: r.search || c.search, fit: r.fit, generic: false, weak: false});
+      } catch (err) { alert(err.message); }
+      b.textContent = label;
+      drawScenes();
+    };
+    inp.click();
+    return;
   }
   if (isStory() && a === "smart") {
     const card = e.target.closest(".scene"), b = e.target, label = b.textContent;
