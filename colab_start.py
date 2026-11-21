@@ -31,7 +31,7 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q", "diffusers", "tran
 # ฟอนต์ไทย สำหรับซับไตเติล ชื่อช่อง และภาพปก (Colab ไม่มีมาให้) — Kanit (Google Fonts) + สำรอง tlwg
 subprocess.run("apt-get install -y -qq fonts-thai-tlwg > /dev/null 2>&1", shell=True)
 os.makedirs(f"{APP}/fonts", exist_ok=True)
-for w in ("Bold", "SemiBold"):
+for w in ("Bold", "SemiBold", "Black"):
     f = f"{APP}/fonts/Kanit-{w}.ttf"
     if not os.path.exists(f):
         try:
