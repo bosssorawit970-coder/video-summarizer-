@@ -52,6 +52,7 @@ import source as SRC  # noqa: E402
 import product as PR  # noqa: E402
 import motion as MO  # noqa: E402
 import cover as CV  # noqa: E402
+import mascot as MS  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -331,6 +332,7 @@ def analyze_talk(jid: str, src: Path, info: dict) -> dict:
 
 def _brand(r: dict) -> dict:
     return {"text": r.get("channel") or "", "logo": asset_path("logo", r.get("logo") or ""),
+            "mascot": asset_path("mascot", r.get("mascot") or ""), "mascot_pos": r.get("mascot_pos") or "top_right",
             "top": r.get("toptext") or ""}
 
 
@@ -393,6 +395,15 @@ def do_render(jid: str) -> None:
                  cover=thumb if r.get("cover") and thumb.exists() else None,
                  src_resolver=_resolve,
                  progress=lambda pct, msg: save(jid, progress=pct * 0.97, message=msg))
+        if brand.get("mascot"):
+            save(jid, progress=97, message="ใส่มาสคอต")
+            try:
+                tmp = d / "output_mascot.mp4"
+                MS.overlay(out, brand["mascot"], tmp, brand.get("mascot_pos", "top_right"))
+                tmp.replace(out)
+            except Exception as e:
+                print("ใส่มาสคอตไม่ได้:", str(e)[-300:])
+                P.TTS_NOTES.append("ใส่มาสคอตในคลิปไม่สำเร็จ")
         music = asset_path("music", r.get("music") or "")
         if music:
             save(jid, progress=98, message="ใส่เพลงประกอบ")
@@ -428,7 +439,8 @@ def _covers(jid: str, frames: list[Path], vertical: bool, title: str, summary: s
         return False
     W, H = (1080, 1920) if vertical else (1280, 720)
     outs = [d / f"cover_{k + 1}.jpg" for k in range(len(frames))]
-    made = CV.make_covers(frames, outs, W, H, text, accent, tag, (brand or {}).get("text", ""), work)
+    made = CV.make_covers(frames, outs, W, H, text, accent, tag, (brand or {}).get("text", ""), work,
+                          (brand or {}).get("mascot"))
     if not made:
         return False
     shutil.copyfile(made[0], d / "thumb.jpg")
@@ -496,6 +508,15 @@ def do_render_story(jid: str) -> None:
         plan["credits"] = list(dict.fromkeys(
             c for c in (imagegen.credit_of(d / "scenes" / s_["img"]) for s_ in plan["scenes"] if s_.get("img")) if c))
         save(jid, plan=plan)  # ภาพที่วาดเพิ่มระหว่างตัดต่อ
+        if brand.get("mascot"):
+            save(jid, progress=97, message="ใส่มาสคอต")
+            try:
+                tmp = d / "output_mascot.mp4"
+                MS.overlay(out, brand["mascot"], tmp, brand.get("mascot_pos", "top_right"))
+                tmp.replace(out)
+            except Exception as e:
+                print("ใส่มาสคอตไม่ได้:", str(e)[-300:])
+                P.TTS_NOTES.append("ใส่มาสคอตในคลิปไม่สำเร็จ")
         music = asset_path("music", r.get("music") or "")
         if music:
             save(jid, progress=98, message="ใส่เพลงประกอบ")
@@ -904,11 +925,13 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "toptext": str(body.get("toptext") or "").strip()[:100],
         "cover_text": str(body.get("cover_text") or "").strip()[:60],
         "logo": str(body.get("logo") or "") if asset_path("logo", str(body.get("logo") or "")) else "",
+        "mascot": str(body.get("mascot") or "") if asset_path("mascot", str(body.get("mascot") or "")) else "",
+        "mascot_pos": body.get("mascot_pos") if body.get("mascot_pos") in MS.POSITIONS else "top_right",
     }
 
 
 RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "orig_mode", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "frame", "less_text", "fx", "cover", "music",
-               "music_volume", "channel", "logo", "toptext", "cover_text")
+               "music_volume", "channel", "logo", "toptext", "cover_text", "mascot", "mascot_pos")
 
 
 def _subs(r: dict):
@@ -1107,7 +1130,8 @@ async def capcut_zip(req: Request):
 ASSETS = JOBS_DIR / "_assets"
 P.VOICE_DIR = ASSETS / "voice"
 ASSET_EXT = {"music": {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus"},
-             "logo": {".png", ".jpg", ".jpeg", ".webp"}}
+             "logo": {".png", ".jpg", ".jpeg", ".webp"},
+             "mascot": {".png", ".jpg", ".jpeg", ".webp"}}
 
 
 def asset_path(kind: str, name: str) -> Path | None:
@@ -1139,6 +1163,18 @@ async def upload_asset(req: Request):
         i += 1
     with open(ASSETS / kind / name, "wb") as f:
         shutil.copyfileobj(up.file, f, 1024 * 1024)
+    if kind == "mascot":  # ลบพื้นหลัง + ตัดขอบ → PNG พื้นใส
+        orig = ASSETS / kind / name
+        png = orig.with_name(Path(name).stem + "_m.png")
+        try:
+            MS.prepare(orig, png)
+        except Exception as e:
+            orig.unlink(missing_ok=True)
+            return JSONResponse({"error": f"เปิดรูปไม่ได้: {e}"}, status_code=400)
+        orig.unlink(missing_ok=True)
+        final = orig.with_suffix(".png")
+        png.replace(final)
+        return JSONResponse({"name": final.name})
     if kind == "logo" and ext != ".png":  # แปลงเป็น PNG ให้ ffmpeg ใช้ได้แน่นอน
         orig = ASSETS / kind / name
         png = orig.with_suffix(".png")

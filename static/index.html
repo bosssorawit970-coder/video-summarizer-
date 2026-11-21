@@ -368,6 +368,14 @@ video{width:100%;border-radius:10px;background:#000;display:block}
           <div class="urlrow"><select id="logo0"></select><button data-up="logo">+ เพิ่มโลโก้</button></div>
         </div>
         <div>
+          <label class="f">มาสคอตประจำช่อง</label>
+          <div class="urlrow"><select id="mascot0"></select><button data-up="mascot">+ เพิ่มมาสคอต</button></div>
+          <div class="urlrow" style="margin-top:6px"><select id="mascotPos0">
+            <option value="top_right">ในคลิป: มุมขวาบน</option><option value="bottom_left">ในคลิป: มุมซ้ายล่าง</option>
+            <option value="bottom_right">ในคลิป: มุมขวาล่าง</option></select></div>
+          <div class="hint">ลอยมุมจอตลอดคลิป + ติดบนภาพปก · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้</div>
+        </div>
+        <div>
           <label class="f">ภาพปก</label>
           <div class="seg"><label><input type="checkbox" id="cover0" checked> ใส่ภาพปกไว้ต้นคลิป (กดเลือกเป็นปก TikTok ได้ง่าย)</label></div>
         </div>
@@ -850,16 +858,19 @@ function pick(list) {
 // ── ตกแต่ง ──
 const store = {get(k, d) { try { const v = localStorage.getItem("sc_" + k); return v == null ? d : v; } catch { return d; } },
                set(k, v) { try { localStorage.setItem("sc_" + k, v); } catch {} }};
-let assets = {music: [], logo: []};
+let assets = {music: [], logo: [], mascot: []};
 function fillAssets() {
   const opt = (list, none) => `<option value="">${none}</option>` + list.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
   for (const id of ["music0", "music"]) { const el = $("#" + id), v = el.value; el.innerHTML = opt(assets.music, "ไม่ใส่เพลง"); el.value = assets.music.includes(v) ? v : ""; }
   const l = $("#logo0"), lv = l.value; l.innerHTML = opt(assets.logo, "ไม่ใส่โลโก้"); l.value = assets.logo.includes(lv) ? lv : "";
+  const m = $("#mascot0"), mv = m.value; m.innerHTML = opt(assets.mascot || [], "ไม่ใส่มาสคอต"); m.value = (assets.mascot || []).includes(mv) ? mv : "";
 }
 async function loadAssets() {
   assets = await api("/api/assets").catch(() => assets); fillAssets();
   $("#music0").value = assets.music.includes(store.get("music", "")) ? store.get("music", "") : "";
   $("#logo0").value = assets.logo.includes(store.get("logo", "")) ? store.get("logo", "") : "";
+  $("#mascot0").value = (assets.mascot || []).includes(store.get("mascot", "")) ? store.get("mascot", "") : "";
+  $("#mascotPos0").value = store.get("mascotPos", "top_right");
   decorSummary();
 }
 function decorSummary() {
@@ -869,6 +880,7 @@ function decorSummary() {
   if ($("#channel0").value.trim()) bits.push("ชื่อช่อง");
   if ($("#toptext0").value.trim() && (mode() === "talk" || mode() === "game")) bits.push("หัวเรื่อง");
   if ($("#logo0").value) bits.push("โลโก้");
+  if ($("#mascot0").value) bits.push("มาสคอต");
   if ($("#cover0").checked) bits.push("ภาพปก");
   $("#decorSum").textContent = bits.length ? "· " + bits.join(", ") : "";
 }
@@ -881,6 +893,7 @@ $("#mvol0").oninput();
 $("#decor").addEventListener("change", () => {
   store.set("channel", $("#channel0").value.trim()); store.set("fx", $("#fx0").checked ? "1" : "0");
   store.set("cover", $("#cover0").checked ? "1" : "0"); store.set("music", $("#music0").value); store.set("logo", $("#logo0").value);
+  store.set("mascot", $("#mascot0").value); store.set("mascotPos", $("#mascotPos0").value);
   decorSummary();
 });
 let upKind = "";
@@ -935,6 +948,7 @@ function commonFields(fd) {
   fd.append("channel", $("#channel0").value.trim());
   if (mode() === "talk" || mode() === "game") fd.append("toptext", $("#toptext0").value.trim());
   fd.append("logo", $("#logo0").value);
+  fd.append("mascot", $("#mascot0").value); fd.append("mascot_pos", $("#mascotPos0").value);
   fd.append("cover", $("#cover0").checked ? "1" : "");
   return fd;
 }

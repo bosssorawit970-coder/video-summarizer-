@@ -233,7 +233,8 @@ def _hook_events(text: str, accent: str, W: int, H: int, style: str, cx: int, cy
 
 
 def compose(img_path: Path, out: Path, W: int, H: int, text: str, accent: str = "", tag: str = "",
-            brand: str = "", style: str = "pop", accent_color: str = YELLOW, workdir: Path | None = None) -> str:
+            brand: str = "", style: str = "pop", accent_color: str = YELLOW, workdir: Path | None = None,
+            mascot: Path | None = None) -> str:
     """ทำปก 1 ภาพ คืนแบบที่ใช้จริง (pop ตัดตัวเด่นไม่ได้ → bold)"""
     from PIL import Image, ImageFilter
     workdir = Path(workdir or out.parent)
@@ -258,6 +259,14 @@ def compose(img_path: Path, out: Path, W: int, H: int, text: str, accent: str = 
         bg = bg.convert("RGBA")
         bg.alpha_composite(layer)
         bg = bg.convert("RGB")
+    if mascot:  # มาสคอตประจำช่อง ติดมุมปก
+        try:
+            import mascot as MS
+            bg = bg.convert("RGBA")
+            bg.alpha_composite(MS.sticker_layer(mascot, W, H, vertical))
+            bg = bg.convert("RGB")
+        except Exception as e:
+            print("ใส่มาสคอตบนปกไม่ได้:", e)
     base = workdir / (out.stem + "_base.png")
     bg.save(base)
     # ตำแหน่งข้อความ: แนวตั้ง = ช่วงบน (ตัวเด่นอยู่ล่าง) · แนวนอน = ครึ่งซ้าย (ตัวเด่นขวา) หรือด้านล่าง
@@ -292,14 +301,14 @@ def parse_user_text(s: str) -> tuple[str, str]:
 
 
 def make_covers(images: list[Path], outs: list[Path], W: int, H: int, text: str, accent: str,
-                tag: str, brand: str, workdir: Path) -> list[Path]:
+                tag: str, brand: str, workdir: Path, mascot: Path | None = None) -> list[Path]:
     """ทำปก 3 แบบ (คนละเฟรม/คนละสไตล์) — อย่างน้อย 1 แบบสำเร็จก็พอ"""
     styles = [("pop", YELLOW), ("band", YELLOW), ("bold", "FF5A36")]
     made = []
     for k, (img, out) in enumerate(zip(images, outs)):
         st, col = styles[k % len(styles)]
         try:
-            compose(img, out, W, H, text, accent, tag, brand, st, col, workdir)
+            compose(img, out, W, H, text, accent, tag, brand, st, col, workdir, mascot)
             made.append(out)
         except Exception as e:
             print(f"ทำปกแบบที่ {k + 1} ไม่ได้:", str(e)[-300:])
