@@ -139,6 +139,47 @@ def generate(prompt: str, out: Path, width: int = 1024, height: int = 1024, styl
 UA = {"User-Agent": "sarupclip/1.0 (personal short-video maker)"}
 
 
+def gemini_image(prompt: str, out: Path, tall: bool = False) -> bool:
+    """วาดภาพด้วย Gemini (รุ่นทำภาพ) — เข้าใจคำสั่งละเอียดกว่าโมเดลในเครื่องมาก (วาดของชิ้นเล็กๆ เฉพาะเจาะจงได้)
+    ใช้ได้เมื่อคีย์มีสิทธิ์/โควตารุ่นทำภาพ ไม่งั้นคืน False"""
+    import base64
+    import io
+    import json as _json
+    import os
+
+    import pipeline as P
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    try:
+        models = P.gemini_models("image")
+    except Exception:
+        models = []
+    if not key or not models:
+        return False
+    text = (f"Create one photo-realistic image (no text, no letters, no watermark): {prompt}. "
+            f"{'Vertical 9:16 composition.' if tall else 'Square composition.'}")
+    for model in models[:2]:
+        for cfg in ({"responseModalities": ["TEXT", "IMAGE"], "imageConfig": {"aspectRatio": "9:16" if tall else "1:1"}},
+                    {"responseModalities": ["TEXT", "IMAGE"]}):
+            body = _json.dumps({"contents": [{"role": "user", "parts": [{"text": text}]}],
+                                "generationConfig": cfg}).encode()
+            try:
+                data = P._gemini_post(model, body, key)
+            except Exception as e:
+                msg = str(getattr(e, "_msg_text", "") or e)
+                print(f"Gemini วาดภาพไม่ได้ ({model}):", msg[:200])
+                if "imageConfig" in msg or "aspect" in msg.lower():
+                    continue  # รุ่นนี้ไม่รู้จักการตั้งสัดส่วน → ลองแบบไม่ตั้ง
+                break
+            for part in ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []:
+                inline = part.get("inlineData") or part.get("inline_data")
+                if inline and inline.get("data"):
+                    from PIL import Image
+                    Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB").save(out)
+                    return True
+            break
+    return False
+
+
 def _keys() -> tuple[str, str]:
     """คืน (คีย์ Pexels, คีย์ Pixabay) — วางคีย์ Pixabay ในช่อง PEXELS_API_KEY ก็ได้ (แยกจากรูปแบบคีย์)"""
     pex = (os.environ.get("PEXELS_API_KEY") or "").strip()

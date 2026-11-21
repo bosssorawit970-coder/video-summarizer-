@@ -248,8 +248,13 @@ def analyze_story(jid: str) -> dict:
         plan["source"] = {k: source[k] for k in ("site", "url", "title")}
     save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
-                        lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.78, message=msg),
+                        lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.7, message=msg),
                         source=o.get("image_source", "ai"))
+    if o.get("verify", True) and ST.vision_ready():  # 🧠 ตรวจว่าภาพตรงบท ไม่ตรง → หาภาพ/วาดใหม่
+        nf = ST.verify_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
+                              lambda pct, msg: save(jid, step="images", progress=90 + pct * 0.07, message=msg))
+        if nf:
+            plan["note"] = ((plan.get("note") or "") + f" · 🧠 AI ตรวจแล้วเปลี่ยนภาพที่ไม่ตรงบท {nf} ฉาก").strip(" ·")
     if o.get("videos"):  # แทรกวิดีโอฟรีบางฉาก
         nv = ST.add_videos(plan, d / "scenes",
                            lambda pct, msg: save(jid, step="images", progress=97, message=msg))
@@ -1427,6 +1432,33 @@ async def video_scene(req: Request):
     return JSONResponse({"imgs": names})
 
 
+async def smart_scene(req: Request):
+    """🧠 หาภาพที่ตรงบทที่สุดให้ฉากนี้: AI เขียนคำสั่งวาดใหม่ + หาภาพถ่ายจริง แล้วให้ AI ดูเลือกตัวที่ตรงที่สุด"""
+    from starlette.concurrency import run_in_threadpool
+    j, err = _get(req.path_params["jid"])
+    if err:
+        return err
+    if not ST.vision_ready():
+        return JSONResponse({"error": "ต้องใส่คีย์ Gemini ก่อน AI ถึงจะช่วยดูภาพได้"}, status_code=400)
+    body = await req.json()
+    i = int(_num(req.path_params["i"], 0))
+    d = job_dir(j["id"]) / "scenes"
+    scenes = (j.get("plan") or {}).get("scenes") or []
+    scene = dict(scenes[i]) if 0 <= i < len(scenes) else {}
+    for k in ("narration", "image", "search", "img"):
+        if body.get(k):
+            scene[k] = str(body[k])[:300]
+    scene["options"] = [str(o) for o in body.get("options") or [] if re.fullmatch(r"[\w.\-]+", str(o))]
+    plan = {"title": (j.get("plan") or {}).get("title", ""), "scenes": [scene]}
+    lay = (j.get("render_opts") or j["opts"].get("render") or {}).get("layout", "vertical_crop")
+    # ใช้ลำดับฉากจริง (ชื่อไฟล์ภาพใหม่จะเป็นของฉากนี้)
+    plan["scenes"] = [{}] * i + [scene]
+    await run_in_threadpool(ST.verify_images, plan, d, lay, j["opts"].get("style", "cinematic"),
+                            lambda *_: None, [i], True)
+    return JSONResponse({"img": scene.get("img"), "options": scene.get("options", []), "image": scene.get("image", ""),
+                         "search": scene.get("search", ""), "fit": scene.get("fit")})
+
+
 async def rank_scenes(req: Request):
     """ให้ AI เลือกภาพที่ตรงบทที่สุดของหลายฉากพร้อมกัน (ใช้หลังกดเปลี่ยนเป็นภาพถ่ายทุกฉาก)"""
     from starlette.concurrency import run_in_threadpool
@@ -1757,6 +1789,7 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/scenes/{i}/upload", upload_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/photos", photo_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes-rank", rank_scenes, methods=["POST"]),
+    Route("/api/jobs/{jid}/scenes/{i}/smart", smart_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/videos", video_scene, methods=["POST"]),
     Route("/api/assets", list_assets, methods=["GET"]),
     Route("/api/motion", create_motion, methods=["POST"]),

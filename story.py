@@ -51,6 +51,9 @@ Step 2 — for EACH scene write:
   Stay consistent with the topic and setting from Step 1 — every image must clearly belong to this same story.
   Recurring characters must be described with the SAME appearance every time (age, gender, hair, clothes).
   If the scene states a fact, number or idea, show a concrete visual of it (never an unrelated generic scene).
+  The SPECIFIC object the narration is about must be the main subject and clearly visible — if it is small or a detail
+  (e.g. "the tiny hole in an airplane window"), use a macro / extreme close-up of exactly that detail and describe its
+  shape and location, instead of a wide view of the whole thing (not just "airplane wing in the sky").
   No text or letters in the image. No real people's names, celebrities, brands or copyrighted characters — describe them generically.
 - "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
 {graphic_rules}
@@ -555,6 +558,73 @@ Pick the photo that best illustrates THAT scene's narration: the right subject, 
 Prefer clear, relevant, good-looking photos. Avoid photos with big text/watermarks, or that contradict the narration.
 order = photo numbers from best to worst. score 0-10 = how well your best pick matches (0 = nothing relevant).
 Reply JSON only: {{"scenes": [{{"id": 1, "order": [2, 1, 3], "score": 7}}]}} with one item per scene."""
+
+
+FIX_PROMPT = """An image was made for one scene of a Thai short video, but it does not show what the narration is about.
+Narration (Thai): {narration}
+Story topic: {topic}
+Old image prompt: {old}
+Write a NEW English image prompt (15-35 words) that makes the exact subject of the narration unmistakable:
+name the specific object/creature/action as the main subject first, use a close-up or macro shot if it is small,
+describe its shape, colour and where it is. Photo-realistic, no text. Also give 2-4 English stock-photo search words.
+Reply JSON only: {{"image": "...", "search": "..."}}"""
+
+FIT_OK = 6  # คะแนนความตรงขั้นต่ำ (0-10) ที่ยอมรับภาพ
+
+
+def verify_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
+                  only: list[int] | None = None, force: bool = False) -> int:
+    """🧠 ตรวจภาพทุกฉากด้วย Gemini ว่าตรงบทไหม — ไม่ตรง (< 6/10) → หาภาพถ่ายจริง + เขียนคำสั่งวาดใหม่ให้ชัดขึ้น
+    (Gemini วาด ถ้าคีย์ทำได้ ไม่งั้นวาดในเครื่อง) แล้วให้ AI เลือกภาพที่ตรงที่สุด  คืนจำนวนฉากที่เปลี่ยนภาพ"""
+    if not vision_ready():
+        return 0
+    topic = plan.get("title") or ""
+    scenes = plan["scenes"]
+    changed = 0
+    for i, s in enumerate(scenes):
+        img = s.get("img") or ""
+        if only is not None and i not in only:
+            continue
+        if not img or is_video(img) or img.startswith("anim_") or (s.get("img_locked") and not force):
+            continue
+        progress(i / len(scenes) * 100, f"🧠 ตรวจว่าภาพตรงบท ฉากที่ {i + 1}/{len(scenes)}")
+        tmp = {"narration": s.get("narration", ""), "options": [img]}
+        score = _rank_one(tmp, scene_dir, topic)
+        if score is None:
+            return changed  # AI ดูภาพไม่ได้ (โควตา/เน็ต) → หยุดตรวจ ใช้ภาพเดิม
+        s["fit"] = score
+        if score >= FIT_OK and not force:
+            continue
+        cands = [img] + [o for o in s.get("options") or [] if o != img]
+        progress(i / len(scenes) * 100, f"🧠 ภาพฉากที่ {i + 1} ไม่ตรงบท ({score:g}/10) — กำลังหาภาพใหม่")
+        try:  # 1) ภาพถ่ายจริง (มักตรงกว่าสำหรับของเฉพาะเจาะจง)
+            cands += [o for o in photo_options(s, i, scene_dir, 4) if o not in cands]
+        except Exception as e:
+            print("หาภาพถ่ายไม่ได้:", e)
+        try:  # 2) เขียนคำสั่งวาดใหม่ให้ชัดขึ้น แล้ววาดใหม่
+            fix = P._parse_json(P._ask_gemini(FIX_PROMPT.format(narration=s.get("narration", ""), topic=topic,
+                                                                old=s.get("image", ""))))
+            if fix.get("image"):
+                s["image"] = str(fix["image"])[:300]
+                if fix.get("search"):
+                    s["search"] = str(fix["search"])[:60]
+                out = next_names(scene_dir, i, 1)[0]
+                if imagegen.gemini_image(s["image"], out, tall=layout != "original"):
+                    cands.insert(1, out.name)
+                else:
+                    names, ai = ai_variants(s, i, scene_dir, style, 1, tall=layout != "original")
+                    if ai:
+                        cands.insert(1, names[0])
+        except Exception as e:
+            print("วาดภาพใหม่ไม่ได้:", e)
+        tmp = {"narration": s.get("narration", ""), "options": cands[:6]}
+        best_score = _rank_one(tmp, scene_dir, topic)
+        if best_score is not None and tmp["options"][0] != img:
+            s["img"] = tmp["options"][0]
+            s["fit"] = best_score
+            changed += 1
+        s["options"] = list(dict.fromkeys(tmp["options"] + cands))
+    return changed
 
 
 def vision_ready() -> bool:

@@ -1168,7 +1168,9 @@ function drawScenes() {
           ${cfg.pexels ? `<button data-a="photo">📷 ภาพถ่ายจริง</button>` : ""}
           ${cfg.videos ? `<button data-a="video">📹 วิดีโอ</button>` : ""}
           <button data-a="mine">📁 รูปของฉัน</button>
+          ${cfg.vision ? `<button data-a="smart" title="AI ดูภาพเทียบกับบท ไม่ตรง → เขียนคำสั่งวาดใหม่ + หาภาพถ่ายจริง แล้วเลือกตัวที่ตรงที่สุด">🧠 หาภาพที่ตรงบท</button>` : ""}
         </div>
+        ${c.fit != null ? `<div class="hint">🧠 ความตรงกับบท: ${c.fit}/10${c.fit < 6 ? " — ยังไม่ค่อยตรง ลองพิมพ์คำบรรยายภาพเองแล้วกด 🎲" : ""}</div>` : ""}
         <details><summary>คำบรรยายภาพ / คำค้น (ไทยหรืออังกฤษ) — แก้แล้วกดปุ่มด้านบน</summary>
           <label class="hint">ให้ AI วาด:</label><input type="text" data-k="image" maxlength="300" value="${esc(c.image || "")}">
           <label class="hint">คำค้นภาพถ่าย:</label><input type="text" data-k="search" maxlength="60" placeholder="เช่น ทะเลทราย หรือ desert sunset" value="${esc(c.search || "")}">
@@ -1296,6 +1298,20 @@ $("#clips").addEventListener("click", async e => {
       c.options = [...new Set([...r.imgs, ...(c.options || []), ...(c.img ? [c.img] : [])])];
       c.img = r.imgs[0]; c.generic = false; c.weak = !!r.weak; c.weak_photo = false;
       if (r.ai === false) job.plan.note = "วาดภาพด้วย AI ไม่ได้ (ไม่มีไลบรารี/การ์ดจอ) จึงใช้ภาพพื้นหลังไล่สีแทน";
+    } catch (err) { alert(err.message); }
+    b.textContent = label;
+    return drawScenes();
+  }
+  if (isStory() && a === "smart") {
+    const card = e.target.closest(".scene"), b = e.target, label = b.textContent;
+    card.querySelectorAll(".imgbtns button").forEach(x => x.disabled = true);
+    b.textContent = "🧠 กำลังดู/หาภาพ (~1 นาที)…"; card.querySelector(".pic img, .pic video")?.classList.add("busy");
+    try {
+      const c = clips[i];
+      const r = await api(`/api/jobs/${job.id}/scenes/${i}/smart`, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({narration: c.narration, image: c.image, search: c.search, img: c.img, options: c.options || []})});
+      Object.assign(c, {img: r.img || c.img, options: r.options.length ? r.options : c.options, image: r.image || c.image,
+                        search: r.search || c.search, fit: r.fit, generic: false, weak: false});
     } catch (err) { alert(err.message); }
     b.textContent = label;
     return drawScenes();
