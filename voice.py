@@ -61,6 +61,7 @@ def _too_long(seconds: float, text: str) -> bool:
 def _tts_models() -> list[str]:
     import pipeline as P
     return P.gemini_models("tts") or ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"]
+_pinned: str | None = None   # รุ่นเสียง Gemini ที่ใช้ในงานนี้
 _gemini_off: str | None = None   # โควตาเต็ม/ใช้ไม่ได้ → ไม่ต้องลองซ้ำทุกฉากในรอบนี้
 
 
@@ -121,8 +122,10 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
         "generationConfig": {"responseModalities": ["AUDIO"],
                              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}},
     }).encode()
+    global _pinned
     last = "เรียกเสียง Gemini ไม่สำเร็จ"
-    for model in _tts_models():
+    # รุ่นที่ใช้ได้แล้วในงานนี้ → ใช้รุ่นเดียวทั้งคลิป (คนละรุ่นเสียงต่างกันชัด ห้ามสลับรุ่นกลางคลิป)
+    for model in ([_pinned] if _pinned else _tts_models()):
         tries = 0
         while True:
             req = urllib.request.Request(
@@ -167,6 +170,7 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
             if inline and inline.get("data"):
                 _to_mp3(base64.b64decode(inline["data"]), inline.get("mimeType") or inline.get("mime_type", ""),
                         out, rate)
+                _pinned = model
                 return
         last = "Gemini ไม่ส่งเสียงกลับมา"
     if "โควตา" in last:
@@ -176,8 +180,13 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
 
 def reset() -> None:
     """เริ่มงานใหม่ → ลองเสียง Gemini ใหม่ (โควตาอาจกลับมาแล้ว)"""
-    global _gemini_off
+    global _gemini_off, _pinned
     _gemini_off = None
+    _pinned = None
+
+
+def gemini_off() -> bool:
+    return bool(_gemini_off)
 
 
 # ───────────────────────── โคลนเสียง (ThonburianTTS) ─────────────────────────

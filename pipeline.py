@@ -1026,6 +1026,8 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
             V.gemini_tts(text, out_mp3, name, tone, rate)
             return voice
         except Exception as e:
+            if not switch and not V.gemini_off():
+                return None  # สะดุดชั่วคราว → ให้ tts_all วนกลับมาลองเสียง Gemini เดิมอีกรอบ
             _note(f"ใช้เสียง Gemini ไม่ได้ ({e}) — ใช้เสียงเปรมวดี/นิวัฒน์แทน")
     elif voice.startswith("clone:"):
         fallback = "th-TH-NiwatNeural"
@@ -1039,6 +1041,8 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
                         progress=note)
             return voice
         except Exception as e:
+            if not switch:
+                return None
             _note(f"โคลนเสียงไม่ได้ ({str(e)[:150]}) — ใช้เสียงนิวัฒน์แทน")
     elif voice not in {v["id"] for v in THAI_VOICES}:
         voice = fallback
