@@ -470,6 +470,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div><label class="f">สัดส่วนวิดีโอ</label><select id="layout"></select></div>
             <div><label class="f">เพลงประกอบ</label><select id="music"></select></div>
             <div><label class="f">ชื่อช่อง</label><input type="text" id="channel" maxlength="40"></div>
+            <div><label class="f">มาสคอต</label><select id="mascot"></select></div>
             <div class="noStory"><label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label><input type="text" id="toptext" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2"><div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่</div></div>
             <div><label class="f">ข้อความบนปก</label><input type="text" id="coverText" maxlength="60" placeholder="เว้นว่าง = AI คิดให้ · เช่น ภารกิจ*สุดป่วน*!"><div class="hint">สั้นๆ 2-6 คำ · ครอบคำเด่นด้วย *ดอกจัน* ให้เป็นสีเหลือง</div></div>
             <div><label class="f">ตกแต่ง</label>
@@ -871,8 +872,8 @@ function fillAssets() {
   const opt = (list, none) => `<option value="">${none}</option>` + list.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
   for (const id of ["music0", "music"]) { const el = $("#" + id), v = el.value; el.innerHTML = opt(assets.music, "ไม่ใส่เพลง"); el.value = assets.music.includes(v) ? v : ""; }
   const l = $("#logo0"), lv = l.value; l.innerHTML = opt(assets.logo, "ไม่ใส่โลโก้"); l.value = assets.logo.includes(lv) ? lv : "";
-  const m = $("#mascot0"), mv = m.value;
-  m.innerHTML = `<option value="">ไม่ใส่มาสคอต</option>` + (assets.mascot || []).map(n => `<option value="${esc(n)}">${/\.\w+$/.test(n) ? "🙂 " + esc(n) : "📦 ชุดหลายท่า: " + esc(n)}</option>`).join(""); m.value = (assets.mascot || []).includes(mv) ? mv : "";
+  for (const id of ["mascot0", "mascot"]) { const m = $("#" + id), mv = m.value;
+    m.innerHTML = `<option value="">ไม่ใส่มาสคอต</option>` + (assets.mascot || []).map(n => `<option value="${esc(n)}">${/\.\w+$/.test(n) ? "🙂 " + esc(n) : "📦 ชุดหลายท่า: " + esc(n)}</option>`).join(""); m.value = (assets.mascot || []).includes(mv) ? mv : ""; }
 }
 async function loadAssets() {
   assets = await api("/api/assets").catch(() => assets); fillAssets();
@@ -1130,7 +1131,7 @@ function enterReview() {
   $("#s-review .card.sticky").classList.toggle("hidden", multi);
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
-  if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#toptext").value = r.toptext || ""; $("#coverText").value = r.cover_text || "";
+  if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#mascot").value = (assets.mascot || []).includes(r.mascot) ? r.mascot : ""; $("#toptext").value = r.toptext || ""; $("#coverText").value = r.cover_text || "";
            $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; $("#frameSel").value = r.frame || "full"; $("#lessText").checked = r.less_text !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#origMode").value = r.orig_mode || (isGame() ? "all" : "key"); origChanged(); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
@@ -1463,7 +1464,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, orig_mode: $("#origMode").value, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), toptext: $("#toptext").value.trim(), cover_text: $("#coverText").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameSel").value, less_text: $("#lessText").checked})});
+      music: $("#music").value, channel: $("#channel").value.trim(), mascot: $("#mascot").value, toptext: $("#toptext").value.trim(), cover_text: $("#coverText").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameSel").value, less_text: $("#lessText").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };
