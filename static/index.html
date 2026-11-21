@@ -374,7 +374,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <option value="top_right">ในคลิป: มุมขวาบน</option><option value="bottom_left">ในคลิป: มุมซ้ายล่าง</option>
             <option value="bottom_right">ในคลิป: มุมขวาล่าง</option></select></div>
           <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="mascotClean" checked> ตอนอัป: ลบของประกอบรอบตัว (หลอดไฟ เครื่องหมาย ฯลฯ) เก็บเฉพาะตัวการ์ตูน</label>
-          <div class="hint">ลอยมุมจอตลอดคลิป + ติดบนภาพปก · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้</div>
+          <div class="hint">ลอยมุมจอตลอดคลิป + ติดบนภาพปก · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้ · ไฟล์ .zip = ชุดหลายท่า เปลี่ยนท่าตามอารมณ์ฉาก (ชื่อไฟล์ขึ้นต้นด้วย hook_ calm_ info_ exciting_ shock_ sad_ happy_)</div>
         </div>
         <div>
           <label class="f">ภาพปก</label>
@@ -864,7 +864,8 @@ function fillAssets() {
   const opt = (list, none) => `<option value="">${none}</option>` + list.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
   for (const id of ["music0", "music"]) { const el = $("#" + id), v = el.value; el.innerHTML = opt(assets.music, "ไม่ใส่เพลง"); el.value = assets.music.includes(v) ? v : ""; }
   const l = $("#logo0"), lv = l.value; l.innerHTML = opt(assets.logo, "ไม่ใส่โลโก้"); l.value = assets.logo.includes(lv) ? lv : "";
-  const m = $("#mascot0"), mv = m.value; m.innerHTML = opt(assets.mascot || [], "ไม่ใส่มาสคอต"); m.value = (assets.mascot || []).includes(mv) ? mv : "";
+  const m = $("#mascot0"), mv = m.value;
+  m.innerHTML = `<option value="">ไม่ใส่มาสคอต</option>` + (assets.mascot || []).map(n => `<option value="${esc(n)}">${/\.\w+$/.test(n) ? "🙂 " + esc(n) : "📦 ชุดหลายท่า: " + esc(n)}</option>`).join(""); m.value = (assets.mascot || []).includes(mv) ? mv : "";
 }
 async function loadAssets() {
   assets = await api("/api/assets").catch(() => assets); fillAssets();
@@ -900,7 +901,7 @@ $("#decor").addEventListener("change", () => {
 let upKind = "";
 document.querySelectorAll("[data-up]").forEach(b => b.onclick = e => {
   e.preventDefault(); upKind = b.dataset.up;
-  $("#assetFile").accept = upKind === "music" ? "audio/*" : "image/*"; $("#assetFile").click();
+  $("#assetFile").accept = upKind === "music" ? "audio/*" : upKind === "mascot" ? "image/*,.zip" : "image/*"; $("#assetFile").click();
 });
 $("#assetFile").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;

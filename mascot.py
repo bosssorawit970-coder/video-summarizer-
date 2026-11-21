@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pipeline as P
 
+# ชุดมาสคอตหลายท่า (โฟลเดอร์/ไฟล์ .zip): ตั้งชื่อไฟล์ขึ้นต้นด้วยอารมณ์ เช่น shock_scared.png, happy_party.png
+# อารมณ์ตรงกับอารมณ์ฉาก: hook calm info exciting shock sad happy (อื่นๆ = other)
+MOODS = ("hook", "calm", "info", "exciting", "shock", "sad", "happy")
+FALLBACK = {"hook": ["shock", "exciting", "happy"], "calm": ["info", "happy"], "info": ["calm"],
+            "exciting": ["happy", "hook"], "shock": ["hook", "sad"], "sad": ["calm"], "happy": ["exciting", "calm"]}
+
 POSITIONS = {"top_right": "มุมขวาบน", "bottom_left": "มุมซ้ายล่าง", "bottom_right": "มุมขวาล่าง"}
 
 
@@ -81,6 +87,49 @@ def prepare(src: Path, out: Path, main_only: bool = False) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     im.save(out)
     return out
+
+
+def load_pack(path: Path | None) -> dict[str, list[Path]]:
+    """มาสคอต 1 ไฟล์ → {"*": [ไฟล์]} · โฟลเดอร์ชุดท่า → {อารมณ์: [ไฟล์...]}"""
+    if not path:
+        return {}
+    path = Path(path)
+    if path.is_file():
+        return {"*": [path]}
+    pack: dict[str, list[Path]] = {}
+    for f in sorted(path.glob("*.png")):
+        mood = f.stem.split("_")[0].lower()
+        pack.setdefault(mood if mood in MOODS else "other", []).append(f)
+    return pack
+
+
+def pick(pack: dict, mood: str, i: int = 0) -> Path | None:
+    """ท่าที่ตรงอารมณ์ฉาก (หลายท่า → วนใช้ตามลำดับฉาก ไม่ซ้ำติดกัน)"""
+    if not pack:
+        return None
+    if "*" in pack:
+        return pack["*"][0]
+    for m in [mood] + FALLBACK.get(mood, []):
+        if pack.get(m):
+            return pack[m][i % len(pack[m])]
+    allf = [f for v in pack.values() for f in v]
+    return allf[i % len(allf)] if allf else None
+
+
+def is_pack(path: Path | None) -> bool:
+    return bool(path) and Path(path).is_dir()
+
+
+def scene_overlay(mascot: Path, W: int, H: int, pos: str, i: int) -> tuple[str, str]:
+    """ท่ามาสคอตประจำฉาก (ในตัดต่อฉาก): เด้งเข้ามาตอนต้นฉาก + โยกเบาๆ
+    คืน (filter สำหรับ input มาสคอต → [msc], นิพจน์ x:y สำหรับ overlay)"""
+    mh, x, y = _box(W, H, pos)
+    m = int(W * 0.03)
+    p = "min(max((t-0.15)/0.25,0),1)"
+    pop = f"(1-{p})*(1-{p})*(h+{m}+40)"  # โผล่ขึ้นจากด้านล่างของตำแหน่ง
+    xs = f"W-w-{m}" if x < 0 else f"{x}"
+    ys = f"{y}+{pop}+5*sin(t*2.6+{i})"
+    return f"scale=-2:{mh},format=rgba", f"x='{xs}':y='{ys}'"
 
 
 def _box(W: int, H: int, pos: str) -> tuple[int, int, int]:

@@ -994,6 +994,16 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     else:
         parts.append(motion)
         parts.append(f"[mv]{','.join(vf)},format=yuv420p[v]")
+    msc = None
+    if extras and brand.get("mascot_pack") and "*" not in brand["mascot_pack"]:  # ชุดมาสคอต: ท่าตามอารมณ์ฉาก โผล่ที่มุมจอทุกฉาก
+        import mascot as MS
+        msc = MS.pick(brand["mascot_pack"], sty["mood"], i)
+    if msc is not None:
+        mf, mxy = MS.scene_overlay(msc, W, H, brand.get("mascot_pos", "top_right"), i)
+        inputs += ["-loop", "1", "-t", f"{D:.3f}", "-i", str(msc)]; im_ = n_in; n_in += 1
+        last = parts[-1]
+        parts[-1] = last[:last.rindex("[v]")] + "[v0]"
+        parts.append(f"[{im_}:v]{mf}[msc];[v0][msc]overlay={mxy}:shortest=1:format=auto,format=yuv420p[v]")
     if pcard is not None and studio:  # ฉากสตูดิโอ: สินค้าวางบนแท่น + แถบแสงวิ่งผ่าน + กล้องค่อยๆ ซูมเข้า
         import product as PR
         bw, bh = (int(W * 0.36), int(H * 0.17)) if has_g else (int(W * 0.58), int(H * 0.36))

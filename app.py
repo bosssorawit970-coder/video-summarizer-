@@ -333,6 +333,7 @@ def analyze_talk(jid: str, src: Path, info: dict) -> dict:
 def _brand(r: dict) -> dict:
     return {"text": r.get("channel") or "", "logo": asset_path("logo", r.get("logo") or ""),
             "mascot": asset_path("mascot", r.get("mascot") or ""), "mascot_pos": r.get("mascot_pos") or "top_right",
+            "mascot_pack": MS.load_pack(asset_path("mascot", r.get("mascot") or "")),
             "top": r.get("toptext") or ""}
 
 
@@ -399,7 +400,7 @@ def do_render(jid: str) -> None:
             save(jid, progress=97, message="ใส่มาสคอต")
             try:
                 tmp = d / "output_mascot.mp4"
-                MS.overlay(out, brand["mascot"], tmp, brand.get("mascot_pos", "top_right"))
+                MS.overlay(out, MS.pick(brand["mascot_pack"], "info"), tmp, brand.get("mascot_pos", "top_right"))
                 tmp.replace(out)
             except Exception as e:
                 print("ใส่มาสคอตไม่ได้:", str(e)[-300:])
@@ -440,7 +441,7 @@ def _covers(jid: str, frames: list[Path], vertical: bool, title: str, summary: s
     W, H = (1080, 1920) if vertical else (1280, 720)
     outs = [d / f"cover_{k + 1}.jpg" for k in range(len(frames))]
     made = CV.make_covers(frames, outs, W, H, text, accent, tag, (brand or {}).get("text", ""), work,
-                          (brand or {}).get("mascot"))
+                          MS.pick((brand or {}).get("mascot_pack") or {}, "hook"))
     if not made:
         return False
     shutil.copyfile(made[0], d / "thumb.jpg")
@@ -508,11 +509,11 @@ def do_render_story(jid: str) -> None:
         plan["credits"] = list(dict.fromkeys(
             c for c in (imagegen.credit_of(d / "scenes" / s_["img"]) for s_ in plan["scenes"] if s_.get("img")) if c))
         save(jid, plan=plan)  # ภาพที่วาดเพิ่มระหว่างตัดต่อ
-        if brand.get("mascot"):
+        if brand.get("mascot") and not MS.is_pack(brand["mascot"]):  # ชุดหลายท่า = ใส่ทีละฉากไปแล้ว
             save(jid, progress=97, message="ใส่มาสคอต")
             try:
                 tmp = d / "output_mascot.mp4"
-                MS.overlay(out, brand["mascot"], tmp, brand.get("mascot_pos", "top_right"))
+                MS.overlay(out, MS.pick(brand["mascot_pack"], "info"), tmp, brand.get("mascot_pos", "top_right"))
                 tmp.replace(out)
             except Exception as e:
                 print("ใส่มาสคอตไม่ได้:", str(e)[-300:])
@@ -1131,18 +1132,18 @@ ASSETS = JOBS_DIR / "_assets"
 P.VOICE_DIR = ASSETS / "voice"
 ASSET_EXT = {"music": {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus"},
              "logo": {".png", ".jpg", ".jpeg", ".webp"},
-             "mascot": {".png", ".jpg", ".jpeg", ".webp"}}
+             "mascot": {".png", ".jpg", ".jpeg", ".webp", ".zip"}}
 
 
 def asset_path(kind: str, name: str) -> Path | None:
     if kind not in ASSET_EXT or not name or "/" in name or "\\" in name or name.startswith("."):
         return None
     f = ASSETS / kind / name
-    return f if f.is_file() else None
+    return f if f.is_file() or (kind == "mascot" and f.is_dir()) else None
 
 
 async def list_assets(_: Request):
-    return JSONResponse({k: sorted(p.name for p in (ASSETS / k).glob("*") if p.is_file())
+    return JSONResponse({k: sorted(p.name for p in (ASSETS / k).glob("*") if p.is_file() or (k == "mascot" and p.is_dir()))
                          if (ASSETS / k).exists() else [] for k in ASSET_EXT})
 
 
@@ -1163,6 +1164,30 @@ async def upload_asset(req: Request):
         i += 1
     with open(ASSETS / kind / name, "wb") as f:
         shutil.copyfileobj(up.file, f, 1024 * 1024)
+    if kind == "mascot" and ext == ".zip":  # ชุดมาสคอตหลายท่า → โฟลเดอร์ (ชื่อไฟล์ขึ้นต้นด้วยอารมณ์)
+        orig = ASSETS / kind / name
+        folder = ASSETS / kind / Path(name).stem
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            with zipfile.ZipFile(orig) as zf:
+                for zi in zf.infolist():
+                    base = Path(zi.filename).name
+                    if zi.is_dir() or not re.fullmatch(r"[\w\-ก-๙ ]+\.(png|jpe?g|webp)", base, re.I):
+                        continue
+                    tmp = folder / ("_" + base)
+                    with zf.open(zi) as fsrc, open(tmp, "wb") as fdst:
+                        shutil.copyfileobj(fsrc, fdst, 1024 * 1024)
+                    MS.prepare(tmp, folder / (Path(base).stem + ".png"))
+                    tmp.unlink(missing_ok=True)
+        except Exception as e:
+            shutil.rmtree(folder, ignore_errors=True)
+            return JSONResponse({"error": f"เปิดไฟล์ชุดมาสคอตไม่ได้: {e}"}, status_code=400)
+        finally:
+            orig.unlink(missing_ok=True)
+        if not any(folder.glob("*.png")):
+            shutil.rmtree(folder, ignore_errors=True)
+            return JSONResponse({"error": "ในไฟล์ zip ไม่มีรูปมาสคอต"}, status_code=400)
+        return JSONResponse({"name": folder.name})
     if kind == "mascot":  # ลบพื้นหลัง + ตัดขอบ → PNG พื้นใส
         orig = ASSETS / kind / name
         png = orig.with_name(Path(name).stem + "_m.png")
