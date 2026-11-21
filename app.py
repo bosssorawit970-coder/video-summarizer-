@@ -51,6 +51,7 @@ import graphics as G2  # noqa: E402
 import source as SRC  # noqa: E402
 import product as PR  # noqa: E402
 import motion as MO  # noqa: E402
+import cover as CV  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -362,14 +363,29 @@ def do_render(jid: str) -> None:
         thumb.unlink(missing_ok=True)
         try:
             best = _best_clip(clips)
-            bsrc = _resolve(best["src"]) if best.get("src") else src
-            t_ = float(best.get("mark") or (float(best["start"]) + float(best["end"])) / 2)
-            save(jid, message="ทำภาพปก")
-            P.make_thumbnail(bsrc, t_, r.get("layout", "original"),
-                             j["plan"].get("title") or Path(j.get("name", "")).stem,
-                             best.get("label") or "", thumb, work, brand)
+            title = j["plan"].get("title") or Path(j.get("name", "")).stem
+            save(jid, message="ทำภาพปก (3 แบบ)")
+            work.mkdir(parents=True, exist_ok=True)
+            frames = []
+            for k, c in enumerate(_spread(clips, 3, best)):  # เฟรมจังหวะเด็ด + ช่วงอื่นๆ
+                csrc = _resolve(c["src"]) if c.get("src") else src
+                t_ = float(c.get("mark") or (float(c["start"]) + float(c["end"])) / 2)
+                frames.append(CV.grab_frame(csrc, t_, work / f"cframe_{k}.png"))
+            tag = CV.tag_from_top(brand.get("top", "")) or (best.get("label") or "").title()
+            if not _covers(jid, frames, r.get("layout", "original").startswith("vertical"), title,
+                           j["plan"].get("summary", ""), tag, work, brand):
+                raise RuntimeError("ทำปกแบบใหม่ไม่ได้")
         except Exception as e:
-            print("ทำภาพปกไม่ได้:", e)
+            print("ทำปกแบบใหม่ไม่ได้ ใช้แบบเรียบ:", e)
+            try:
+                best = _best_clip(clips)
+                bsrc = _resolve(best["src"]) if best.get("src") else src
+                t_ = float(best.get("mark") or (float(best["start"]) + float(best["end"])) / 2)
+                P.make_thumbnail(bsrc, t_, r.get("layout", "original"),
+                                 j["plan"].get("title") or Path(j.get("name", "")).stem,
+                                 best.get("label") or "", thumb, work, brand)
+            except Exception as e2:
+                print("ทำภาพปกไม่ได้:", e2)
         P.render(src, clips, work, out,
                  voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], orig_volume=r["orig_volume"], orig_mode=r.get("orig_mode", "all"),
                  subtitles=_subs(r), layout=r.get("layout", "original"),
@@ -391,6 +407,45 @@ def do_render(jid: str) -> None:
         fail_job(jid, e)
 
 
+def _covers(jid: str, frames: list[Path], vertical: bool, title: str, summary: str, tag: str,
+            work: Path, brand: dict) -> bool:
+    """ปกดึงสายตา 3 แบบ (cover_1..3.jpg) → แบบแรกเป็น thumb.jpg  คืน False ถ้าทำไม่ได้เลย"""
+    d, j = job_dir(jid), jobs[jid]
+    r = j.get("render_opts") or {}
+    work.mkdir(parents=True, exist_ok=True)
+    for f in d.glob("cover_*.jpg"):
+        f.unlink(missing_ok=True)
+    if r.get("cover_text"):
+        text, accent = CV.parse_user_text(r["cover_text"])
+    else:
+        cached = j.get("cover_auto") or {}
+        if cached.get("title") == title and cached.get("text"):
+            text, accent = cached["text"], cached.get("accent", "")
+        else:
+            text, accent = CV.cover_text(title, summary, j["opts"].get("provider", "gemini"))
+            j["cover_auto"] = {"title": title, "text": text, "accent": accent}
+    if not text or not frames:
+        return False
+    W, H = (1080, 1920) if vertical else (1280, 720)
+    outs = [d / f"cover_{k + 1}.jpg" for k in range(len(frames))]
+    made = CV.make_covers(frames, outs, W, H, text, accent, tag, (brand or {}).get("text", ""), work)
+    if not made:
+        return False
+    shutil.copyfile(made[0], d / "thumb.jpg")
+    save(jid, covers=[m.name for m in made], cover_pick=made[0].name, cover_used=text)
+    return True
+
+
+def _spread(items: list, n: int, first=None) -> list:
+    """เลือก n อย่างกระจายทั่วรายการ (ให้ first มาก่อน)"""
+    rest = [x for x in items if x is not first]
+    pick = [first] if first is not None else []
+    if rest:
+        step = max(1, len(rest) // max(1, n - len(pick)))
+        pick += rest[step // 2::step]
+    return pick[:n]
+
+
 def do_render_story(jid: str) -> None:
     d, j = job_dir(jid), jobs[jid]
     try:
@@ -407,13 +462,30 @@ def do_render_story(jid: str) -> None:
         thumb = d / "thumb.jpg"
         thumb.unlink(missing_ok=True)
         first = (d / "scenes" / plan["scenes"][0]["img"]) if plan["scenes"] and plan["scenes"][0].get("img") else None
-        if first and first.exists():
-            try:
-                save(jid, message="ทำภาพปก")
-                P.make_thumbnail(first, 0, "original" if layout == "original" else "vertical_blur",
-                                 plan.get("title") or j["name"], "", thumb, work, brand)
-            except Exception as e:
-                print("ทำภาพปกไม่ได้:", e)
+        try:  # ปก 3 แบบจากภาพฉากเด่น (ฉากเปิด + ฉากช็อก/ตื่นเต้น + อื่นๆ)
+            save(jid, message="ทำภาพปก (3 แบบ)")
+            imgs, seen = [], set()
+            order = sorted(range(len(plan["scenes"])), key=lambda i: (
+                0 if i == 0 else 1 if plan["scenes"][i].get("mood") in ("shock", "exciting", "hook") else 2, i))
+            for i in order:
+                im = plan["scenes"][i].get("img") or ""
+                p_ = d / "scenes" / (ST.poster(im) if im else "")
+                if im and p_.is_file() and p_ not in seen:
+                    seen.add(p_)
+                    imgs.append(p_)
+                if len(imgs) == 3:
+                    break
+            if not _covers(jid, imgs, layout != "original", plan.get("title") or j["name"],
+                           plan.get("summary", ""), CV.tag_from_top(brand.get("top", "")), work, brand):
+                raise RuntimeError("ทำปกแบบใหม่ไม่ได้")
+        except Exception as e:
+            print("ทำปกแบบใหม่ไม่ได้ ใช้แบบเรียบ:", e)
+            if first and first.exists():
+                try:
+                    P.make_thumbnail(first, 0, "original" if layout == "original" else "vertical_blur",
+                                     plan.get("title") or j["name"], "", thumb, work, brand)
+                except Exception as e2:
+                    print("ทำภาพปกไม่ได้:", e2)
         ST.render_story(plan, d / "scenes", work, out, voice=r["voice"], tone=r.get("tone", "natural"), rate=r["rate"], layout=layout,
                         sfx=r.get("gfx_sfx", True), ai_motion=bool(r.get("ai_motion")),
                         frame=r.get("frame", "full"), less_text=r.get("less_text", True),
@@ -479,7 +551,7 @@ def do_capcut(jid: str) -> None:
 
 def public(j: dict) -> dict:
     keep = ("id", "name", "url", "detail", "capcut", "preview_progress", "status", "step", "progress", "message", "duration",
-            "plan", "opts", "render_opts", "output_duration", "created", "post", "warn")
+            "plan", "opts", "render_opts", "output_duration", "created", "post", "warn", "covers", "cover_pick", "cover_used")
     out = {k: j.get(k) for k in keep}
     out["segments"] = len(j.get("transcript") or [])
     out["thumb"] = (job_dir(j["id"]) / "thumb.jpg").exists()
@@ -827,12 +899,13 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "music_volume": max(0.0, min(1.0, _num(body.get("music_volume"), 0.25))),
         "channel": str(body.get("channel") or "").strip()[:40],
         "toptext": str(body.get("toptext") or "").strip()[:100],
+        "cover_text": str(body.get("cover_text") or "").strip()[:60],
         "logo": str(body.get("logo") or "") if asset_path("logo", str(body.get("logo") or "")) else "",
     }
 
 
 RENDER_KEYS = ("voice", "tone", "rate", "orig_volume", "orig_mode", "layout", "subtitles", "sub_style", "gfx_sfx", "ai_motion", "frame", "less_text", "fx", "cover", "music",
-               "music_volume", "channel", "logo", "toptext")
+               "music_volume", "channel", "logo", "toptext", "cover_text")
 
 
 def _subs(r: dict):
@@ -1163,6 +1236,27 @@ async def voice_preview_file(req: Request):
 async def get_asset(req: Request):
     f = asset_path(req.path_params["kind"], req.path_params["name"])
     return FileResponse(f) if f else JSONResponse({"error": "ไม่พบไฟล์"}, status_code=404)
+
+
+async def cover_image(req: Request):
+    j = jobs.get(req.path_params["jid"])
+    n = req.path_params["n"]
+    f = job_dir(j["id"]) / f"cover_{n}.jpg" if j and n.isdigit() else None
+    if not f or not f.exists():
+        return JSONResponse({"error": "ไม่พบภาพปก"}, status_code=404)
+    return FileResponse(f, headers={"Cache-Control": "no-store"})
+
+
+async def pick_cover(req: Request):
+    j = jobs.get(req.path_params["jid"])
+    if not j:
+        return JSONResponse({"error": "ไม่พบงานนี้"}, status_code=404)
+    body = await req.json()
+    n = str(body.get("n") or "")
+    if not (n.isdigit() and CV.choose(job_dir(j["id"]), int(n))):
+        return JSONResponse({"error": "ไม่พบภาพปกแบบนี้"}, status_code=404)
+    save(j["id"], cover_pick=f"cover_{n}.jpg")
+    return JSONResponse({"ok": True})
 
 
 async def thumb_image(req: Request):
@@ -1590,6 +1684,8 @@ app = Starlette(routes=[
     Route("/api/jobs/{jid}/source", source_video),
     Route("/api/jobs/{jid}/output", output_video),
     Route("/api/jobs/{jid}/thumb.jpg", thumb_image),
+    Route("/api/jobs/{jid}/cover_{n}.jpg", cover_image),
+    Route("/api/jobs/{jid}/cover", pick_cover, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{name}", scene_image),
     Route("/api/jobs/{jid}/scenes/{i}/regen", regen_scene, methods=["POST"]),
     Route("/api/jobs/{jid}/scenes/{i}/upload", upload_scene, methods=["POST"]),
@@ -1621,7 +1717,7 @@ def _fetch_fonts() -> None:
     import urllib.request
     fd = P.FONT_DIR
     fd.mkdir(parents=True, exist_ok=True)
-    for w in ("Bold", "SemiBold", "Regular"):
+    for w in ("Bold", "SemiBold", "Regular", "Black"):  # Black = ตัวหนาพิเศษสำหรับข้อความบนปก
         f = fd / f"Kanit-{w}.ttf"
         if not f.exists():
             try:
