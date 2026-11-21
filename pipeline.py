@@ -1037,7 +1037,9 @@ def _ff_path(p: Path) -> str:
 
 
 def ass_filter(name: str) -> str:
-    f = f"subtitles={name}"
+    # ใช้ฟิลเตอร์ ass + shaping=complex (HarfBuzz) — ฟิลเตอร์ subtitles ใช้การจัดวางแบบง่าย
+    # ทำให้วรรณยุกต์ที่ซ้อนบนสระบน (นี้ ที่ น้ำ) ไปทับสระจน "จม/หาย" กับฟอนต์อย่าง Kanit
+    f = f"ass=filename={name}:shaping=complex"
     if FONT_DIR.exists():
         f += f":fontsdir={_ff_path(FONT_DIR)}"
     return f

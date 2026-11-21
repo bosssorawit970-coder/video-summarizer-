@@ -63,8 +63,15 @@ def _tokens(text: str) -> list[str]:
     try:
         from pythainlp.tokenize import word_tokenize
         return [t for t in word_tokenize(text, keep_whitespace=True) if t]
-    except Exception:
-        return [c for _, _, c in P.sub_chunks(text, 0, 1, 4)]
+    except Exception:  # ไม่มีตัวตัดคำ: แยกทีละพยางค์คร่าวๆ โดยไม่ผ่ากลางสระ/วรรณยุกต์
+        out = []
+        for ch in text:
+            if out and (re.match(r"[\u0E31\u0E33-\u0E3A\u0E45\u0E46\u0E47-\u0E4E]", ch)
+                        or re.match(r"[\u0E40-\u0E44]$", out[-1])):
+                out[-1] += ch
+            else:
+                out.append(ch)
+        return out
 
 
 def _lines(text: str, per_line: int, accent: str = "") -> list[str]:
