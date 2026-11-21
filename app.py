@@ -256,6 +256,7 @@ def analyze_story(jid: str) -> dict:
                            o.get("style", "cinematic"), o.get("ref_use", "similar"),
                            lambda pct, msg: save(jid, step="images", progress=90 + pct * 0.05, message=msg),
                            want_video=bool(o.get("videos")))
+        ST.dedupe_images(plan, d / "scenes")
         if nr:
             plan["note"] = ((plan.get("note") or "") + f" · 🎯 ใช้รูปตัวอย่างใน {nr} ฉาก (ฉากที่มี 🎯)").strip(" ·")
             ok = max(ok, 1)

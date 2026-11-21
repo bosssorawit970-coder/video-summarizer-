@@ -632,6 +632,7 @@ def verify_images(plan: dict, scene_dir: Path, layout: str, style: str, progress
             s["fit"] = best_score
             changed += 1
         s["options"] = list(dict.fromkeys(tmp["options"] + cands))
+    dedupe_images(plan, scene_dir)
     return changed
 
 
@@ -690,7 +691,8 @@ def from_reference(s: dict, i: int, scene_dir: Path, ref: Path, layout: str, sty
 MATCH_PROMPT = """The user wrote a Thai short-video script and uploaded {n} REFERENCE images ("I want pictures like these").
 Match the references to the scenes. For each scene give the number of the reference whose subject best fits
 what that scene's narration talks about, or 0 if no reference fits. One reference may fit several scenes.
-Try to use every reference at least once (put it on the scene it fits best). Do not give a reference to a scene
+Try to use every reference at least once (put it on the scene it fits best), and one reference on at most 2 scenes.
+Do not give a reference to a scene
 about something clearly different.
 Scenes:
 {scenes}
@@ -724,6 +726,11 @@ def match_refs(scenes: list[dict], refs: list[Path], topic: str = "") -> dict[in
                 free = sorted((i for i in range(n) if i not in out), key=lambda i: abs(i - want))
                 if free:
                     out[free[0]] = k
+        per: dict[int, int] = {}
+        for i in sorted(out):  # รูปเดียวใช้ได้ไม่เกิน 2 ฉาก (ภาพเดิมยาวๆ น่าเบื่อ)
+            per[out[i]] = per.get(out[i], 0) + 1
+            if per[out[i]] > 2:
+                del out[i]
         return out or spread
     except Exception as e:
         print("AI จับคู่รูปตัวอย่างไม่ได้:", e)
@@ -762,6 +769,7 @@ def apply_refs(plan: dict, refs: list[Path], scene_dir: Path, layout: str, style
         s["options"] = list(dict.fromkeys(names + old))
         s["img_locked"] = True
         s["ref"] = k + 1
+        s["ref_direct"] = names[0] == copy.name
     return len(pairs)
 
 
@@ -940,6 +948,7 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         ok += 1 if ai else 0
     if photo_scenes and vision_ready():
         rank_photos(photo_scenes, scene_dir, plan.get("title") or "", lambda m: progress(99, m))
+    dedupe_images(plan, scene_dir)
     auto = sum(1 for s in plan["scenes"] if s.get("auto_photo"))
     if auto:
         plan["note"] = ((plan.get("note") or "") + f" · AI คิดภาพไม่ได้ {auto} ฉาก จึงใช้ภาพถ่ายฟรีที่ค้นจากคำสำคัญในบทแทน — "
@@ -949,6 +958,52 @@ def draw_images(plan: dict, scene_dir: Path, layout: str, style: str, progress,
         plan["note"] = ((plan.get("note") or "") + f" · AI ดูแล้วว่าฉาก {', '.join(weak)} ยังไม่มีภาพที่ตรงบทนัก "
                         "ลองพิมพ์คำค้นเอง หรือใช้ 📁 รูปของฉัน").strip(" ·")
     return ok
+
+
+def _ahash(f: Path) -> int | None:
+    """ลายนิ้วมือภาพ (8x8) — ไฟล์คนละชื่อแต่ภาพเดียวกันก็จับได้"""
+    if f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp") or not f.exists():
+        return None
+    try:
+        from PIL import Image
+        px = list(Image.open(f).convert("L").resize((8, 8)).getdata())
+        avg = sum(px) / 64
+        return sum(1 << k for k, v in enumerate(px) if v > avg)
+    except Exception:
+        return None
+
+
+def _same(a: int | None, b: int | None) -> bool:
+    return a is not None and b is not None and bin(a ^ b).count("1") <= 6
+
+
+def dedupe_images(plan: dict, scene_dir: Path, max_repeat: int = 1) -> int:
+    """ฉากหลายฉากได้ภาพเดียวกัน (ค้นเจอภาพยอดนิยมซ้ำ / รูปตัวอย่างใช้หลายฉาก) → ภาพซ้ำยาวๆ น่าเบื่อ
+    ฉากที่ซ้ำ: เปลี่ยนเป็นตัวเลือกถัดไปที่ยังไม่ซ้ำ  (ฉากที่ผู้ใช้ส่งรูปตัวอย่างแบบใช้ตรงๆ ซ้ำได้ max_repeat+1 ครั้ง)"""
+    seen: list[int] = []
+    count: dict[int, int] = {}
+    changed = 0
+    for s in plan["scenes"]:
+        h = _ahash(scene_dir / s["img"]) if s.get("img") else None
+        hit = next((x for x in seen if _same(x, h)), None)
+        allow = max_repeat if s.get("ref_direct") else 0
+        if hit is None or count.get(hit, 0) <= allow:
+            if hit is None and h is not None:
+                seen.append(h)
+                hit = h
+            if hit is not None:
+                count[hit] = count.get(hit, 0) + 1
+            continue
+        for o in s.get("options") or []:
+            ho = _ahash(scene_dir / o)
+            if (scene_dir / o).exists() and (ho is None or not any(_same(x, ho) for x in seen)):
+                s["img"] = o
+                if ho is not None:
+                    seen.append(ho)
+                    count[ho] = 1
+                changed += 1
+                break
+    return changed
 
 
 # ───────────────────────── ตัดต่อ ─────────────────────────
