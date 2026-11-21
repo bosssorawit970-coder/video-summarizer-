@@ -457,7 +457,7 @@ def _covers(jid: str, frames: list[Path], vertical: bool, title: str, summary: s
     W, H = (1080, 1920) if vertical else (1280, 720)
     outs = [d / f"cover_{k + 1}.jpg" for k in range(len(frames))]
     made = CV.make_covers(frames, outs, W, H, text, accent, tag, (brand or {}).get("text", ""), work,
-                          MS.pick((brand or {}).get("mascot_pack") or {}, "hook"))
+                          None)  # ปกไม่ใส่มาสคอต (บอสขอ — ปกโล่งดูสวยกว่า มาสคอตมีในคลิปแล้ว)
     if not made:
         return False
     shutil.copyfile(made[0], d / "thumb.jpg")
