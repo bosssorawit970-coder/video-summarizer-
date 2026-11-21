@@ -373,6 +373,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
           <div class="urlrow" style="margin-top:6px"><select id="mascotPos0">
             <option value="top_right">ในคลิป: มุมขวาบน</option><option value="bottom_left">ในคลิป: มุมซ้ายล่าง</option>
             <option value="bottom_right">ในคลิป: มุมขวาล่าง</option></select></div>
+          <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="mascotClean" checked> ตอนอัป: ลบของประกอบรอบตัว (หลอดไฟ เครื่องหมาย ฯลฯ) เก็บเฉพาะตัวการ์ตูน</label>
           <div class="hint">ลอยมุมจอตลอดคลิป + ติดบนภาพปก · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้</div>
         </div>
         <div>
@@ -906,7 +907,8 @@ $("#assetFile").onchange = async e => {
   const btn = document.querySelector(`[data-up=${upKind}]`), label = btn.textContent;
   btn.textContent = "กำลังอัปโหลด…"; btn.disabled = true;
   try {
-    const fd = new FormData(); fd.append("kind", upKind); fd.append("file", upKind === "logo" ? await shrinkImage(f, 1024) : f);
+    const fd = new FormData(); fd.append("kind", upKind);
+    if (upKind === "mascot") fd.append("main_only", $("#mascotClean").checked ? "1" : ""); fd.append("file", upKind === "logo" ? await shrinkImage(f, 1024) : f);
     const r = await api("/api/assets", {method: "POST", body: fd});
     await loadAssets(); $("#" + upKind + "0").value = r.name; $("#decor").dispatchEvent(new Event("change"));
   } catch (err) { alert(err.message); }

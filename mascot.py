@@ -12,8 +12,48 @@ import pipeline as P
 POSITIONS = {"top_right": "มุมขวาบน", "bottom_left": "มุมซ้ายล่าง", "bottom_right": "มุมขวาล่าง"}
 
 
-def prepare(src: Path, out: Path) -> Path:
-    """รูปมาสคอต → PNG พื้นใส ตัดขอบว่าง (ถ้ารูปมีพื้นใสอยู่แล้วใช้ตามเดิม)"""
+def _main_only(im):
+    """เก็บเฉพาะชิ้นที่ใหญ่ที่สุด (ตัวการ์ตูน) — ลบของประกอบที่ลอยแยกอยู่รอบๆ เช่น หลอดไฟ เครื่องหมาย ! ?"""
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(im.getchannel("A")) > 40
+    k = max(1, max(a.shape) // 320)  # วิเคราะห์บนภาพย่อ (เร็ว ไม่ต้องใช้ไลบรารีเพิ่ม)
+    small = a[::k, ::k]
+    h, w = small.shape
+    lab = np.zeros((h, w), np.int32)
+    sizes, n = {}, 0
+    for y0 in range(h):
+        for x0 in range(w):
+            if small[y0, x0] and not lab[y0, x0]:
+                n += 1
+                stack, cnt = [(y0, x0)], 0
+                lab[y0, x0] = n
+                while stack:
+                    y, x = stack.pop()
+                    cnt += 1
+                    for yy, xx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                        if 0 <= yy < h and 0 <= xx < w and small[yy, xx] and not lab[yy, xx]:
+                            lab[yy, xx] = n
+                            stack.append((yy, xx))
+                sizes[n] = cnt
+    if len(sizes) < 2:
+        return im
+    keep = max(sizes, key=sizes.get)
+    mask = Image.fromarray(((lab == keep) * 255).astype("uint8"), "L")
+    from PIL import ImageFilter
+    mask = mask.resize((mask.width * k, mask.height * k), Image.NEAREST).crop((0, 0, im.width, im.height))
+    full = Image.new("L", im.size, 0)
+    full.paste(mask, (0, 0))
+    full = full.filter(ImageFilter.MaxFilter(2 * k + 1))  # กันขอบตัวโดนกินจากการย่อ
+    alpha = Image.fromarray(np.minimum(np.asarray(im.getchannel("A")), np.asarray(full)).astype("uint8"), "L")
+    im = im.copy()
+    im.putalpha(alpha)
+    return im
+
+
+def prepare(src: Path, out: Path, main_only: bool = False) -> Path:
+    """รูปมาสคอต → PNG พื้นใส ตัดขอบว่าง (ถ้ารูปมีพื้นใสอยู่แล้วใช้ตามเดิม)
+    main_only: ลบของประกอบที่ลอยแยกจากตัว (หลอดไฟ เครื่องหมาย ฯลฯ)"""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter, ImageOps
     im = ImageOps.exif_transpose(Image.open(src)).convert("RGBA")
@@ -33,6 +73,8 @@ def prepare(src: Path, out: Path) -> Path:
         alpha = Image.fromarray(np.where(bg, 0, 255).astype("uint8"), "L")
         alpha = alpha.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(0.8))
         im.putalpha(alpha)
+    if main_only:
+        im = _main_only(im)
     bb = im.getchannel("A").point(lambda v: 255 if v > 20 else 0).getbbox()
     if bb:
         im = im.crop(bb)

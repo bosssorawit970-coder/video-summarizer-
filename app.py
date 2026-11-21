@@ -1167,7 +1167,7 @@ async def upload_asset(req: Request):
         orig = ASSETS / kind / name
         png = orig.with_name(Path(name).stem + "_m.png")
         try:
-            MS.prepare(orig, png)
+            MS.prepare(orig, png, str(form.get("main_only") or "") == "1")
         except Exception as e:
             orig.unlink(missing_ok=True)
             return JSONResponse({"error": f"เปิดรูปไม่ได้: {e}"}, status_code=400)
