@@ -180,7 +180,9 @@ def _sticker(fg, W: int, H: int, vertical: bool):
 
 def _ass(W: int, H: int, events: list[str], path: Path) -> None:
     font = P.thai_font()
-    big = "Kanit Black" if (P.FONT_DIR / "Kanit-Black.ttf").exists() else font
+    # ใช้ชื่อตระกูลฟอนต์เดียวกับซับ ("Kanit") แล้วขอความหนาด้วย \\b900 — ถ้าเรียก "Kanit Black" ตรงๆ
+    # บางเครื่องหาไม่เจอ → libass ไปยืมฟอนต์อื่นทีละตัวอักษร ทำให้สระ/วรรณยุกต์จมหรือหาย
+    big = font
     path.write_text(
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\n"
         f"PlayResX: {W}\nPlayResY: {H}\n\n[V4+ Styles]\n"
@@ -193,6 +195,11 @@ def _ass(W: int, H: int, events: list[str], path: Path) -> None:
         f"Style: Brand,{font},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,5,20,20,20,1\n"
         "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         + "\n".join(events) + "\n", encoding="utf-8")
+
+
+def _heavy() -> str:
+    """ตัวหนาพิเศษถ้ามีไฟล์ Kanit Black (ไม่มี = ตัวหนาปกติ)"""
+    return "\\b900" if (P.FONT_DIR / "Kanit-Black.ttf").exists() else ""
 
 
 def _ev(style: str, text: str, tags: str, layer: int = 1) -> str:
@@ -218,9 +225,9 @@ def _hook_events(text: str, accent: str, W: int, H: int, style: str, cx: int, cy
         y = int(y0 + k * step)
         if style == "band":  # ตัวดำบนแถบเหลือง เอียงนิดๆ
             t = t.replace("{\\c" + acc + "&}", "{\\c" + P._ass_color(RED) + "&}").replace("{\\c&H00FFFFFF&}", "{\\c&H000000&}")
-            ev.append(_ev("Box", t, f"\\an5\\pos({cx},{y})\\fs{size}\\frz3\\bord{int(size * 0.22)}"))
+            ev.append(_ev("Box", t, f"\\an5\\pos({cx},{y})\\fs{size}{_heavy()}\\frz3\\bord{int(size * 0.22)}"))
         else:
-            ev.append(_ev("Hook", t, f"\\an5\\pos({cx},{y})\\fs{size}\\bord{max(6, int(size * 0.11))}"
+            ev.append(_ev("Hook", t, f"\\an5\\pos({cx},{y})\\fs{size}{_heavy()}\\bord{max(6, int(size * 0.11))}"
                                      f"\\shad{max(3, int(size * 0.06))}" + ("\\frz2" if style == "bold" else "")))
     return ev, int(y0 - size * 0.6), int(y0 + step * (len(lines) - 1) + size * 0.6)
 

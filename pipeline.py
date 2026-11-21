@@ -812,9 +812,23 @@ def make_plan(segs: list[dict], provider: str, target: float,
             "clips": clips}
 
 
+_TONE = "\u0E48-\u0E4B"  # ่ ้ ๊ ๋
+
+
+def thai_fix(t: str) -> str:
+    """แก้ลำดับสระ/วรรณยุกต์ไทยที่พิมพ์ผิดลำดับ (ตัวหนังสือดูเหมือนถูกแต่วาดแล้ว "สระจม/วรรณยุกต์หาย")
+    เช่น น+ำ+้ → น+้+ำ ("น้ำ"), นิคหิต+สระอา แยกกัน → สระอำ, วรรณยุกต์ซ้ำ → ตัวเดียว"""
+    t = re.sub(f"\u0E4D([{_TONE}])\u0E32", "\\1\u0E33", t)      # ํ ้ า → ้ ำ
+    t = re.sub(f"([{_TONE}])\u0E4D\u0E32", "\\1\u0E33", t)      # ้ ํ า → ้ ำ
+    t = t.replace("\u0E4D\u0E32", "\u0E33")                       # ํ า → ำ
+    t = re.sub(f"\u0E33([{_TONE}])", "\\1\u0E33", t)             # ำ ้ → ้ ำ
+    t = re.sub(f"([\u0E31\u0E34-\u0E37])([{_TONE}])\\2+", r"\1\2", t)
+    return re.sub(f"([{_TONE}])\\1+", r"\1", t)
+
+
 def clean_text(t: str) -> str:
     t = re.sub(r"[\U0001F000-\U0001FAFF☀-➿*#_`~]", "", t)
-    return re.sub(r"\s+", " ", t).strip()
+    return thai_fix(re.sub(r"\s+", " ", t).strip())
 
 
 # ───────────────────────── 3) เสียงพากย์ ─────────────────────────
@@ -1044,6 +1058,7 @@ def _ass_time(t: float) -> str:
 
 
 def ass_text(text: str) -> str:
+    text = thai_fix(text)
     return text.replace("\\", "/").replace("{", "(").replace("}", ")").replace("\n", "\\N")
 
 
