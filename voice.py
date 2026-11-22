@@ -134,26 +134,64 @@ def _silences(f: Path) -> list[tuple[float, float]]:
     return list(zip(st, en))
 
 
-def _cut_points(texts: list[str], dur: float, sil: list[tuple[float, float]]) -> list[float]:
-    """จุดตัดระหว่างท่อน: เดาจากสัดส่วนจำนวนตัวอักษร แล้วขยับไปช่วงเงียบที่ใกล้ที่สุด (เงียบนานได้เปรียบ)"""
-    chars = [max(1, len("".join(t.split()))) for t in texts]
-    total = sum(chars)
-    cuts, acc, prev = [], 0, 0.0
-    for k in range(len(texts) - 1):
-        acc += chars[k]
-        exp = dur * acc / total
-        tol = max(0.9, 0.4 * dur * chars[k] / total)
-        best, score = None, 1e9
-        for a, b in sil:
-            mid = (a + b) / 2
-            if mid <= prev + 0.3 or abs(mid - exp) > tol:
-                continue
-            sc = abs(mid - exp) - 1.5 * min(b - a, 0.8)
-            if sc < score:
-                best, score = mid, sc
-        cut = best if best is not None else max(prev + 0.3, exp)
-        cuts.append(cut)
-        prev = cut
+def _norm(t: str) -> str:
+    """เทียบข้อความ: ตัดช่องว่าง/เครื่องหมาย เหลือตัวอักษรไทย อังกฤษ ตัวเลข"""
+    return re.sub(r"[^0-9A-Za-z\u0E01-\u0E4E]", "", t or "").lower()
+
+
+def _align_cuts(texts: list[str], audio: Path) -> list[float]:
+    """หาจุดตัดระหว่างท่อนจาก "คำที่ได้ยินจริง": ถอดเสียง (Whisper ระดับคำ) → เทียบตัวอักษรกับบท
+    → ตัดตรงช่องว่างระหว่างคำที่ตรงกับรอยต่อของท่อน · ไม่แน่ใจ → raise (ให้ไปทำทีละท่อนแทน)"""
+    import difflib
+    import pipeline as P
+    try:
+        model = P._load_whisper("small")
+    except Exception:
+        model = P._load_whisper("small", force_cpu=True)
+    w16 = audio.with_suffix(".16k.wav")
+    P.extract_audio(audio, w16)
+    segs, _ = model.transcribe(P.load_wav(w16), language="th", word_timestamps=True, beam_size=5,
+                               initial_prompt=" ".join(texts)[:400])
+    segs = list(segs)
+    w16.unlink(missing_ok=True)
+    words = [(w.start, w.end, _norm(w.word)) for sg in segs for w in (sg.words or []) if _norm(w.word)]
+    if not words:
+        raise RuntimeError("ถอดเสียงไม่ได้")
+    S, owner = "", []  # ตัวอักษรของคำที่ได้ยิน → คำที่เท่าไร
+    for k, (_, _, w) in enumerate(words):
+        S += w
+        owner += [k] * len(w)
+    T = [_norm(t) for t in texts]
+    full = "".join(T)
+    sm = difflib.SequenceMatcher(None, full, S, autojunk=False)
+    if sm.ratio() < 0.6:
+        raise RuntimeError(f"เสียงที่ได้ไม่ตรงกับบท ({sm.ratio():.0%})")
+    blocks = sm.get_matching_blocks()
+
+    def to_s(pos: int) -> int:  # ตำแหน่งในบท → ตำแหน่งในคำที่ได้ยิน
+        best = None
+        for bl in blocks:
+            if bl.size and bl.a <= pos < bl.a + bl.size:
+                return bl.b + (pos - bl.a)
+            if bl.size and bl.a >= pos:
+                return bl.b
+            best = bl
+        return len(S) - 1
+
+    cuts, acc = [], 0
+    for t in T[:-1]:
+        acc += len(t)
+        k = owner[min(len(owner) - 1, to_s(acc))]  # คำแรกของท่อนถัดไป
+        prev_end = words[k - 1][1] if k > 0 else words[0][0]
+        cuts.append((prev_end + words[k][0]) / 2)
+    # ตรวจ: ความยาวแต่ละท่อนต้องสมเหตุผลกับจำนวนตัวอักษร (ต่างกันไม่เกิน 2.5 เท่า)
+    end = words[-1][1]
+    pts = [0.0] + cuts + [end]
+    rate = end / max(1, len(full))
+    for t, x0, x1 in zip(T, pts, pts[1:]):
+        want = len(t) * rate
+        if x1 - x0 < 0.25 or not (want / 2.5 <= x1 - x0 <= want * 2.5 + 0.6):
+            raise RuntimeError("ตัดแบ่งท่อนไม่แน่ใจ")
     return cuts
 
 
@@ -200,7 +238,7 @@ def gemini_tts_batch(texts: list[str], outs: list[Path], voice: str, tone: str =
         if len(idx) == 1:
             tmp.replace(outs[idx[0]])
             continue
-        cuts = [0.0] + _cut_points(part, dur, _silences(tmp)) + [dur]
+        cuts = [0.0] + _align_cuts(part, tmp) + [dur]
         for j, k in enumerate(idx):
             a, b = cuts[j], cuts[j + 1]
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tmp), "-ss", f"{a:.3f}", "-to", f"{b:.3f}",

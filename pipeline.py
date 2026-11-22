@@ -941,7 +941,7 @@ def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
 VOICE_NAMES = {"th-TH-PremwadeeNeural": "เปรมวดี", "th-TH-NiwatNeural": "นิวัฒน์", "th-TH-AcharaNeural": "อัจฉรา"}
 
 
-GEMINI_BATCH = False
+GEMINI_BATCH = True   # รวดเดียว + เทียบคำด้วย Whisper (ไม่แน่ใจ → ทีละท่อนเอง)
 
 
 def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
@@ -955,7 +955,7 @@ def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
     used: list[str] = [""] * len(texts)
     failed: list[int] = []
     cur = voice
-    # สร้างเสียง Gemini รวดเดียวแล้วตัดแบ่ง → ตัดผิดท่อน เสียงไม่ตรงซับ (บอสแจ้ง) — ปิดไว้ กลับไปทำทีละท่อนแบบเดิม
+    # สร้างเสียง Gemini รวดเดียว (ประหยัดโควตา) แล้วตัดแบ่งตามคำที่ถอดเสียงได้จริง ตรวจแล้วไม่แน่ใจ → ทำทีละท่อนแบบเดิม
     if GEMINI_BATCH and voice.startswith("gemini:") and sum(1 for t in texts if t) > 1:
         import voice as V
         idx = [i for i, t in enumerate(texts) if t]
