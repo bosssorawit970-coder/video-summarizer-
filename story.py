@@ -91,7 +91,15 @@ BADGE_RULES = """- "badge": ONLY for true stories (history, sports, news, real p
   like "1 พ.ค. 2019 · คัมป์นู" or "ปี 1969 · ดวงจันทร์". Use only facts you are sure of; otherwise "". Fiction/general topics: "".
 - "quote": a short famous line really said in this moment (max 30 characters, Thai or original language), e.g. "Never Give Up".
   Only if it is a well-known real quote; otherwise "". Never invent quotes.
-- "real": true if the scene shows real, specific people, teams, places or events (so real photos should be searched), else false."""
+- "real": true if the scene shows real, specific people, teams, places or events (so real photos should be searched), else false.
+- "amb": quiet background ambience that puts the viewer IN this scene's place/feeling, one of:
+  "space", "signal" (radio static + beeps), "tension" (dark mysterious drone), "heart" (heartbeat, suspense),
+  "clock" (ticking, time running out), "wind" (cold/wind/snow/desert), "rain", "waves" (sea/beach),
+  "fire", "war" (distant explosions/battle), "night" (crickets, quiet night), "magic" (dream/fantasy/wonder), or "" for none.
+  Keep the same ambience across consecutive scenes in the same place; use "" when nothing fits.
+- "fx": ONE short sound effect at the start of the scene, or "": "boom" (big reveal/shock), "riser" (build-up just
+  before a reveal), "beep", "heart", "shutter" (photo taken), "glitch" (error/strange signal), "ding" (good idea/answer).
+  Use fx in at most a third of the scenes."""
 
 MOODS = {"hook": "⚡ เปิดแรง", "calm": "🌿 สบายๆ", "info": "💡 ให้ข้อมูล", "exciting": "🔥 ตื่นเต้น",
          "shock": "😱 ช็อก/หักมุม", "sad": "🥀 เศร้า/จริงจัง", "happy": "😄 สนุก/ดีใจ"}
@@ -114,7 +122,44 @@ def _badges(v: dict) -> dict:
     """ป้ายวันที่/สถานที่ + คำพูดดัง จากคำตอบ AI (ตัดให้สั้น ไม่มีอีโมจิ)"""
     b = P.clean_text(str(v.get("badge") or ""))[:36]
     q = P.clean_text(str(v.get("quote") or "")).strip('"“”')[:40]
-    return {"badge": b, "quote": q, "real": bool(v.get("real") or b)}
+    amb = str(v.get("amb") or "").strip().lower()
+    fx = str(v.get("fx") or "").strip().lower()
+    return {"badge": b, "quote": q, "real": bool(v.get("real") or b),
+            "amb": amb if amb in G.AMB else "", "fx": fx if fx in G.FX_NAMES else ""}
+
+
+# AI ไม่ได้เลือกเสียงประกอบ → เดาจากคำในบท (ลำดับสำคัญ: ตัวแรกที่เจอชนะ)
+AMB_RULES = [
+    ("signal", r"สัญญาณ|วิทยุ|คลื่นวิทยุ|ดาวเทียม|เรดาร์|กล้องโทรทรรศน์|รหัสลับ|ข้อความจาก"),
+    ("space", r"อวกาศ|ดวงดาว|ดาวเคราะห์|กาแล็กซี|จักรวาล|ดวงจันทร์|ดาวอังคาร|นักบินอวกาศ|มนุษย์ต่างดาว|เอเลี่ยน|ยูเอฟโอ|UFO"),
+    ("war", r"สงคราม|สนามรบ|สนามเพลาะ|ทหาร|ระเบิด|ปืนใหญ่|กองทัพ|การรบ"),
+    ("waves", r"ทะเล|มหาสมุทร|ชายหาด|คลื่น|เรือ|ใต้น้ำ|ฉลาม|วาฬ|เกาะ"),
+    ("rain", r"ฝน|พายุ|ฟ้าผ่า|น้ำท่วม|มรสุม"),
+    ("wind", r"หิมะ|หนาว|ขั้วโลก|ทะเลทราย|ภูเขาสูง|ยอดเขา|ลมแรง|น้ำแข็ง|คริสต์มาส"),
+    ("fire", r"ไฟไหม้|เปลวไฟ|ภูเขาไฟ|กองไฟ|ลาวา|เผา"),
+    ("clock", r"นาฬิกา|นับถอยหลัง|เวลาเหลือ|ทันเวลา|วินาทีสุดท้าย|หมดเวลา"),
+    ("night", r"กลางคืน|เที่ยงคืน|ป่าลึก|ในป่า|ค่ำคืน"),
+    ("magic", r"เวทมนตร์|ความฝัน|ฝันว่า|มหัศจรรย์|เทพนิยาย|ปาฏิหาริย์"),
+    ("tension", r"ปริศนา|ลึกลับ|ไม่มีใครรู้|ไม่มีใครอธิบาย|หายตัว|ผี|สยอง|ฆาตกร|คดี|ความลับ|น่ากลัว"),
+]
+
+
+def guess_amb(text: str) -> str:
+    for name, pat in AMB_RULES:
+        if re.search(pat, text or "", re.I):
+            return name
+    return ""
+
+
+def finish_sound(scenes: list[dict]) -> None:
+    """ทุกฉากมีเสียงบรรยากาศ (ถ้าเข้ากัน) — ฉากที่ยังไม่ได้เลือก เดาจากบท / ใช้ของฉากก่อนหน้าถ้าเป็นเรื่องเดียวกัน"""
+    prev = ""
+    for s in scenes:
+        if "amb" not in s or s.get("amb") is None:
+            s["amb"] = guess_amb(s.get("narration", "")) or (prev if prev in ("space", "war", "waves", "wind", "night") else "")
+        if not s.get("fx"):
+            s["fx"] = ""
+        prev = s.get("amb") or ""
 
 
 def guess_mood(text: str, i: int, n: int) -> str:
@@ -164,6 +209,7 @@ def finish_moods(scenes: list[dict]) -> None:
 
 def finish_graphics(scenes: list[dict]) -> None:
     finish_moods(scenes)
+    finish_sound(scenes)
     """ไม่ให้กราฟิกรกเกินไป (ไม่เกินครึ่งหนึ่งของฉาก ไม่ซ้ำแบบติดกัน) + ฉากไม่มี AI → เดาจากตัวเลขในบท"""
     if not GRAPHICS_ON:
         for s in scenes:
@@ -1158,7 +1204,8 @@ def _video_layout(video: Path, W: int, H: int) -> str:
 
 def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, workdir: Path,
                  layout: str, subtitles: bool, extras: bool, brand: dict | None, sfx: bool = True,
-                 frame: str = "full", less_text: bool = True) -> float:
+                 frame: str = "full", less_text: bool = True, ambience: bool = True,
+                 sound_dir: Path | None = None) -> float:
     W, H = size_for(layout)
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
@@ -1226,6 +1273,11 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
         cues = []
     if sty.get("sfx") and extras:  # เสียงเอฟเฟกต์ตามอารมณ์ฉาก (ฟิ้ว/ตึง) ตอนเปิดฉาก
         cues = [(0.02, sty["sfx"])] + cues
+    fx = scene.get("fx") or ""
+    if ambience and fx in G.FX_NAMES:  # เสียงประกอบที่ AI เลือกตามเนื้อหา
+        if fx == "boom":
+            cues = [c for c in cues if c[1] != "hit"]  # ไม่ซ้อนกับเสียงตึงของอารมณ์ช็อก
+        cues.append((0.12 if fx != "riser" else max(0.1, D - 1.7), fx))
     elif frame == "card" and extras and not anim:  # การ์ดเลื่อนขึ้นมา = เสียงฟิ้วเบาๆ
         cues = [(0.02, "whoosh")] + cues
     if extras and not anim and scene.get("quote") and D > 1.5:
@@ -1302,22 +1354,43 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
     d = int(LEAD * 1000)
     delay = f",adelay={d}|{d}" if narr else ""
+    bed = None
+    amb = scene.get("amb") or ""
+    if ambience and amb:  # เสียงบรรยากาศเบาๆ คลอทั้งฉาก
+        try:
+            if amb.startswith("file:") and sound_dir:
+                f = sound_dir / amb[5:]
+                bed = (f, 0.5) if f.is_file() else None
+            else:
+                f = G.make_amb(workdir, amb)
+                bed = (f, 0.75) if f else None
+        except Exception as e:
+            print("ทำเสียงบรรยากาศไม่ได้:", str(e)[-200:])
     sounds = {}
-    if sfx and cues:
+    if (sfx or ambience) and cues:
         try:
             sounds = G.make_sfx(workdir)
         except Exception as e:
             print("ทำเสียงเอฟเฟกต์กราฟิกไม่ได้:", str(e)[-200:])
-    if sounds:
+    if not sfx:  # ปิดเสียงเอฟเฟกต์กราฟิก → เหลือเฉพาะเสียงประกอบที่ AI เลือก
+        cues = [c for c in cues if c[1] == fx]
+    if sounds or bed:
         # เสียงเอฟเฟกต์เบาๆ ตามจังหวะกราฟิก — ทุกเส้น apad ยาวไม่จำกัด ให้ amix หารเท่ากันตลอด แล้วคูณกลับ
         idx = {}
-        for name in dict.fromkeys(n for _, n in cues):
-            inputs += ["-i", str(sounds[name][0])]; idx[name] = n_in; n_in += 1
         labels = []
-        for k, (t, name) in enumerate(cues):
-            ms = int(t * 1000)
-            parts.append(f"[{idx[name]}:a]{norm},volume={sounds[name][1]:.2f},adelay={ms}|{ms},apad[fx{k}]")
-            labels.append(f"[fx{k}]")
+        if sounds:
+            for name in dict.fromkeys(n for _, n in cues):
+                inputs += ["-i", str(sounds[name][0])]; idx[name] = n_in; n_in += 1
+            for k, (t, name) in enumerate(cues):
+                ms = int(t * 1000)
+                parts.append(f"[{idx[name]}:a]{norm},volume={sounds[name][1]:.2f},adelay={ms}|{ms},apad[fx{k}]")
+                labels.append(f"[fx{k}]")
+        if bed:
+            inputs += ["-stream_loop", "-1", "-i", str(bed[0])]
+            parts.append(f"[{n_in}:a]{norm},atrim=0:{D:.3f},volume={bed[1]:.2f},"
+                         f"afade=t=in:st=0:d=0.5,afade=t=out:st={max(0, D - 0.5):.3f}:d=0.5,apad[bed]")
+            n_in += 1
+            labels.append("[bed]")
         n = len(labels) + 1
         parts.append(f"[{ia}:a]{norm}{delay},apad[nar]")
         parts.append(f"[nar]{''.join(labels)}amix=inputs={n}:duration=first:dropout_transition=0,"
@@ -1397,7 +1470,8 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
                  cover: Path | None = None, clean: bool = False, style: str = "cinematic",
                  tone: str = "story", sfx: bool = True, ai_motion: bool = False,
-                 frame: str = "full", less_text: bool = True) -> list[Path]:
+                 frame: str = "full", less_text: bool = True, ambience: bool = True,
+                 sound_dir: Path | None = None) -> list[Path]:
     scene_dir, workdir, out = scene_dir.resolve(), workdir.resolve(), out.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     scenes = plan["scenes"]
@@ -1408,6 +1482,7 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         draw_images(plan, scene_dir, layout, style, lambda p, m: progress(0, m))
     n, files, durs = len(scenes), [], []
     finish_moods(scenes)  # ทุกฉากต้องมีอารมณ์ (กำหนดกล้อง/ทรานซิชัน/เสียงให้เข้ากับเนื้อหา)
+    finish_sound(scenes)
     texts = [P.clean_text(s.get("narration", "")) for s in scenes]
     narrs = P.tts_all(texts, workdir, voice, rate, tone, progress, total=30)
     moving = ai_animate(scenes, scene_dir, progress) if ai_motion else {}
@@ -1420,7 +1495,8 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         try:
             d = render_scene(src, sc, i, narr, f, workdir, layout, subtitles,
                              not clean, None if clean else brand, sfx=sfx and not clean,
-                             frame=frame, less_text=less_text)
+                             frame=frame, less_text=less_text, ambience=ambience and not clean,
+                             sound_dir=sound_dir)
         except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
             print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
             d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None, frame=frame)

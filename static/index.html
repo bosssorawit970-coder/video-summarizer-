@@ -375,13 +375,18 @@ video{width:100%;border-radius:10px;background:#000;display:block}
           <div class="urlrow"><select id="logo0"></select><button data-up="logo">+ เพิ่มโลโก้</button></div>
         </div>
         <div>
+          <label class="f">🔊 เสียงประกอบของฉัน <span class="hint">(ไม่บังคับ)</span></label>
+          <div class="urlrow"><select id="sfx0"></select><button data-up="sfx">+ เพิ่มเสียง</button></div>
+          <div class="hint">โปรแกรมมีเสียงบรรยากาศให้แล้ว 12 แบบ (อวกาศ วิทยุ ฝน ทะเล สงคราม ฯลฯ) — อัปเสียงเพิ่มได้ เช่น เสียงคนเชียร์ เสียงเมือง จากเว็บเสียงฟรี (pixabay.com/sound-effects) แล้วเลือกใช้รายฉากในหน้าตรวจบท</div>
+        </div>
+        <div>
           <label class="f">มาสคอตประจำช่อง</label>
           <div class="urlrow"><select id="mascot0"></select><button data-up="mascot">+ เพิ่มมาสคอต</button></div>
           <div class="urlrow" style="margin-top:6px"><select id="mascotPos0">
             <option value="top_right">ในคลิป: มุมขวาบน</option><option value="bottom_left">ในคลิป: มุมซ้ายล่าง</option>
             <option value="bottom_right">ในคลิป: มุมขวาล่าง</option></select></div>
           <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="mascotClean" checked> ตอนอัป: ลบของประกอบรอบตัว (หลอดไฟ เครื่องหมาย ฯลฯ) เก็บเฉพาะตัวการ์ตูน</label>
-          <div class="hint">ลอยมุมจอตลอดคลิป + ติดบนภาพปก · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้ · ไฟล์ .zip = ชุดหลายท่า เปลี่ยนท่าตามอารมณ์ฉาก (ชื่อไฟล์ขึ้นต้นด้วย hook_ calm_ info_ exciting_ shock_ sad_ happy_)</div>
+          <div class="hint">ลอยมุมจอตลอดคลิป · รูปพื้นขาวได้ โปรแกรมลบพื้นหลังให้ · ไฟล์ .zip = ชุดหลายท่า เปลี่ยนท่าตามอารมณ์ฉาก (ชื่อไฟล์ขึ้นต้นด้วย hook_ calm_ info_ exciting_ shock_ sad_ happy_)</div>
         </div>
         <div>
           <label class="f">ภาพปก</label>
@@ -474,7 +479,7 @@ video{width:100%;border-radius:10px;background:#000;display:block}
             <div class="noStory"><label class="f">ข้อความหัวเรื่อง (กลางจอด้านบน)</label><input type="text" id="toptext" maxlength="100" placeholder="เช่น Soul Eater | ตอนที่ 2"><div class="hint">ใส่ | เพื่อขึ้นบรรทัดใหม่</div></div>
             <div><label class="f">ข้อความบนปก</label><input type="text" id="coverText" maxlength="60" placeholder="เว้นว่าง = AI คิดให้ · เช่น ภารกิจ*สุดป่วน*!"><div class="hint">สั้นๆ 2-6 คำ · ครอบคำเด่นด้วย *ดอกจัน* ให้เป็นสีเหลือง</div></div>
             <div><label class="f">ตกแต่ง</label>
-              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label><label class="storyRv">🖼️ แบบภาพ <select id="frameSel" style="width:auto;display:inline-block;margin-left:6px"><option value="full">📱 เต็มจอ</option><option value="card">📰 การ์ดสารคดี (พื้นกระดาษ ภาพในการ์ด)</option><option value="square">⬜ จัตุรัส + ขอบเบลอ</option></select></label><label class="storyRv"><input type="checkbox" id="lessText" checked> ✂️ ตัวหนังสือน้อย (มีซับแล้วไม่ใส่ป้ายหัวข้อซ้ำ)</label><label class="storyRv aiMoBox"><input type="checkbox" id="aiMotion"> 🤖 AI ขยับภาพจริงทุกฉาก (การ์ดจอ ~3 นาที/ฉาก)</label></div></div>
+              <div class="seg"><label class="noStory"><input type="checkbox" id="fx"> สโลว์ + เอฟเฟกต์</label><label><input type="checkbox" id="cover"> ภาพปกต้นคลิป</label><label class="storyRv"><input type="checkbox" id="gfxSfx" checked> 🔊 เสียงเอฟเฟกต์ตอนกราฟิกขึ้น</label><label class="storyRv"><input type="checkbox" id="ambience" checked> 🎧 เสียงประกอบตามเนื้อหา (บรรยากาศ + เอฟเฟกต์)</label><label class="storyRv">🖼️ แบบภาพ <select id="frameSel" style="width:auto;display:inline-block;margin-left:6px"><option value="full">📱 เต็มจอ</option><option value="card">📰 การ์ดสารคดี (พื้นกระดาษ ภาพในการ์ด)</option><option value="square">⬜ จัตุรัส + ขอบเบลอ</option></select></label><label class="storyRv"><input type="checkbox" id="lessText" checked> ✂️ ตัวหนังสือน้อย (มีซับแล้วไม่ใส่ป้ายหัวข้อซ้ำ)</label><label class="storyRv aiMoBox"><input type="checkbox" id="aiMotion"> 🤖 AI ขยับภาพจริงทุกฉาก (การ์ดจอ ~3 นาที/ฉาก)</label></div></div>
             <div><label class="f">ซับไตเติล</label>
               <div class="seg"><label><input type="checkbox" id="subs" checked> ใส่ซับบทพากย์ในวิดีโอ</label></div>
               <div class="seg" id="subStyle" style="margin-top:6px">
@@ -868,9 +873,10 @@ function pick(list) {
 // ── ตกแต่ง ──
 const store = {get(k, d) { try { const v = localStorage.getItem("sc_" + k); return v == null ? d : v; } catch { return d; } },
                set(k, v) { try { localStorage.setItem("sc_" + k, v); } catch {} }};
-let assets = {music: [], logo: [], mascot: []};
+let assets = {music: [], logo: [], mascot: [], sfx: []};
 function fillAssets() {
   const opt = (list, none) => `<option value="">${none}</option>` + list.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  { const el = $("#sfx0"); el.innerHTML = (assets.sfx || []).length ? assets.sfx.map(n => `<option>${esc(n)}</option>`).join("") : `<option value="">ยังไม่มี — ใช้เสียงในตัวโปรแกรม</option>`; }
   for (const id of ["music0", "music"]) { const el = $("#" + id), v = el.value; el.innerHTML = opt(assets.music, "ไม่ใส่เพลง"); el.value = assets.music.includes(v) ? v : ""; }
   const l = $("#logo0"), lv = l.value; l.innerHTML = opt(assets.logo, "ไม่ใส่โลโก้"); l.value = assets.logo.includes(lv) ? lv : "";
   for (const id of ["mascot0", "mascot"]) { const m = $("#" + id), mv = m.value;
@@ -910,7 +916,7 @@ $("#decor").addEventListener("change", () => {
 let upKind = "";
 document.querySelectorAll("[data-up]").forEach(b => b.onclick = e => {
   e.preventDefault(); upKind = b.dataset.up;
-  $("#assetFile").accept = upKind === "music" ? "audio/*" : upKind === "mascot" ? "image/*,.zip" : "image/*"; $("#assetFile").click();
+  $("#assetFile").accept = upKind === "music" || upKind === "sfx" ? "audio/*" : upKind === "mascot" ? "image/*,.zip" : "image/*"; $("#assetFile").click();
 });
 $("#assetFile").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
@@ -1133,7 +1139,7 @@ function enterReview() {
   $("#addClip").classList.toggle("hidden", multi);
   $("#starBtn").classList.toggle("hidden", multi || !isGame()); $("#starHint").classList.toggle("hidden", multi || !isGame());
   if (r) { $("#music").value = assets.music.includes(r.music) ? r.music : ""; $("#channel").value = r.channel || ""; $("#mascot").value = (assets.mascot || []).includes(r.mascot) ? r.mascot : ""; $("#toptext").value = r.toptext || ""; $("#coverText").value = r.cover_text || "";
-           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#aiMotion").checked = !!r.ai_motion; $("#frameSel").value = r.frame || "full"; $("#lessText").checked = r.less_text !== false; }
+           $("#fx").checked = !!r.fx; $("#cover").checked = r.cover !== false; $("#gfxSfx").checked = r.gfx_sfx !== false; $("#ambience").checked = r.ambience !== false; $("#aiMotion").checked = !!r.ai_motion; $("#frameSel").value = r.frame || "full"; $("#lessText").checked = r.less_text !== false; }
   if (r) { $("#layout").value = r.layout || "original"; $("#voice").value = r.voice; $("#tone").value = r.tone || "natural"; voiceChanged(); $("#rate").value = r.rate; $("#vol").value = Math.round(r.orig_volume*100); $("#origMode").value = r.orig_mode || (isGame() ? "all" : "key"); origChanged(); $("#subs").checked = r.subtitles; { const ss = document.querySelector(`input[name=sub_style][value=${r.sub_style || "pop"}]`); if (ss) ss.checked = true; } $("#rate").oninput({target:$("#rate")}); $("#vol").oninput({target:$("#vol")}); }
   drawClips();
 }
@@ -1179,6 +1185,9 @@ function drawScenes() {
         </div>
         <div class="row" style="gap:6px;margin-top:6px;align-items:center"><span class="hint" style="flex:none">อารมณ์ฉาก:</span>
           <select data-k="mood" style="flex:1" title="กำหนดการเคลื่อนกล้อง ทรานซิชัน แฟลช เสียงเอฟเฟกต์ และโทนสีของฉากนี้">${Object.entries(cfg.moods || {}).map(([k, v]) => `<option value="${k}" ${c.mood === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <div class="row" style="gap:6px;margin-top:6px;align-items:center"><span class="hint" style="flex:none">🎧 เสียงประกอบ:</span>
+          <select data-k="amb" style="flex:1;min-width:0" title="เสียงบรรยากาศเบาๆ คลอทั้งฉาก"><option value="">— ไม่มีบรรยากาศ —</option>${Object.entries(cfg.amb || {}).map(([k, v]) => `<option value="${k}" ${c.amb === k ? "selected" : ""}>${v}</option>`).join("")}${(assets.sfx || []).map(n => `<option value="file:${esc(n)}" ${c.amb === "file:" + n ? "selected" : ""}>📁 ${esc(n)}</option>`).join("")}</select>
+          <select data-k="fx" style="flex:1;min-width:0" title="เสียงเอฟเฟกต์ 1 ครั้งตอนเปิดฉาก"><option value="">— ไม่มีเอฟเฟกต์ —</option>${Object.entries(cfg.fx_names || {}).map(([k, v]) => `<option value="${k}" ${c.fx === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
       </div>
       <div class="opts-row">
         ${c.generic ? `<div class="warn" style="margin-bottom:6px">⚠️ AI คิดภาพให้ฉากนี้ไม่ได้ ภาพอาจไม่เกี่ยวกับบท — เปิด "คำบรรยายภาพ" ด้านล่าง พิมพ์ภาพที่อยากได้ (อังกฤษ) แล้วกด 🎲</div>` : ""}
@@ -1465,7 +1474,7 @@ $("#renderBtn").onclick = async () => {
     await api(`/api/jobs/${job.id}/render`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
       clips, scenes: clips, title: $("#title").value, summary: $("#summary").value, voice: $("#voice").value, tone: $("#tone").value,
       rate: +$("#rate").value, orig_volume: $("#vol").value / 100, orig_mode: $("#origMode").value, subtitles: $("#subs").checked, sub_style: document.querySelector("input[name=sub_style]:checked")?.value || "pop", layout: $("#layout").value,
-      music: $("#music").value, channel: $("#channel").value.trim(), mascot: $("#mascot").value, toptext: $("#toptext").value.trim(), cover_text: $("#coverText").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameSel").value, less_text: $("#lessText").checked})});
+      music: $("#music").value, channel: $("#channel").value.trim(), mascot: $("#mascot").value, toptext: $("#toptext").value.trim(), cover_text: $("#coverText").value.trim(), fx: $("#fx").checked, cover: $("#cover").checked, gfx_sfx: $("#gfxSfx").checked, ambience: $("#ambience").checked, ai_motion: $("#aiMotion").checked && !!cfg.motion_ai, frame: $("#frameSel").value, less_text: $("#lessText").checked})});
     $("#srcVid").pause(); openJob(job.id);
   } catch (e) { alert(e.message); }
 };

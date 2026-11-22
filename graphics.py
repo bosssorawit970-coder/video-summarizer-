@@ -211,7 +211,69 @@ SFX = {
     "ding": ("aevalsrc='(0.6*sin(2*PI*1320*t)+0.4*sin(2*PI*1980*t))*exp(-5.5*t)':d=0.7:s=44100", "anull", 0.22),
     "hit": ("aevalsrc='sin(2*PI*(110-70*t)*t)*exp(-7*t)+0.25*sin(2*PI*55*t)*exp(-4*t)':d=0.6:s=44100", "lowpass=f=900", 0.7),
     "rise": ("aevalsrc='sin(2*PI*(260*t+700*t*t))*min(1,t*12)*exp(-2.6*t)':d=0.65:s=44100", "lowpass=f=2500", 0.25),
+    # ── เสียงประกอบตามเนื้อหา (AI เลือกต่อฉาก) ──
+    "boom": ("aevalsrc='sin(2*PI*(70-40*t)*t)*exp(-2.2*t)+0.4*sin(2*PI*35*t)*exp(-1.5*t)':d=1.8:s=44100",
+             "lowpass=f=500,aecho=0.6:0.5:120:0.3", 0.85),
+    "beep": ("aevalsrc='sin(2*PI*1050*t)*(lt(t,0.1)+between(t,0.22,0.32))':d=0.4:s=44100", "lowpass=f=5000", 0.22),
+    "riser": ("anoisesrc=d=1.6:c=white:a=0.5:r=44100",
+              "highpass=f=300,lowpass=f=5000,volume='pow(t/1.6,2)':eval=frame,afade=t=out:st=1.5:d=0.1", 0.5),
+    "heart": ("aevalsrc='sin(2*PI*52*t)*(exp(-28*t)+0.75*gte(t,0.24)*exp(-28*(t-0.24)))':d=0.7:s=44100", "lowpass=f=160", 1.2),
+    "shutter": ("anoisesrc=d=0.12:c=white:a=0.8:r=44100", "highpass=f=1500,afade=t=out:st=0.01:d=0.1", 0.35),
+    "glitch": ("aevalsrc='sin(2*PI*(400+1800*gt(sin(2*PI*23*t),0))*t)*gt(sin(2*PI*11*t),-0.3)*0.6':d=0.35:s=44100",
+               "highpass=f=200,lowpass=f=5000", 0.25),
 }
+
+# ───────────────────────── เสียงบรรยากาศ (เบาๆ คลอตลอดฉาก วนซ้ำได้) ─────────────────────────
+# {ชื่อ: (ชื่อไทย, [แหล่งเสียง lavfi], กราฟ filter)} — สร้างด้วย ffmpeg ทั้งหมด ไม่ติดลิขสิทธิ์
+AMB = {
+    "space": ("🌌 อวกาศ (หึ่งลึกๆ)", ["anoisesrc=d=10:c=brown:a=0.5:r=44100",
+              "aevalsrc='0.35*sin(2*PI*55*t)*(0.7+0.3*sin(2*PI*0.2*t))+0.2*sin(2*PI*82.5*t)':d=10:s=44100"],
+              "[0]lowpass=f=220[n];[1]lowpass=f=300[d];[n][d]amix=inputs=2:normalize=0"),
+    "signal": ("📡 สัญญาณวิทยุ ซ่า+บี๊บ", ["anoisesrc=d=9.6:c=white:a=0.15:r=44100",
+               "aevalsrc='0.35*sin(2*PI*1050*t)*lt(mod(t,1.2),0.1)+0.25*sin(2*PI*1050*t)*between(mod(t,1.2),0.2,0.3)':d=9.6:s=44100"],
+               "[0]bandpass=f=1800:width_type=h:w=1800,tremolo=f=7:d=0.4[n];[n][1]amix=inputs=2:normalize=0"),
+    "tension": ("😰 ตึงเครียด/ลึกลับ", ["aevalsrc='0.4*sin(2*PI*65*t)+0.3*sin(2*PI*65.7*t)+0.15*sin(2*PI*97.5*t)*(0.6+0.4*sin(2*PI*0.1*t))':d=10:s=44100",
+                "anoisesrc=d=10:c=brown:a=0.15:r=44100"],
+                "[0]lowpass=f=400[d];[1]lowpass=f=250[n];[d][n]amix=inputs=2:normalize=0"),
+    "heart": ("💓 หัวใจเต้น (ลุ้น)", ["aevalsrc='sin(2*PI*52*t)*(exp(-28*mod(t,0.9))+0.75*gte(mod(t,0.9),0.24)*exp(-28*(mod(t,0.9)-0.24)))':d=9:s=44100"],
+              "[0]lowpass=f=160,volume=2"),
+    "clock": ("⏰ นาฬิกาเดิน", ["aevalsrc='0.6*sin(2*PI*(2100+600*mod(floor(t),2))*t)*exp(-180*mod(t,1))':d=10:s=44100"],
+              "[0]highpass=f=700"),
+    "wind": ("🌬 ลม/หนาว", ["anoisesrc=d=10:c=pink:a=0.6:r=44100"],
+             "[0]bandpass=f=450:width_type=o:w=2,tremolo=f=0.2:d=0.8,lowpass=f=1600"),
+    "rain": ("🌧 ฝนตก", ["anoisesrc=d=10:c=white:a=0.25:r=44100", "anoisesrc=d=10:c=pink:a=0.3:r=44100"],
+             "[0]highpass=f=900,lowpass=f=7000[a];[1]lowpass=f=400[b];[a][b]amix=inputs=2:normalize=0"),
+    "waves": ("🌊 ทะเล/คลื่น", ["anoisesrc=d=10:c=brown:a=0.6:r=44100"],
+              "[0]lowpass=f=700,volume='0.25+0.75*pow(sin(PI*t/5),2)':eval=frame"),
+    "fire": ("🔥 ไฟปะทุ", ["anoisesrc=d=10:c=brown:a=0.35:r=44100", "aevalsrc='gt(random(0),0.9992)*(random(1)*1.6-0.8)':d=10:s=44100"],
+             "[0]lowpass=f=320[n];[1]highpass=f=1200,lowpass=f=6000[c];[n][c]amix=inputs=2:normalize=0"),
+    "war": ("💥 สงคราม (ระเบิดไกลๆ)", ["anoisesrc=d=10:c=brown:a=0.45:r=44100",
+            "aevalsrc='sin(2*PI*38*t)*(exp(-2.5*mod(t,3.3))+0.6*exp(-3*mod(t+1.7,5)))':d=10:s=44100"],
+            "[0]lowpass=f=140[n];[1]lowpass=f=120[b];[n][b]amix=inputs=2:normalize=0"),
+    "night": ("🦗 กลางคืน/จิ้งหรีด", ["aevalsrc='0.3*sin(2*PI*4400*t)*gt(sin(2*PI*28*t),0.3)*gt(mod(t,1.3),0.75)':d=10.4:s=44100",
+              "anoisesrc=d=10.4:c=pink:a=0.08:r=44100"],
+              "[0]bandpass=f=4400:width_type=h:w=800[c];[1]lowpass=f=600[n];[c][n]amix=inputs=2:normalize=0"),
+    "magic": ("✨ เวทมนตร์/ความฝัน", ["aevalsrc='0.2*sin(2*PI*1760*t)*(0.5+0.5*sin(2*PI*3*t))+0.15*sin(2*PI*2637*t)*(0.5+0.5*sin(2*PI*2.3*t))+0.1*sin(2*PI*880*t)':d=10:s=44100"],
+              "[0]aecho=0.8:0.7:180|370:0.4|0.25"),
+}
+FX_NAMES = {"boom": "💥 ตึ้ง! (เปิดเผย/ช็อก)", "riser": "📈 ไต่ขึ้น (ก่อนเฉลย)", "beep": "📟 บี๊บ บี๊บ",
+            "heart": "💓 หัวใจเต้น 1 ที", "shutter": "📸 ชัตเตอร์กล้อง", "glitch": "📺 สัญญาณรบกวน",
+            "ding": "🔔 ติ๊ง", "whoosh": "💨 ฟิ้ว", "pop": "🫧 ป๊อป"}
+
+
+def make_amb(workdir, name: str):
+    """สร้างไฟล์เสียงบรรยากาศ (ความดังมาตรฐาน -26 LUFS วนซ้ำได้) คืน path หรือ None"""
+    if name not in AMB:
+        return None
+    f = workdir / f"amb_{name}.wav"
+    if not f.exists():
+        _, ins, graph = AMB[name]
+        args = []
+        for src in ins:
+            args += ["-f", "lavfi", "-i", src]
+        P.run(["ffmpeg", "-y", "-hide_banner", *args, "-filter_complex", graph + ",loudnorm=I=-26:TP=-5[o]",
+               "-map", "[o]", "-ac", "2", "-ar", "44100", str(f)])
+    return f
 
 
 def make_sfx(workdir) -> dict:
