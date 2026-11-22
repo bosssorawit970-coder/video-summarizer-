@@ -612,7 +612,8 @@ setInterval(async () => {
 let lastTouch = Date.now();
 for (const ev of ["pointerdown", "keydown", "scroll", "input"]) addEventListener(ev, () => { lastTouch = Date.now(); }, {passive: true, capture: true});
 setInterval(() => {
-  if (document.visibilityState === "visible" && Date.now() - lastTouch < 5 * 60e3) fetch("/api/alive", {cache: "no-store"}).catch(() => {});
+  // หน้าโปรแกรมเปิดอยู่บนจอ = ยังใช้อยู่ (อ่านบท/รอ/ดูคลิป) · ไม่แตะเลยเกิน 2 ชม. = ลืมเปิดทิ้งไว้
+  if (document.visibilityState === "visible" && Date.now() - lastTouch < 120 * 60e3) fetch("/api/alive", {cache: "no-store"}).catch(() => {});
 }, 60e3);
 // ── ย่อรูปในเครื่องก่อนอัปโหลด (รูปมือถือ 5-15 MB → ~1 MB อัปเร็ว ไม่ติดขนาด) ──
 async function shrinkImage(f, max = 2048) {
