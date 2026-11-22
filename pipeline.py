@@ -941,6 +941,9 @@ def tts(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natural",
 VOICE_NAMES = {"th-TH-PremwadeeNeural": "เปรมวดี", "th-TH-NiwatNeural": "นิวัฒน์", "th-TH-AcharaNeural": "อัจฉรา"}
 
 
+GEMINI_BATCH = False
+
+
 def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
             progress: Progress, total: float = 100) -> list[Path | None]:
     """สร้างเสียงพากย์ทุกท่อนก่อนตัดต่อ — ทั้งคลิปต้องเป็นเสียงเดียวกันเสมอ:
@@ -952,7 +955,8 @@ def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
     used: list[str] = [""] * len(texts)
     failed: list[int] = []
     cur = voice
-    if voice.startswith("gemini:") and sum(1 for t in texts if t) > 1:
+    # สร้างเสียง Gemini รวดเดียวแล้วตัดแบ่ง → ตัดผิดท่อน เสียงไม่ตรงซับ (บอสแจ้ง) — ปิดไว้ กลับไปทำทีละท่อนแบบเดิม
+    if GEMINI_BATCH and voice.startswith("gemini:") and sum(1 for t in texts if t) > 1:
         import voice as V
         idx = [i for i, t in enumerate(texts) if t]
         files = [workdir / f"narr_{i:03}.mp3" for i in idx]
