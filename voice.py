@@ -62,6 +62,25 @@ def _tts_models() -> list[str]:
     import pipeline as P
     return P.gemini_models("tts") or ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"]
 _pinned: str | None = None   # รุ่นเสียง Gemini ที่ใช้ในงานนี้
+_spent: dict[str, str] = {}   # รุ่นที่โควตาฟรีวันนี้หมดแล้ว {รุ่น: วันที่ (เวลาแปซิฟิก)} — แต่ละรุ่นมีโควตาของตัวเอง
+
+
+def _pt_day() -> str:
+    import datetime as _dt
+    return (_dt.datetime.utcnow() - _dt.timedelta(hours=8)).date().isoformat()  # โควตารีเซ็ตเที่ยงคืนแปซิฟิก
+
+
+def _alive_models() -> list[str]:
+    return [m for m in _tts_models() if _spent.get(m) != _pt_day()]
+
+
+def switch_model() -> bool:
+    """รุ่นที่ใช้อยู่โควตาวันนี้หมดกลางคลิป แต่ยังมีรุ่นอื่นเหลือ → ปลดล็อก ให้ทำใหม่ทั้งคลิปด้วยรุ่นใหม่"""
+    global _pinned, _gemini_off
+    if _pinned and _spent.get(_pinned) == _pt_day() and _alive_models():
+        _pinned, _gemini_off = None, None
+        return True
+    return False
 _gemini_off: str | None = None   # โควตาเต็ม/ใช้ไม่ได้ → ไม่ต้องลองซ้ำทุกฉากในรอบนี้
 
 
@@ -208,7 +227,7 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
     global _pinned
     last = "เรียกเสียง Gemini ไม่สำเร็จ"
     # รุ่นที่ใช้ได้แล้วในงานนี้ → ใช้รุ่นเดียวทั้งคลิป (คนละรุ่นเสียงต่างกันชัด ห้ามสลับรุ่นกลางคลิป)
-    for model in ([_pinned] if _pinned else _tts_models()):
+    for model in ([_pinned] if _pinned else _alive_models()):
         tries = 0
         while True:
             req = urllib.request.Request(
@@ -229,6 +248,8 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
                         time.sleep(min(65, int(m.group(1)) + 2 if m else 20 * tries))
                         continue
                     last = "โควตาเสียง Gemini ฟรีเต็ม"
+                    if "PerDay" in full:
+                        _spent[model] = _pt_day()
                 elif e.code in (500, 502, 503, 504) and tries < 3:  # เซิร์ฟเวอร์ยุ่งชั่วคราว → รอแล้วลองซ้ำ
                     tries += 1
                     time.sleep(5 * tries)
@@ -256,9 +277,11 @@ def _gemini_call(prompt: str, out: Path, voice: str, rate: int, key: str) -> Non
                 _pinned = model
                 return
         last = "Gemini ไม่ส่งเสียงกลับมา"
-    if "โควตา" in last:
-        _gemini_off = last
-    raise RuntimeError(last)
+    if "โควตา" in last and not _alive_models():  # ทุกรุ่นหมดแล้ว → ใช้เสียง Edge ทั้งคลิป
+        _gemini_off = last + " (ทุกรุ่น — รีเซ็ตราวบ่าย 3 โมงเวลาไทย)"
+    elif not _pinned and not _alive_models():
+        _gemini_off = "โควตาเสียง Gemini ฟรีเต็ม (ทุกรุ่น — รีเซ็ตราวบ่าย 3 โมงเวลาไทย)"
+    raise RuntimeError(_gemini_off or last)
 
 
 def reset() -> None:

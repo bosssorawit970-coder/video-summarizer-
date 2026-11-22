@@ -981,6 +981,19 @@ def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
             used[i] = u
             if u != cur:  # เสียง Gemini/โคลนใช้ไม่ได้ ถอยไปเสียงสำรองแล้ว → ใช้เสียงสำรองนั้นต่อทั้งคลิป
                 cur = u
+    if voice.startswith("gemini:") and failed:
+        import voice as V
+        while V.switch_model():  # รุ่นเสียงที่ใช้อยู่โควตาวันนี้หมด → ทำใหม่ทั้งคลิปด้วยรุ่นอื่นที่ยังมีโควตา
+            progress(total, "โควตาเสียง Gemini รุ่นนี้หมด — สร้างเสียงใหม่ทั้งคลิปด้วยอีกรุ่น (เสียงไม่สลับกลางคลิป)")
+            failed = []
+            for i, text in enumerate(texts):
+                if text:
+                    u = tts(text, outs[i], voice, rate, tone, switch=False)
+                    used[i] = u or ""
+                    if u is None:
+                        failed.append(i)
+            if not failed:
+                break
     for rnd in range(2):  # วนกลับมาลองท่อนที่พลาดด้วยเสียงเดิม
         if not failed:
             break
