@@ -113,12 +113,17 @@ env["APP_PIN"] = pin
 if SAVE_TO_DRIVE:
     try:
         from google.colab import drive
-        drive.mount("/content/drive")
+        if not os.path.isdir("/content/drive/MyDrive"):  # รันเซลล์ซ้ำ → เชื่อมไว้แล้ว ไม่ต้องขออนุญาตใหม่
+            try:
+                drive.mount("/content/drive")
+            except Exception:  # เชื่อมค้างครึ่งๆ / โฟลเดอร์ไม่ว่าง → ล้างแล้วลองอีกครั้ง
+                drive.mount("/content/drive", force_remount=True)
         env["JOBS_DIR"] = "/content/drive/MyDrive/สรุปคลิป"
         step("   เก็บงานไว้ใน Google Drive โฟลเดอร์ \"สรุปคลิป\" ✓")
     except Exception as e:
         step(f"   ⚠️ เชื่อม Google Drive ไม่สำเร็จ ({e}) — ทำงานต่อโดยเก็บไฟล์ในเครื่อง Colab ชั่วคราวแทน")
-        step("      (ถ้าอยากเก็บใน Drive: กดอนุญาตตอนมีหน้าต่างเด้งขึ้น หรือใช้บนคอมพิวเตอร์)")
+        step("      วิธีแก้: รันเซลล์ใหม่ → หน้าต่างเด้ง กด \"เชื่อมต่อกับ Google ไดรฟ์\" → เลือกบัญชี")
+        step("      → ติ๊ก \"เลือกทั้งหมด\" ให้ครบทุกช่อง → ดำเนินการต่อ (ทำภายใน 1-2 นาที)")
 
 if AI == "ollama" and gem:
     step("2/4 มีคีย์ Gemini แล้ว — ข้ามการโหลด Ollama (ประหยัดเวลาและการ์ดจอ)")
