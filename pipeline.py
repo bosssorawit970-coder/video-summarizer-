@@ -952,6 +952,19 @@ def tts_all(texts: list[str], workdir: Path, voice: str, rate: int, tone: str,
     used: list[str] = [""] * len(texts)
     failed: list[int] = []
     cur = voice
+    if voice.startswith("gemini:") and sum(1 for t in texts if t) > 1:
+        import voice as V
+        idx = [i for i, t in enumerate(texts) if t]
+        files = [workdir / f"narr_{i:03}.mp3" for i in idx]
+        try:  # ทั้งบทในคำขอเดียว (ประหยัดโควตาฟรี + น้ำเสียงต่อเนื่อง)
+            V.gemini_tts_batch([texts[i] for i in idx], files, voice[7:], tone, rate,
+                               lambda m: progress(total * 0.3, m))
+            for i, f in zip(idx, files):
+                _tidy_voice(f)
+                outs[i] = f
+            return outs
+        except Exception as e:
+            print("สร้างเสียง Gemini รวดเดียวไม่ได้ → ทำทีละท่อน:", e)
     for i, text in enumerate(texts):
         if not text:
             continue

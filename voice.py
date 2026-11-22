@@ -106,6 +106,89 @@ def gemini_tts(text: str, out: Path, voice: str, tone: str = "natural", rate: in
     _gemini_call(text, out, voice, rate, key)
 
 
+def _silences(f: Path) -> list[tuple[float, float]]:
+    """ช่วงเงียบในไฟล์เสียง [(เริ่ม, จบ)]"""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(f), "-af", "silencedetect=noise=-35dB:d=0.15",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    st = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", r.stderr)]
+    en = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
+    return list(zip(st, en))
+
+
+def _cut_points(texts: list[str], dur: float, sil: list[tuple[float, float]]) -> list[float]:
+    """จุดตัดระหว่างท่อน: เดาจากสัดส่วนจำนวนตัวอักษร แล้วขยับไปช่วงเงียบที่ใกล้ที่สุด (เงียบนานได้เปรียบ)"""
+    chars = [max(1, len("".join(t.split()))) for t in texts]
+    total = sum(chars)
+    cuts, acc, prev = [], 0, 0.0
+    for k in range(len(texts) - 1):
+        acc += chars[k]
+        exp = dur * acc / total
+        tol = max(0.9, 0.4 * dur * chars[k] / total)
+        best, score = None, 1e9
+        for a, b in sil:
+            mid = (a + b) / 2
+            if mid <= prev + 0.3 or abs(mid - exp) > tol:
+                continue
+            sc = abs(mid - exp) - 1.5 * min(b - a, 0.8)
+            if sc < score:
+                best, score = mid, sc
+        cut = best if best is not None else max(prev + 0.3, exp)
+        cuts.append(cut)
+        prev = cut
+    return cuts
+
+
+def gemini_tts_batch(texts: list[str], outs: list[Path], voice: str, tone: str = "natural", rate: int = 0,
+                     progress=None) -> None:
+    """สร้างเสียง Gemini ทีละหลายท่อนในคำขอเดียว แล้วตัดแบ่งตามช่วงเงียบ
+    (โควตาฟรีนับเป็น "จำนวนครั้งต่อวัน" ราว 10 ครั้ง — เดิมท่อนละ 1 ครั้ง คลิปเดียวก็หมด
+    แบบนี้ทั้งคลิปใช้ 1-2 ครั้ง + น้ำเสียงต่อเนื่องเป็นคนเดียวกันทั้งคลิป)"""
+    if _gemini_off:
+        raise RuntimeError(_gemini_off)
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError("ยังไม่ได้ใส่คีย์ Gemini")
+    groups, cur, size = [], [], 0
+    for k, t in enumerate(texts):
+        n = len(t)
+        if cur and size + n > 1500:
+            groups.append(cur)
+            cur, size = [], 0
+        cur.append(k)
+        size += n
+    if cur:
+        groups.append(cur)
+    style = TONES.get(tone, TONES["natural"])[1]
+    for g, idx in enumerate(groups):
+        if progress:
+            progress(f"สร้างเสียง Gemini ทั้งบทรวดเดียว ({g + 1}/{len(groups)})")
+        part = [texts[k].strip() for k in idx]
+        body = "\n\n".join(part)
+        tmp = outs[idx[0]].with_name(f"gbatch_{g}.mp3")
+        prompt = body
+        if style or len(idx) > 1:
+            prompt = ("Synthesize speech for the performance below. Everything above the transcript is direction only, "
+                      "do NOT speak it. Speak ONLY the Thai lines under #### TRANSCRIPT, word for word, "
+                      "with a short clear pause between paragraphs.\n\n"
+                      f"### PERFORMANCE\nStyle: {style or 'Natural, clear Thai narrator.'}\n"
+                      f"Language: Thai (th-TH), native Thai pronunciation.\n\n#### TRANSCRIPT\n{body}")
+        _gemini_call(prompt, tmp, voice, rate, key)
+        dur = _duration(tmp)
+        if _too_long(dur * max(0.6, 1 + rate / 100), body):  # อ่านคำกำกับออกมาด้วย → ส่งบทล้วน
+            print(f"เสียง Gemini ยาวผิดปกติ ({dur:.1f} วิ) → สร้างใหม่แบบบทล้วน")
+            _gemini_call(body, tmp, voice, rate, key)
+            dur = _duration(tmp)
+        if len(idx) == 1:
+            tmp.replace(outs[idx[0]])
+            continue
+        cuts = [0.0] + _cut_points(part, dur, _silences(tmp)) + [dur]
+        for j, k in enumerate(idx):
+            a, b = cuts[j], cuts[j + 1]
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tmp), "-ss", f"{a:.3f}", "-to", f"{b:.3f}",
+                            "-c:a", "libmp3lame", "-q:a", "3", str(outs[k])], check=True)
+        tmp.unlink(missing_ok=True)
+
+
 def _duration(f: Path) -> float:
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)],
                        capture_output=True, text=True)
