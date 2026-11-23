@@ -150,14 +150,19 @@ else:
     step("2/4 ข้ามการติดตั้ง Ollama")
 
 step("3/4 เปิดโปรแกรม…")
-log = open("/content/app.log", "w")
-subprocess.Popen([sys.executable, "app.py"], cwd=APP, env=env, stdout=log, stderr=subprocess.STDOUT)
+def _start_app(mode="w"):
+    lg = open("/content/app.log", mode)
+    return subprocess.Popen([sys.executable, "app.py"], cwd=APP, env=env, stdout=lg, stderr=subprocess.STDOUT)
+
+
+app_proc = _start_app()
 if not wait_url("http://127.0.0.1:8000/api/config", 60):
     print(open("/content/app.log").read()); raise SystemExit("โปรแกรมเปิดไม่สำเร็จ ดูข้อความด้านบน")
 
 step("4/4 สร้างลิงก์…")
 # ลิงก์สำรอง (Cloudflare) ทำก่อน — ไม่ต้องรอหน้าเว็บ Colab ตอบ ใช้ได้แม้จอดับ/สลับแอป
 backup = ""
+cf_proc = None
 if BACKUP_LINK:
     try:
         if not os.path.exists("/content/cloudflared"):
@@ -165,8 +170,8 @@ if BACKUP_LINK:
                                        "/content/cloudflared")
             os.chmod("/content/cloudflared", 0o755)
         cf = open("/content/cloudflared.log", "w")
-        subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
-                         stdout=cf, stderr=cf)
+        cf_proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
+                                   stdout=cf, stderr=cf)
         for _ in range(40):
             m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
             if m:
@@ -226,17 +231,50 @@ def _stop_all():
     subprocess.run("pkill -f 'python app.py'; pkill -f cloudflared; pkill -f 'ollama serve'", shell=True)
 
 
+def _new_tunnel():
+    """ลิงก์สำรองหลุด (Cloudflare ตัดเป็นพักๆ) → เปิดลิงก์ใหม่"""
+    global cf_proc
+    try:
+        cf = open("/content/cloudflared.log", "w")
+        cf_proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
+                                   stdout=cf, stderr=cf)
+        for _ in range(40):
+            m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
+            if m:
+                display(HTML(f'<a href="{m.group(0)}" target="_blank" style="{btn};background:#d9480f;color:#fff">'
+                             '▶ ลิงก์สำรองใหม่ (อันเดิมหลุด)</a>'))
+                print(f"🔗 ลิงก์สำรองหลุด — ลิงก์ใหม่: {m.group(0)}  (PIN เดิม)", flush=True)
+                return
+            time.sleep(1)
+    except Exception as e:
+        print("เปิดลิงก์สำรองใหม่ไม่ได้:", e)
+
+
+restarts = 0
 try:
     while True:
         time.sleep(CHECK_EVERY)
+        if app_proc.poll() is not None:  # โปรแกรมพังจริง (ไม่ใช่แค่ยุ่ง) → เปิดใหม่ให้เอง
+            tail = open("/content/app.log", errors="replace").read()[-1500:]
+            mem = subprocess.run("free -m | head -2", shell=True, capture_output=True, text=True).stdout
+            print(f"⚠️ โปรแกรมหยุดทำงาน (รหัส {app_proc.returncode}) ข้อความล่าสุด:\n{tail}\n{mem}", flush=True)
+            if app_proc.returncode in (-9, 137):
+                print("   น่าจะเป็นเพราะหน่วยความจำ (RAM) เต็ม — ปิดตัวเลือก AI ภาพเคลื่อนไหว/AI วาดภาพในเครื่องจะช่วยได้", flush=True)
+            if restarts >= 5:
+                print("   พังซ้ำหลายครั้ง — หยุดเปิดใหม่แล้ว แคปข้อความนี้ไปให้ดูได้", flush=True)
+                break
+            restarts += 1
+            app_proc = _start_app("a")
+            if wait_url("http://127.0.0.1:8000/api/config", 90):
+                print(f"🔄 เปิดโปรแกรมใหม่ให้แล้ว (ครั้งที่ {restarts}) — ลิงก์และ PIN เดิม รีเฟรชหน้าโปรแกรม · งานที่ค้างกด 🔁 ลองใหม่", flush=True)
+            continue
+        if cf_proc is not None and cf_proc.poll() is not None:
+            _new_tunnel()
         try:
             import json as _json
-            st = _json.loads(urllib.request.urlopen("http://127.0.0.1:8000/api/idle", timeout=5).read())
+            st = _json.loads(urllib.request.urlopen("http://127.0.0.1:8000/api/idle", timeout=20).read())
         except Exception:
-            if not wait_url("http://127.0.0.1:8000/api/config", 5):
-                print("⚠️ โปรแกรมหยุดทำงาน:\n" + open("/content/app.log").read()[-2000:])
-                break
-            continue
+            continue  # ยุ่งอยู่ (กำลังทำคลิป) ตอบช้า ≠ พัง — รอบหน้าค่อยถามใหม่
         if AUTO_STOP_MIN and not st.get("busy") and st.get("idle_seconds", 0) >= AUTO_STOP_MIN * 60:
             print(f"💤 ไม่มีการใช้งาน {AUTO_STOP_MIN:g} นาที (หน้าโปรแกรมไม่ได้เปิดบนจอ) — ปิดโปรแกรมและคืนเครื่อง Colab แล้ว", flush=True)
             print("   ใช้ครั้งหน้า: กด เรียกใช้ทุกเซลล์ ใหม่ได้เลย", flush=True)
