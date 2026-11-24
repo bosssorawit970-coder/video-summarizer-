@@ -854,6 +854,7 @@ def make_plan(segs: list[dict], provider: str, target: float,
         clips.append({"start": segs[a]["start"],
                       "end": min(segs[b]["end"] + 0.3, video_duration),
                       "narration": "" if keep else clean_text(str(c.get("narration", ""))),
+                      "_src": " ".join(sg["text"] for sg in segs[a:b + 1])[:600],
                       **({"keep_audio": True} if keep else {})})
     clips.sort(key=lambda c: c["start"])
     # กันช่วงทับกัน
@@ -861,7 +862,13 @@ def make_plan(segs: list[dict], provider: str, target: float,
         if cur["start"] < prev["end"]:
             prev["end"] = cur["start"]
     clips = [c for c in clips if c["end"] - c["start"] >= 1]
+    try:  # บทสั้นกว่าเวลาภาพมาก → ให้ AI เขียนบทแต่ละช่วงให้ยาวเต็มเวลา (คลิปได้ความยาวตามที่ตั้ง)
+        expand_narration(clips, provider, data.get("title", ""))
+    except Exception as e:
+        print("ขยายบทพากย์ไม่ได้:", e)
     fit_clips_to_narration(clips)
+    for c in clips:
+        c.pop("_src", None)
     limit_original_audio(clips)
     if not clips:
         raise RuntimeError("AI ไม่ได้เลือกช่วงไฮไลต์ที่ใช้ได้ ลองใหม่อีกครั้ง")
@@ -870,6 +877,43 @@ def make_plan(segs: list[dict], provider: str, target: float,
         plan["note"] = ("⚠️ บทนี้เขียนด้วย Gemini รุ่นเล็ก (lite) เพราะโควตารุ่นหลักของวันนี้หมด — สรุปอาจไม่ดีเท่าปกติ "
                         "ถ้าไม่พอใจ กด 🔁 ลองใหม่ หลังบ่าย 3 โมง (โควตารีเซ็ต)")
     return plan
+
+
+EXPAND_PROMPT = """คุณเป็นนักพากย์สรุปเรื่อง (เช่น สรุปอนิเมะ/หนัง) ด้านล่างคือช่วงคลิปที่เลือกไว้แล้ว เรียงตามเวลา
+แต่ละช่วงมี: ความยาว (วินาที), จำนวนตัวอักษรที่ต้องการ, คำพูดในต้นฉบับช่วงนั้น, และบทพากย์เดิม (สั้นเกินไป)
+เรื่อง: {title}
+
+งาน: เขียนบทพากย์ภาษาไทยใหม่ทุกช่วง ให้ยาว "ประมาณจำนวนตัวอักษรที่ต้องการ" (ขาด/เกินได้ไม่เกิน 15%)
+- เล่าสรุปเรื่องต่อเนื่องทุกช่วงเหมือนเล่าให้เพื่อนฟัง: ใครเป็นใคร เกิดอะไรขึ้น ทำไมสำคัญ ผลเป็นยังไง
+- อิงจากคำพูดในต้นฉบับ ห้ามแต่งเหตุการณ์ที่ไม่มี ภาษาพูดเป็นธรรมชาติ ห้ามอีโมจิ/สัญลักษณ์
+ตอบ JSON อย่างเดียว: {{"narrations": ["บทช่วงที่ 1", "บทช่วงที่ 2", ...]}} จำนวนเท่ากับจำนวนช่วง ({n})
+
+{clips}"""
+
+
+def expand_narration(clips: list[dict], provider: str, title: str = "") -> bool:
+    """บทพากย์รวมสั้นกว่าเวลาภาพมาก (AI เขียนห้วนๆ) → ขอให้เขียนใหม่ให้เต็มเวลาแต่ละช่วง (เรียก AI เพิ่ม 1 ครั้ง)"""
+    talk = [c for c in clips if not c.get("keep_audio")]
+    if provider == "none" or not talk:
+        return False
+    secs = sum(c["end"] - c["start"] for c in talk)
+    chars = sum(len(re.sub(r"\s", "", c.get("narration", ""))) for c in talk)
+    if chars >= secs * 11 * 0.65:
+        return False  # บทยาวพอแล้ว
+    lines = []
+    for k, c in enumerate(talk, 1):
+        d = c["end"] - c["start"]
+        lines.append(f"ช่วงที่ {k} | ยาว {d:.0f} วิ | ต้องการ ~{int(d * 10.5)} ตัวอักษร\n"
+                     f"ต้นฉบับ: {c.get('_src', '')}\nบทเดิม: {c.get('narration', '')}")
+    raw = ask_ai(provider, EXPAND_PROMPT.format(title=title, n=len(talk), clips="\n\n".join(lines)))
+    new = _parse_json(raw).get("narrations") or []
+    if len(new) != len(talk):
+        return False
+    for c, t in zip(talk, new):
+        t = clean_text(str(t or ""))
+        if len(t) > len(c.get("narration", "")):
+            c["narration"] = t
+    return True
 
 
 def fit_clips_to_narration(clips: list[dict]) -> None:
