@@ -228,7 +228,25 @@ def analyze_story(jid: str) -> dict:
         return analyze_product(jid)
     rewrite = o.get("script_mode") == "rewrite"
     text, extra, source = o.get("text", ""), "", None
-    if o.get("source_url"):
+    if o.get("research"):
+        if o["provider"] == "none" or not provider_available(o["provider"]):
+            raise RuntimeError("โหมดพิมพ์แค่หัวข้อต้องใช้ AI เขียนบท — เลือก Gemini (ฟรี) หรือ Claude แล้วลองใหม่")
+        save(jid, status="analyzing", step="plan", progress=3, message=f"🔎 กำลังค้นข้อมูลเรื่อง \"{o['research']}\" จาก Wikipedia…")
+
+        def en_query(t):
+            try:
+                return str(P._parse_json(P.ask_ai(o["provider"], (
+                    'แปลหัวข้อนี้เป็นคำค้น Wikipedia ภาษาอังกฤษที่ตรงที่สุด (ชื่อเรื่อง/ชื่อคน/ชื่อเหตุการณ์ ภาษาอังกฤษ) '
+                    f'ตอบ JSON อย่างเดียว {{"en": "..."}}\nหัวข้อ: {t}'))).get("en") or "")
+            except Exception:
+                return ""
+        source = SRC.research(o["research"], en_query)
+        text = source["text"]
+        extra = ("- ผู้ใช้พิมพ์มาแค่หัวข้อ ข้อมูลด้านบนค้นมาจาก Wikipedia: เลือกมุมที่น่าทึ่ง/น่าสงสัยที่สุดของเรื่องมาเล่า "
+                 "ไม่ต้องเล่าทุกอย่าง เปิดด้วยคำถามหรือข้อเท็จจริงที่คนไม่รู้ ใช้เฉพาะข้อเท็จจริงในข้อมูล")
+        save(jid, name=o["research"][:60], source={k: source[k] for k in ("site", "url", "title")},
+             message=f"ได้ข้อมูลจาก Wikipedia {len(source['sources'])} บทความ — AI กำลังเขียนบท")
+    elif o.get("source_url"):
         if o["provider"] == "none" or not provider_available(o["provider"]):
             raise RuntimeError("โหมดลิงก์โพสต์/ข่าวต้องใช้ AI ช่วยแปลและเรียบเรียง — เลือก Gemini (ฟรี) หรือ Claude แล้วลองใหม่")
         save(jid, status="analyzing", step="plan", progress=3, message="กำลังอ่านโพสต์/ข่าวจากลิงก์…")
@@ -690,6 +708,9 @@ def job_opts(form) -> dict:
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
         opts["verify"] = _bool(form.get("verify"), True)  # 🧠 ตรวจภาพทุกฉาก (ใช้โควตา Gemini เพิ่มฉากละ 1-3 ครั้ง)
+        if _bool(form.get("research"), False) and not opts.get("source_url"):  # 🔎 พิมพ์แค่หัวข้อ → ค้นข้อมูลเอง
+            opts["research"] = opts["text"].strip()[:200]
+            opts["script_mode"] = "rewrite"
     opts["render"] = _render_opts(form, opts["mode"])
     if opts["mode"] == "game":
         opts["narrate"] = _bool(form.get("narrate"), True)
@@ -775,6 +796,16 @@ async def create_job(req: Request):
         return JSONResponse({"id": new_job("🛒 " + (info["name"].strip()[:40] or "สินค้า"), "", None, opts)})
     if form.get("mode") == "story":
         text = str(form.get("text") or "").strip()
+        if _bool(form.get("research"), False) and not SRC.find_url(text):  # 🔎 พิมพ์แค่หัวข้อ
+            topics = [t.strip(" -•*0123456789.)") for t in text.splitlines()]
+            topics = [t for t in topics if len(t) >= 2][:10]
+            if not topics:
+                return JSONResponse({"error": "พิมพ์หัวข้อที่อยากทำคลิป (บรรทัดละเรื่อง)"}, status_code=400)
+            if len(topics) > 1:
+                return JSONResponse({"batch": _topic_batch(form, topics)})
+            o = job_opts(form)
+            o["text"] = o["research"] = topics[0][:200]
+            return JSONResponse({"id": new_job("🔎 " + topics[0][:58], "", None, o)})
         if len(text) < 10:
             return JSONResponse({"error": "ใส่ข้อความอย่างน้อย 1-2 ประโยค"}, status_code=400)
         name = re.sub(r"\s+", " ", text)[:40] + ("…" if len(text) > 40 else "")
@@ -822,6 +853,20 @@ batches: dict[str, dict] = {}
 def save_batch(b: dict) -> None:
     BATCH_DIR.mkdir(parents=True, exist_ok=True)
     (BATCH_DIR / f"{b['id']}.json").write_text(json.dumps(b, ensure_ascii=False), encoding="utf-8")
+
+
+def _topic_batch(form, topics: list[str]) -> str:
+    """🔎 หลายหัวข้อ (บรรทัดละเรื่อง) → ชุดงาน 1 คลิปต่อหัวข้อ"""
+    opts = job_opts(form)
+    bid = "b" + uuid.uuid4().hex[:9]
+    b = {"id": bid, "compile": False, "jobs": [], "compile_job": "", "created": time.time(), "opts": opts}
+    batches[bid] = b
+    for t in topics:
+        o = json.loads(json.dumps(opts))
+        o["text"] = o["research"] = t[:200]
+        b["jobs"].append(new_job("🔎 " + t[:58], "", None, o, batch=bid))
+    save_batch(b)
+    return bid
 
 
 async def create_batch(req: Request):

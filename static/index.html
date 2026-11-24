@@ -273,6 +273,7 @@ video{border-radius:14px}
     <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
     <div class="storyOnly hidden">
       <h2>1. ใส่ข้อความ / ข้อมูล</h2>
+      <div class="seg" style="margin-bottom:8px"><label><input type="checkbox" id="research"> 🔎 พิมพ์แค่หัวข้อ — AI ค้นข้อมูลจาก Wikipedia แล้วทำคลิปให้เอง <span class="hint">(หลายเรื่อง = บรรทัดละหัวข้อ ได้หลายคลิปทีเดียว)</span></label></div>
       <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
       <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
       <label class="f">🎯 รูปตัวอย่าง <span class="hint">(ไม่บังคับ · สูงสุด 10 รูป)</span></label>
@@ -925,7 +926,9 @@ function refreshItems() {
   }
   if (mode() === "story") {
     const len = $("#storyText").value.trim().length, link = URL_RE.test($("#storyText").value);
-    $("#go").disabled = len < 10; $("#go").textContent = link ? "อ่านลิงก์ แปล แล้วสร้างคลิป" : "สร้างคลิปจากข้อความ";
+    const topics = $("#research").checked && !link ? $("#storyText").value.split("\n").filter(t => t.trim().length >= 2).length : 0;
+    $("#go").disabled = topics ? false : len < 10;
+    $("#go").textContent = link ? "อ่านลิงก์ แปล แล้วสร้างคลิป" : topics > 1 ? `🔎 ค้นข้อมูลแล้วทำ ${Math.min(topics, 10)} คลิป` : topics ? "🔎 ค้นข้อมูลแล้วสร้างคลิป" : "สร้างคลิปจากข้อความ";
     $("#scriptSeg").classList.toggle("hidden", link); $("#scriptHint").classList.toggle("hidden", link); $("#scriptLbl").classList.toggle("hidden", link);
     $("#storyHint").textContent = link
       ? "🔗 เจอลิงก์ — ระบบจะไปอ่านโพสต์/ข่าว (รวมคอมเมนต์เด่นของ Reddit) แปลเป็นไทยและเรียบเรียงเป็นบทคลิป · พิมพ์คำสั่งเพิ่มต่อท้ายได้ เช่น \"เล่าแบบตลก\" · ต้องเลือก AI เป็น Gemini หรือ Claude"
@@ -947,6 +950,13 @@ function urlChanged() {
 }
 $("#url").oninput = urlChanged;
 $("#storyText").oninput = () => refreshItems();
+$("#research").onchange = () => {
+  const on = $("#research").checked;
+  $("#storyText").placeholder = on ? "พิมพ์หัวข้อ บรรทัดละเรื่อง เช่น\nปริศนาเรือผี Mary Celeste\nทำไมพีระมิดถึงสร้างได้\nหลุมดำคืออะไร"
+    : "วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้";
+  $("#storyText").style.minHeight = on ? "110px" : "";
+  refreshItems();
+};
 for (const id of ["pName", "pPoints"]) $("#" + id).oninput = () => refreshItems();
 for (const id of ["pShots", "pMedia", "pVisSeg"]) $("#" + id).onchange = () => refreshItems();
 function scriptModeChanged() {
@@ -1115,7 +1125,10 @@ $("#go").onclick = async () => {
         fd.append("ref_ids", (await up(refs, "รูปตัวอย่าง")).join(","));
         fd.append("ref_use", document.querySelector("input[name=ref_use]:checked").value);
       }
-      const r = await api("/api/jobs", {method: "POST", body: fd}); location.hash = r.id; return openJob(r.id);
+      if ($("#research").checked) fd.append("research", "1");
+      const r = await api("/api/jobs", {method: "POST", body: fd});
+      if (r.batch) { location.hash = "b=" + r.batch; return openBatch(r.batch); }
+      location.hash = r.id; return openJob(r.id);
     }
     if (n > 1) {  // หลายคลิป → ชุดงาน
       setSteps("download");

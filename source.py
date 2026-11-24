@@ -182,3 +182,62 @@ def fetch_source(url: str) -> dict:
     if len(body) < 60:
         raise RuntimeError("อ่านเนื้อหาจากลิงก์นี้ไม่ได้ (อาจเป็นโพสต์รูป/วิดีโอล้วน หรือเว็บต้องล็อกอิน) — ลองคัดลอกข้อความมาวางเองแทน")
     return src
+
+
+# ───────────────────────── 🔎 พิมพ์แค่หัวข้อ → ค้นข้อมูลจาก Wikipedia ─────────────────────────
+WIKI_UA = "sarupclip/1.0 (personal Thai short-video maker; reads Wikipedia API)"
+_CUT = re.compile(r"\n(ดูเพิ่ม|อ้างอิง|แหล่งข้อมูลอื่น|เชิงอรรถ|บรรณานุกรม|See also|References|External links|"
+                  r"Notes|Further reading|Bibliography|Sources)\s*\n")
+
+
+def _wiki(lang: str, **params) -> dict:
+    q = urllib.parse.urlencode({"format": "json", "formatversion": 2, **params})
+    raw, _ = _get(f"https://{lang}.wikipedia.org/w/api.php?{q}", ua=WIKI_UA, accept="application/json")
+    return json.loads(raw)
+
+
+def _wiki_article(lang: str, query: str, limit: int) -> dict | None:
+    """ค้นหัวข้อ → บทความที่ตรงที่สุด (ข้อความล้วน ตัดส่วนอ้างอิงท้ายบท)"""
+    hits = _wiki(lang, action="query", list="search", srsearch=query, srlimit=3).get("query", {}).get("search", [])
+    for h in hits:
+        pages = _wiki(lang, action="query", prop="extracts", explaintext=1, redirects=1,
+                      titles=h["title"]).get("query", {}).get("pages", [])
+        text = (pages[0].get("extract") or "") if pages else ""
+        text = re.sub(r"^=+\s*(.*?)\s*=+\s*$", r"\1", text, flags=re.M)
+        text = _CUT.split("\n" + text + "\n")[0]
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if len(text) > 300:
+            title = pages[0].get("title") or h["title"]
+            return {"title": title, "text": text[:limit], "lang": lang,
+                    "url": f"https://{lang}.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_"))}
+    return None
+
+
+def research(topic: str, english_query=None) -> dict:
+    """พิมพ์แค่หัวข้อ → รวมข้อมูลจาก Wikipedia ไทย (+ อังกฤษ ซึ่งมักละเอียดกว่า) ให้ AI เขียนบทจากข้อเท็จจริง
+    english_query: ฟังก์ชันแปลหัวข้อเป็นคำค้นภาษาอังกฤษ (ไม่ใส่ = ค้นด้วยคำเดิม)
+    คืน {"title", "text", "site", "url", "sources": [...]}"""
+    topic = topic.strip()
+    found = []
+    try:
+        th = _wiki_article("th", topic, 6000)
+        if th:
+            found.append(th)
+    except Exception as e:
+        print("ค้น Wikipedia ไทยไม่ได้:", e)
+    try:
+        q = topic
+        if english_query and re.search(r"[฀-๿]", topic):
+            q = english_query(topic) or topic
+        en = _wiki_article("en", q, 7000)
+        if en and not any(f["title"] == en["title"] for f in found):
+            found.append(en)
+    except Exception as e:
+        print("ค้น Wikipedia อังกฤษไม่ได้:", e)
+    if not found:
+        raise RuntimeError(f"หาข้อมูลเรื่อง \"{topic}\" ใน Wikipedia ไม่เจอ — ลองพิมพ์หัวข้อให้ชัดขึ้น (เช่น ชื่อเต็ม) "
+                           "หรือวางเนื้อหา/ลิงก์ข่าวเองแทน")
+    body = f"หัวข้อที่ผู้ใช้อยากทำคลิป: {topic}\n\n" + "\n\n".join(
+        f"[ข้อมูลจาก Wikipedia ภาษา{'ไทย' if f['lang'] == 'th' else 'อังกฤษ'}: {f['title']}]\n{f['text']}" for f in found)
+    return {"title": topic, "text": body, "site": "Wikipedia", "url": found[0]["url"],
+            "sources": [f["url"] for f in found]}
