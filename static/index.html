@@ -273,6 +273,7 @@ video{border-radius:14px}
     <div class="hint" id="modeHint" style="margin:8px 2px 16px"></div>
     <div class="storyOnly hidden">
       <h2>1. ใส่ข้อความ / ข้อมูล</h2>
+      <div class="seg" style="margin-bottom:8px"><label><input type="checkbox" id="longform"> 📺 คลิปยาว YouTube <span class="hint">(แนวนอน 16:9 · 3–15 นาที · แบ่งเป็นบท + ไทม์สแตมป์ในคำอธิบาย)</span></label></div>
       <div class="seg" style="margin-bottom:8px"><label><input type="checkbox" id="research"> 🔎 พิมพ์แค่หัวข้อ — AI ค้นข้อมูลจาก Wikipedia แล้วทำคลิปให้เอง <span class="hint">(หลายเรื่อง = บรรทัดละหัวข้อ ได้หลายคลิปทีเดียว)</span></label></div>
       <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
       <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
@@ -410,7 +411,7 @@ video{border-radius:14px}
         <div class="seg" id="providers"></div>
       </div>
       <div>
-        <label class="f">ความยาวคลิปสรุป: <span id="tgtV" class="stat">60</span> วินาที</label>
+        <label class="f">ความยาวคลิปสรุป: <span id="tgtV" class="stat">60 วินาที</span></label>
         <input type="range" id="target" min="20" max="300" step="10" value="60">
       </div>
       <div>
@@ -887,10 +888,20 @@ function modeChanged() {
   if (!g) { const sep = document.querySelector("input[name=bmode][value=separate]"); if (sep) sep.checked = true; }
   if (typeof decorSummary === "function" && $("#decorSum")) decorSummary();
   if (cfg) $("#layout0").value = g ? "vertical_blur" : st ? "vertical_crop" : "original";
-  $("#target").value = g ? 45 : pr ? 30 : st ? 40 : 60; $("#tgtV").textContent = $("#target").value;
+  if ($("#longform")) $("#longform").checked = false;
+  Object.assign($("#target"), {min: 20, max: 300, step: 10});
+  $("#target").value = g ? 45 : pr ? 30 : st ? 40 : 60; $("#tgtV").textContent = $("#target").value + " วินาที";
 }
 $("#modeSeg").onchange = modeChanged;
-$("#target").oninput = e => $("#tgtV").textContent = e.target.value;
+const tgtText = v => v >= 120 ? `${Math.floor(v / 60)} นาที${v % 60 ? " " + (v % 60) + " วิ" : ""}` : v + " วินาที";
+$("#target").oninput = e => $("#tgtV").textContent = tgtText(+e.target.value);
+$("#longform").onchange = () => {
+  const on = $("#longform").checked, t = $("#target");
+  if (on) { t.min = 180; t.max = 900; t.step = 30; t.value = 480; } else { t.min = 20; t.max = 300; t.step = 10; t.value = 40; }
+  $("#tgtV").textContent = tgtText(+t.value);
+  if (cfg) $("#layout0").value = on ? "original" : "vertical_crop";
+  scriptModeChanged();
+};
 $("#rate").oninput = e => $("#rateV").textContent = (e.target.value > 0 ? "+" : "") + e.target.value + "%";
 $("#vol").oninput = e => $("#volV").textContent = e.target.value + "%";
 $("#rate").oninput({target: $("#rate")});
@@ -951,6 +962,7 @@ function urlChanged() {
 $("#url").oninput = urlChanged;
 $("#storyText").oninput = () => refreshItems();
 $("#research").onchange = () => {
+  scriptModeChanged();
   const on = $("#research").checked;
   $("#storyText").placeholder = on ? "พิมพ์หัวข้อ บรรทัดละเรื่อง เช่น\nปริศนาเรือผี Mary Celeste\nทำไมพีระมิดถึงสร้างได้\nหลุมดำคืออะไร"
     : "วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้";
@@ -962,7 +974,8 @@ for (const id of ["pShots", "pMedia", "pVisSeg"]) $("#" + id).onchange = () => r
 function scriptModeChanged() {
   const rw = document.querySelector("input[name=script_mode]:checked").value === "rewrite";
   $("#scriptHint").textContent = rw ? "AI จะเรียบเรียงใหม่ให้กระชับ ตามความยาวคลิปที่ตั้งไว้ด้านล่าง" : "ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ";
-  $("#target").closest("div").classList.toggle("hidden", mode() === "story" && !rw);
+  const lf = $("#longform") && $("#longform").checked, rs = $("#research") && $("#research").checked;
+  $("#target").closest("div").classList.toggle("hidden", mode() === "story" && !rw && !lf && !rs);
 }
 $("#scriptSeg").onchange = scriptModeChanged;
 $("#paste").onclick = async () => {
@@ -1126,6 +1139,7 @@ $("#go").onclick = async () => {
         fd.append("ref_use", document.querySelector("input[name=ref_use]:checked").value);
       }
       if ($("#research").checked) fd.append("research", "1");
+      if ($("#longform").checked) { fd.set("longform", "1"); fd.set("layout", "original"); fd.set("script_mode", "rewrite"); }
       const r = await api("/api/jobs", {method: "POST", body: fd});
       if (r.batch) { location.hash = "b=" + r.batch; return openBatch(r.batch); }
       location.hash = r.id; return openJob(r.id);

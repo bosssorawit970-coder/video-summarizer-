@@ -213,14 +213,14 @@ def _wiki_article(lang: str, query: str, limit: int) -> dict | None:
     return None
 
 
-def research(topic: str, english_query=None) -> dict:
+def research(topic: str, english_query=None, deep: bool = False) -> dict:
     """พิมพ์แค่หัวข้อ → รวมข้อมูลจาก Wikipedia ไทย (+ อังกฤษ ซึ่งมักละเอียดกว่า) ให้ AI เขียนบทจากข้อเท็จจริง
     english_query: ฟังก์ชันแปลหัวข้อเป็นคำค้นภาษาอังกฤษ (ไม่ใส่ = ค้นด้วยคำเดิม)
     คืน {"title", "text", "site", "url", "sources": [...]}"""
     topic = topic.strip()
     found = []
     try:
-        th = _wiki_article("th", topic, 6000)
+        th = _wiki_article("th", topic, 12000 if deep else 6000)
         if th:
             found.append(th)
     except Exception as e:
@@ -229,9 +229,19 @@ def research(topic: str, english_query=None) -> dict:
         q = topic
         if english_query and re.search(r"[฀-๿]", topic):
             q = english_query(topic) or topic
-        en = _wiki_article("en", q, 7000)
+        en = _wiki_article("en", q, 16000 if deep else 7000)
         if en and not any(f["title"] == en["title"] for f in found):
             found.append(en)
+        if deep and en:  # คลิปยาว: บทความที่เกี่ยวข้องเพิ่มอีก 2 เรื่อง (คน/เหตุการณ์/ทฤษฎีที่เกี่ยวกัน)
+            hits = _wiki("en", action="query", list="search", srsearch=q, srlimit=6).get("query", {}).get("search", [])
+            for h in hits:
+                if len(found) >= 4:
+                    break
+                if any(f["title"] == h["title"] for f in found):
+                    continue
+                more = _wiki_article("en", h["title"], 5000)
+                if more and not any(f["title"] == more["title"] for f in found):
+                    found.append(more)
     except Exception as e:
         print("ค้น Wikipedia อังกฤษไม่ได้:", e)
     if not found:

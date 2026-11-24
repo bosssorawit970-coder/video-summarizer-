@@ -658,6 +658,22 @@ def make_post(plan: dict, mode: str, provider: str, note: str = "") -> dict:
             body, _, tags = yt["description"].rpartition("\n\n")
             yt["description"] = f"{body or yt['description']}\n📌 ที่มา: {src['site']} {src.get('url', '')}".strip() + \
                 (f"\n\n{tags}" if body else "")
+    if plan.get("longform"):  # คลิปยาว ไม่ใช่ Shorts
+        for k in ("caption",):
+            post[k] = re.sub(r"\s*#Shorts\b", "", post.get(k) or "", flags=re.I)
+        if post.get("youtube"):
+            for k in ("title", "description"):
+                post["youtube"][k] = re.sub(r"\s*#Shorts\b", "", post["youtube"].get(k) or "", flags=re.I)
+    chaps = [(s_.get("t"), s_["chapter"]) for s_ in plan.get("scenes") or [] if s_.get("chapter") and s_.get("t") is not None]
+    if plan.get("longform") and len(chaps) >= 3 and post.get("youtube"):  # 📺 ไทม์สแตมป์บท (YouTube ทำเป็น "บท" ในแถบเวลาให้)
+        lines = []
+        for k, (t, name) in enumerate(chaps):
+            t = 0 if k == 0 else int(t)
+            lines.append(f"{t // 60}:{t % 60:02d} {name}")
+        yt = post["youtube"]
+        body, _, tags = yt["description"].rpartition("\n\n")
+        yt["description"] = f"{body or yt['description']}\n\n📖 บทในคลิป\n" + "\n".join(lines) + \
+            (f"\n\n{tags}" if body else "")
     credits = plan.get("credits") or []
     if credits:  # ภาพ Wikimedia Commons ต้องให้เครดิตผู้ถ่าย + สัญญาอนุญาต
         post["caption"] = post["caption"].rstrip() + "\n📷 ภาพบางส่วน: Wikimedia Commons (เครดิตเต็มในคำอธิบาย YouTube)"

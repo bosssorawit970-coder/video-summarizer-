@@ -240,10 +240,12 @@ def analyze_story(jid: str) -> dict:
                     f'ตอบ JSON อย่างเดียว {{"en": "..."}}\nหัวข้อ: {t}'))).get("en") or "")
             except Exception:
                 return ""
-        source = SRC.research(o["research"], en_query)
+        source = SRC.research(o["research"], en_query, deep=bool(o.get("longform")))
         text = source["text"]
-        extra = ("- ผู้ใช้พิมพ์มาแค่หัวข้อ ข้อมูลด้านบนค้นมาจาก Wikipedia: เลือกมุมที่น่าทึ่ง/น่าสงสัยที่สุดของเรื่องมาเล่า "
-                 "ไม่ต้องเล่าทุกอย่าง เปิดด้วยคำถามหรือข้อเท็จจริงที่คนไม่รู้ ใช้เฉพาะข้อเท็จจริงในข้อมูล")
+        extra = ("- ผู้ใช้พิมพ์มาแค่หัวข้อ ข้อมูลด้านบนค้นมาจาก Wikipedia: " + (
+            "เล่าให้ครบทุกแง่มุมที่น่าสนใจ ใช้ข้อมูลจากทุกบทความ" if o.get("longform") else
+            "เลือกมุมที่น่าทึ่ง/น่าสงสัยที่สุดของเรื่องมาเล่า ไม่ต้องเล่าทุกอย่าง")
+            + " เปิดด้วยคำถามหรือข้อเท็จจริงที่คนไม่รู้ ใช้เฉพาะข้อเท็จจริงในข้อมูล")
         save(jid, name=o["research"][:60], source={k: source[k] for k in ("site", "url", "title")},
              message=f"ได้ข้อมูลจาก Wikipedia {len(source['sources'])} บทความ — AI กำลังเขียนบท")
     elif o.get("source_url"):
@@ -261,7 +263,7 @@ def analyze_story(jid: str) -> dict:
              message="AI กำลังเรียบเรียงบทและแบ่งฉาก" if rewrite else "แบ่งฉากตามบท + คิดภาพประกอบ")
     plan = ST.make_story_plan(text, o["provider"], o["target_seconds"],
                               "rewrite" if rewrite else "verbatim", graphics=o.get("graphics", True), extra=extra,
-                              strict=bool(source))
+                              strict=bool(source), longform=bool(o.get("longform")))
     if source:
         plan["source"] = {k: source[k] for k in ("site", "url", "title")}
     save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
@@ -682,7 +684,7 @@ def job_opts(form) -> dict:
     opts = {
         "whisper_model": str(form.get("whisper_model") or "small"),
         "provider": str(form.get("provider") or "claude"),
-        "target_seconds": max(15, min(600, int(_num(form.get("target_seconds"), 60)))),
+        "target_seconds": max(15, min(1200, int(_num(form.get("target_seconds"), 60)))),
         "auto": str(form.get("auto") or "") in ("1", "true", "on"),
         "mode": "game" if form.get("mode") == "game" else "talk",
         "note": str(form.get("note") or "")[:300],
@@ -708,10 +710,17 @@ def job_opts(form) -> dict:
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
         opts["verify"] = _bool(form.get("verify"), True)  # 🧠 ตรวจภาพทุกฉาก (ใช้โควตา Gemini เพิ่มฉากละ 1-3 ครั้ง)
+        if _bool(form.get("longform"), False):  # 📺 คลิปยาวแนวนอน แบ่งบท
+            opts["longform"] = True
+            opts["script_mode"] = "rewrite"
+            opts["verify"] = False  # หลายสิบฉาก ตรวจทุกฉากโควตาไม่พอ (กด 🧠 เองเฉพาะฉากที่ไม่ตรง)
+            opts["target_seconds"] = max(180, opts["target_seconds"])
         if _bool(form.get("research"), False) and not opts.get("source_url"):  # 🔎 พิมพ์แค่หัวข้อ → ค้นข้อมูลเอง
             opts["research"] = opts["text"].strip()[:200]
             opts["script_mode"] = "rewrite"
     opts["render"] = _render_opts(form, opts["mode"])
+    if opts.get("longform"):
+        opts["render"]["layout"] = "original"  # 16:9
     if opts["mode"] == "game":
         opts["narrate"] = _bool(form.get("narrate"), True)
         if not opts["narrate"]:  # ไม่พากย์: เสียงเกมเต็ม + เอฟเฟกต์ ไม่มีซับบทพากย์

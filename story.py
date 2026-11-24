@@ -291,7 +291,7 @@ def thai_ratio(text: str) -> float:
 
 
 def make_story_plan(text: str, provider: str, target: float, mode: str = "verbatim",
-                    graphics: bool = True, extra: str = "", strict: bool = False) -> dict:
+                    graphics: bool = True, extra: str = "", strict: bool = False, longform: bool = False) -> dict:
     """mode="verbatim": อ่านตามบทที่ใส่ทุกคำ (AI แค่คิดภาพ+หัวข้อ) · "rewrite": ให้ AI เรียบเรียงใหม่
     strict=True (ลิงก์โพสต์/ข่าว): AI แปลไม่สำเร็จ = แจ้งผิดพลาด ไม่เอาต้นฉบับภาษาอื่นมาพากย์ตรงๆ"""
     global GRAPHICS_ON, LAST_AI_ERROR
@@ -300,6 +300,10 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     text = text.strip()
     if len(text) < 10:
         raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
+    if longform:
+        if provider == "none":
+            raise RuntimeError("คลิปยาวต้องใช้ AI เขียนบท — เลือก Gemini (ฟรี) หรือ Claude")
+        return make_long_plan(text, provider, target, extra)
     foreign = thai_ratio(text) < 0.3
     if foreign and provider != "none":  # บทเป็นภาษาอื่น → ต้องแปลเป็นไทยก่อนพากย์
         mode, strict = "rewrite", True
@@ -334,6 +338,76 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
         plan["note"] = (f"AI คิดภาพให้ตรงเนื้อหาไม่ได้ {bad}/{len(scenes)} ฉาก ({why}) — ฉากเหล่านี้ใช้ภาพทั่วไปที่ไม่เกี่ยวกับเรื่อง "
                         "กด 📷 ภาพถ่ายจริง / 📁 รูปของฉัน ทีละฉาก หรือแก้ปัญหา AI แล้วเริ่มใหม่")
     plan.pop("ai_error", None)
+    return plan
+
+
+LONG_PROMPT = """คุณเป็นนักเล่าเรื่องช่อง YouTube สารคดีภาษาไทยมืออาชีพ เขียนบทคลิปยาว (แนวนอน) ความยาวประมาณ {minutes} นาที จากข้อมูลด้านล่าง
+
+ข้อกำหนด:
+- บทพากย์รวมประมาณ {budget} ตัวอักษร (ไม่นับช่องว่าง) ขาด/เกินได้ไม่เกิน 10% — สำคัญ คลิปต้องยาวตามนี้
+- แบ่งเป็น {chapters} บท (chapter) แต่ละบทมีชื่อสั้นๆ ไม่เกิน 20 ตัวอักษร เรียงเรื่องให้ลื่นไหล
+- บทแรก "เปิดเรื่อง" ยาว 20-40 วินาที: ดึงความสนใจทันที (คำถาม/ข้อเท็จจริงที่น่าทึ่ง) แล้วบอกว่าคลิปนี้จะพาไปรู้อะไร โดยยังไม่เฉลย
+- ทุก 1-2 นาที ใส่ประโยคดึงให้ดูต่อ เช่น "แต่เรื่องที่แปลกที่สุดยังไม่มา…" "และนี่คือจุดที่ทุกอย่างเปลี่ยนไป"
+- เล่าแบบสารคดีที่สนุก ภาษาพูดเป็นธรรมชาติ มีจังหวะ ไม่ใช่อ่านรายงาน อธิบายบริบทให้คนที่ไม่รู้เรื่องเข้าใจ
+- บทสุดท้าย: สรุปข้อคิด/คำถามที่ยังค้างคา แล้วชวนกดติดตามช่อง และคอมเมนต์ตอบคำถาม 1 ข้อ
+- ยึดข้อเท็จจริงจากข้อมูลเท่านั้น ห้ามแต่งตัวเลข ชื่อ วันที่ หรือเหตุการณ์ ถ้าข้อมูลไม่พอ ให้ขยายด้วยการอธิบายบริบท/ความหมาย ไม่ใช่แต่งเพิ่ม
+- ชื่อคน/สถานที่ภาษาอื่นให้ทับศัพท์ไทย ห้ามใส่อีโมจิหรือสัญลักษณ์ในบทพากย์
+{extra}
+ตอบ JSON อย่างเดียว:
+{{"title": "ชื่อคลิป YouTube น่าคลิก ไม่เกิน 70 ตัวอักษร", "summary": "สรุปเรื่อง 1-2 ประโยค",
+  "chapters": [{{"title": "ชื่อบท", "text": "บทพากย์ทั้งบท แบ่งย่อหน้าด้วยบรรทัดว่าง"}}]}}
+
+ข้อมูล:
+{text}"""
+
+
+def make_long_plan(text: str, provider: str, target: float, extra: str = "") -> dict:
+    """📺 คลิปยาว: AI เขียนบทเป็นบทๆ (chapter) → แบ่งฉากละ ~10-14 วิ → คิดภาพทีละชุด → ชื่อบทขึ้นจอตอนเปลี่ยนบท"""
+    global LAST_AI_ERROR
+    budget = speech_budget(target)
+    chapters = max(4, min(9, round(target / 90)))
+    data = None
+    for limit in (30000, 14000):
+        try:
+            data = P._parse_json(P.ask_ai(provider, LONG_PROMPT.format(
+                minutes=round(target / 60), budget=budget, chapters=chapters, extra=extra, text=text[:limit])))
+            if data.get("chapters"):
+                break
+        except Exception as e:
+            LAST_AI_ERROR = str(e)[:200]
+            print("เขียนบทคลิปยาวไม่ได้:", e)
+    chs = [c for c in (data or {}).get("chapters") or [] if isinstance(c, dict) and str(c.get("text") or "").strip()]
+    if not chs:
+        raise RuntimeError("AI เขียนบทคลิปยาวไม่สำเร็จ" + (f" ({LAST_AI_ERROR})" if LAST_AI_ERROR else "")
+                           + " — ลองใหม่อีกครั้ง (ถ้าโควตา Gemini หมด รอหลังบ่าย 3 โมง)")
+    scenes = []
+    for ci, ch in enumerate(chs):
+        body = P.clean_text(str(ch.get("text") or ""))
+        body = re.sub(r"\n{3,}", "\n\n", str(ch.get("text") or "")).strip()
+        parts = [P.clean_text(x) for x in split_script(body, max_len=150)]
+        title = P.clean_text(str(ch.get("title") or ""))[:24]
+        for k, narr in enumerate(x for x in parts if x):
+            sc = {"narration": narr, "headline": "", "img": "", "image": "", "search": "", "chapter_no": ci}
+            if k == 0:
+                sc["chapter"] = title or f"บทที่ {ci + 1}"
+            scenes.append(sc)
+    plan = {"title": str(data.get("title") or "")[:90], "summary": str(data.get("summary") or ""),
+            "scenes": scenes, "longform": True}
+    for a in range(0, len(scenes), 18):  # คิดภาพทีละ 18 ฉาก (ทั้งเรื่องทีเดียว AI ตอบไม่ครบ)
+        sub = {"title": plan["title"], "scenes": scenes[a:a + 18]}
+        fill_visuals(sub, provider)
+        if not plan["summary"]:
+            plan["summary"] = sub.get("summary", "")
+    for i, sc in enumerate(scenes):
+        if not sc.get("image"):
+            sc["image"], sc["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
+        if sc.get("chapter") and sc["chapter_no"] > 0:  # ชื่อบทขึ้นจอ
+            sc["graphic"] = {"type": "keyword", "text": f"{sc['chapter_no']}. {sc['chapter']}"[:30]}
+    finish_graphics(scenes)
+    got = sum(len(re.sub(r"\s", "", s["narration"])) for s in scenes)
+    if got < budget * 0.6:
+        plan["note"] = (f"บทที่ได้สั้นกว่าที่ตั้งไว้ (ราว {got / SPEECH_CPS / 60:.1f} นาที) เพราะข้อมูลมีไม่พอเล่ายาว — "
+                        "ใส่ข้อมูลเพิ่ม/ลิงก์บทความ หรือเลือกหัวข้อที่มีเรื่องเล่าเยอะกว่า")
     return plan
 
 
@@ -1406,7 +1480,21 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
 
 def join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path,
                trans: list[str] | None = None) -> None:
-    """ต่อฉากด้วยทรานซิชัน (ถ้าไม่ได้ ใช้ต่อธรรมดา)"""
+    """ต่อฉากด้วยทรานซิชัน (ถ้าไม่ได้ ใช้ต่อธรรมดา) — คลิปยาวหลายสิบฉาก: ต่อทีละชุด 20 ฉาก แล้วต่อชุดเข้าด้วยกัน
+    (เปิดทุกฉากพร้อมกันใน ffmpeg ตัวเดียว หน่วยความจำไม่พอ)"""
+    if len(files) > 24:
+        groups = []
+        for g, a in enumerate(range(0, len(files), 20)):
+            gf = workdir / f"group_{g:02}.mp4"
+            _join_xfade(files[a:a + 20], durs[a:a + 20], gf, workdir, (trans or [])[a:a + 20] or None)
+            groups.append(gf)
+        P.concat(groups, out, workdir)
+        return
+    _join_xfade(files, durs, out, workdir, trans)
+
+
+def _join_xfade(files: list[Path], durs: list[float], out: Path, workdir: Path,
+                trans: list[str] | None = None) -> None:
     if len(files) == 1:
         P.concat(files, out, workdir)
         return
@@ -1503,6 +1591,10 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         files.append(f)
         durs.append(d)
     progress(97, "ต่อฉากพร้อมทรานซิชัน")
+    t = 0.0
+    for k, s in enumerate(scenes):  # เวลาเริ่มของแต่ละฉาก (ไทม์สแตมป์บทในคำอธิบาย YouTube)
+        s["t"] = round(t, 1)
+        t += durs[k] - (XF if k < len(scenes) - 1 else 0)
     joined = workdir / "joined.mp4"
     join_xfade(files, durs, joined, workdir, [scene_style(s, i)["tr"] for i, s in enumerate(scenes)])
     seq = [joined]
