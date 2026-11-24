@@ -368,6 +368,8 @@ PLAN_PROMPT = """คุณเป็นบรรณาธิการวิดี
 2. เลือกช่วงไฮไลต์ที่สำคัญที่สุด เรียงตามเวลา ไม่ทับกัน รวมความยาวประมาณ {target} วินาที (แต่ละช่วงยาว 5-20 วินาที)
 3. เขียนบทพากย์ภาษาไทยสำหรับแต่ละช่วง เป็นภาษาพูดที่เป็นธรรมชาติ เล่าเรื่องต่อเนื่องกันเมื่ออ่านเรียงกัน
    ความยาวบทพากย์ต้องอ่านจบทันในช่วงนั้น (ประมาณ 10-12 ตัวอักษรต่อวินาที) ห้ามใส่อีโมจิหรือสัญลักษณ์
+   บทต้อง "เต็มช่วง" ด้วย: ช่วง 10 วินาทีควรมีบทราว 100-120 ตัวอักษร ห้ามเขียนสั้นๆ ไม่กี่คำแล้วปล่อยภาพเงียบ
+   เล่าเหมือนคนสรุปเรื่องให้เพื่อนฟัง: ใครเป็นใคร เกิดอะไรขึ้น ทำไมสำคัญ เกิดผลอะไร ต่อเนื่องจนจบเรื่อง
 4. คลิปสรุปจะพากย์ทับเป็นหลัก และเปิดเสียงต้นฉบับเฉพาะ "ฉากสำคัญ" 1-3 ฉากเท่านั้น
    เช่น ประโยคเด็ด/ประโยคดัง จุดไคลแมกซ์ ฉากซึ้ง ฉากหักมุม ที่ต้องได้ยินเสียงจริงถึงจะอิน
    ช่วงแบบนี้ให้ใส่ "keep_audio": true และ narration เป็น "" (ว่าง) ยาวช่วงละ 3-8 วินาที
@@ -478,6 +480,7 @@ def gemini_models(kind: str = "text") -> list[str]:
     return [m for m in dict.fromkeys(order) if m not in _gemini_dead and _gemini_spent.get(m) != _pt_today()]
 
 
+LAST_GEMINI_MODEL = [""]  # รุ่นที่ตอบล่าสุด (ไว้เตือนเมื่อบทถูกเขียนด้วยรุ่นเล็ก)
 _gemini_spent: dict[str, str] = {}  # รุ่นที่โควตาฟรี "ต่อวัน" หมดแล้ว {รุ่น: วันที่แปซิฟิก} — ไม่ต้องลองซ้ำจนรีเซ็ต
 
 
@@ -563,6 +566,7 @@ def _ask_gemini_once(prompt: str, extra_parts: list | None, lite_first: bool) ->
         parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
         text = "".join(p.get("text", "") for p in parts)
         if text:
+            LAST_GEMINI_MODEL[0] = model
             return text
         last = "Gemini ไม่ตอบ (อาจถูกระบบกรองเนื้อหา)"
         tried.append(f"{model}: ไม่ตอบ")
@@ -857,11 +861,29 @@ def make_plan(segs: list[dict], provider: str, target: float,
         if cur["start"] < prev["end"]:
             prev["end"] = cur["start"]
     clips = [c for c in clips if c["end"] - c["start"] >= 1]
+    fit_clips_to_narration(clips)
     limit_original_audio(clips)
     if not clips:
         raise RuntimeError("AI ไม่ได้เลือกช่วงไฮไลต์ที่ใช้ได้ ลองใหม่อีกครั้ง")
-    return {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")),
-            "clips": clips}
+    plan = {"title": str(data.get("title", "")), "summary": str(data.get("summary", "")), "clips": clips}
+    if "lite" in (LAST_GEMINI_MODEL[0] or "") and provider == "gemini":
+        plan["note"] = ("⚠️ บทนี้เขียนด้วย Gemini รุ่นเล็ก (lite) เพราะโควตารุ่นหลักของวันนี้หมด — สรุปอาจไม่ดีเท่าปกติ "
+                        "ถ้าไม่พอใจ กด 🔁 ลองใหม่ หลังบ่าย 3 โมง (โควตารีเซ็ต)")
+    return plan
+
+
+def fit_clips_to_narration(clips: list[dict]) -> None:
+    """ช่วงที่บทพากย์สั้นแต่ภาพยาว → พากย์จบแล้วเหลือแต่ภาพเงียบๆ (คนดูรู้สึกไม่ใช่การสรุป)
+    ตัดภาพให้ยาวพอดีบท (อ่านไทย ~11 ตัวอักษร/วิ) — คลิปกระชับ พากย์เล่าตลอด"""
+    for c in clips:
+        if c.get("keep_audio"):
+            continue
+        n = len(re.sub(r"\s", "", c.get("narration", "")))
+        if not n:
+            continue
+        want = n / 11.0 + 1.2
+        if c["end"] - c["start"] > want * 1.5:
+            c["end"] = c["start"] + max(3.0, want * 1.2)
 
 
 _TONE = "\u0E48-\u0E4B"  # ่ ้ ๊ ๋
