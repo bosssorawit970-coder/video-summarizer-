@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>สรุปคลิป</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&family=Kanit:wght@500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#f4f1ea; --card:#fffdf8; --ink:#1d1b17; --muted:#6d675c; --line:#e3ddd0;
@@ -148,6 +148,104 @@ video{width:100%;border-radius:10px;background:#000;display:block}
   .row .spacer{display:none}
   #s-done .row a{flex:1 1 100%}
   .drop{padding:28px 12px}
+}
+
+/* ═════════════ ธีมใหม่ (โมเดิร์น) — ทับสไตล์เดิมด้านบน ═════════════ */
+:root{
+  --bg:#f5f6fa; --card:#ffffff; --ink:#151823; --muted:#6b7183; --line:#e6e8f0; --field:#f7f8fb;
+  --accent:#ff5a36; --accent2:#ff2e7e; --accent-ink:#fff; --accent-soft:#fff1ec;
+  --grad:linear-gradient(135deg,var(--accent),var(--accent2));
+  --ok:#13a36b; --warn:#d97706; --err:#e5383b;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px -8px rgba(16,24,40,.10);
+  --ring:0 0 0 4px color-mix(in srgb,var(--accent) 18%,transparent);
+  --r:18px;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0c0e13;--card:#14171f;--ink:#eef0f6;--muted:#9097a8;--line:#242936;--field:#0f1218;
+        --accent:#ff6a45;--accent2:#ff3d8b;--accent-ink:#fff;--accent-soft:#2a1814;
+        --ok:#34d399;--warn:#fbbf24;--err:#f87171;
+        --shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 30px -12px rgba(0,0,0,.6)}
+}
+body{overflow-x:hidden;font:15.5px/1.65 "Anuphan","IBM Plex Sans Thai",system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+  background:radial-gradient(1200px 500px at 15% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),
+             radial-gradient(900px 400px at 100% 0%,color-mix(in srgb,var(--accent2) 8%,transparent),transparent 60%),var(--bg);
+  background-attachment:fixed}
+h1,h2,.seg.mode label,button.primary{font-family:"Kanit","Anuphan",sans-serif}
+.wrap{max-width:1120px;padding:0 18px 90px}
+header{position:sticky;top:0;z-index:40;margin:0 calc(50% - 50vw) 22px;padding:14px max(18px,calc(50vw - 50% + 18px));align-items:center;
+  background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px);
+  border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+header h1{font-size:24px;font-weight:700;display:flex;align-items:center;gap:0;letter-spacing:0}
+header h1::before{content:"▶";display:grid;place-items:center;width:34px;height:34px;margin-right:10px;border-radius:11px;font-size:14px;
+  color:#fff;background:var(--grad);box-shadow:0 6px 16px -6px var(--accent)}
+header h1 span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+header p{font-size:13.5px}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:26px;box-shadow:var(--shadow);margin-bottom:20px}
+h2{font-size:20px;font-weight:600;letter-spacing:0;margin-bottom:16px}
+label.f{font-size:13.5px;font-weight:600;margin:18px 0 8px;color:var(--ink)}
+.hint{font-size:12.5px;line-height:1.55}
+/* ช่องกรอก */
+select,input[type=text],input[type=number],textarea{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:10px 13px;
+  transition:border-color .15s,box-shadow .15s,background .15s}
+select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring);background:var(--card)}
+select{appearance:none;-webkit-appearance:none;padding-right:34px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center}
+input[type=file]{font:inherit;font-size:13.5px;color:var(--muted);width:100%;padding:10px;border:1.5px dashed var(--line);border-radius:12px;background:var(--field)}
+input[type=file]::file-selector-button{font:inherit;font-weight:600;font-size:13px;border:0;border-radius:9px;padding:7px 14px;margin-right:10px;
+  background:var(--ink);color:var(--bg);cursor:pointer}
+/* ปุ่ม */
+button{border-radius:12px;padding:9px 16px;transition:transform .08s,border-color .15s,background .15s,box-shadow .15s}
+button:hover{border-color:color-mix(in srgb,var(--ink) 40%,var(--line));background:color-mix(in srgb,var(--field) 60%,var(--card))}
+button:active{transform:scale(.97)}
+button.primary{background:var(--grad);border:0;font-weight:600;padding:13px 26px;font-size:16px;border-radius:14px;
+  box-shadow:0 10px 24px -10px var(--accent),inset 0 1px 0 rgba(255,255,255,.25)}
+button.primary:hover{filter:brightness(1.06);box-shadow:0 14px 28px -10px var(--accent)}
+button.ghost:hover{background:color-mix(in srgb,var(--err) 10%,transparent)}
+/* ตัวเลือกแบบเม็ดยา */
+.seg{gap:8px}
+.seg label{border:1px solid var(--line);border-radius:14px;padding:9px 14px;background:var(--card);font-size:14px;transition:.15s;user-select:none}
+.seg label:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.seg label:has(input:checked){border-color:transparent;background:var(--accent-soft);color:var(--ink);
+  box-shadow:0 0 0 1.5px var(--accent) inset}
+.seg input[type=radio]{appearance:none;-webkit-appearance:none;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--muted);margin:0;flex:none;display:grid;place-items:center}
+.seg input[type=radio]:checked{border-color:var(--accent);background:radial-gradient(circle,var(--accent) 0 4px,transparent 5px)}
+.seg input[type=checkbox]{width:16px;height:16px;flex:none}
+/* แท็บเลือกโหมด */
+.seg.mode{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:6px;border-radius:20px;background:var(--field);border:1px solid var(--line)}
+.seg.mode label{border:0;border-radius:14px;padding:14px 10px;font-size:14.5px;font-weight:500;background:transparent;text-align:center;line-height:1.35;flex-direction:column;gap:2px}
+.seg.mode label input{position:absolute;opacity:0;pointer-events:none}
+.seg.mode label:has(input:checked){background:var(--card);box-shadow:var(--shadow),0 0 0 1.5px var(--accent) inset;font-weight:600}
+@media(max-width:820px){.seg.mode{grid-template-columns:repeat(2,1fr)}.seg.mode label:last-child{grid-column:1/-1}}
+/* อื่นๆ */
+.drop{border:1.5px dashed color-mix(in srgb,var(--muted) 45%,var(--line));border-radius:16px;background:var(--field)}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.decor{border-radius:16px;background:var(--field);padding:12px 16px}
+.decor[open]{background:transparent}
+.batchbox{border-radius:16px;border:1px solid color-mix(in srgb,var(--accent) 25%,transparent)}
+.tag{background:var(--field);border:1px solid var(--line)}
+.steps{gap:8px}
+.steps div{border-top:0;padding-top:10px;position:relative;font-size:12.5px}
+.steps div::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;border-radius:9px;background:var(--line)}
+.steps div.on::before{background:var(--grad)}
+.steps div.done::before{background:var(--ok)}
+.bar{height:8px;background:var(--field);border:1px solid var(--line)}
+.bar i{background:var(--grad);border-radius:99px}
+.clip,.scene{border-radius:16px;background:var(--card);box-shadow:var(--shadow)}
+.scene .pic img,.scene .thumbs img{border-radius:10px}
+.scene .thumbs img.on{border-color:var(--accent);box-shadow:0 4px 12px -4px var(--accent)}
+video{border-radius:14px}
+.num{background:var(--grad);color:#fff;border-radius:8px}
+.summary{background:var(--field);border:1px solid var(--line);border-radius:14px}
+.jobs a{padding:12px 10px;margin:0 -10px;border-bottom:1px solid var(--line);border-radius:10px;transition:background .15s}
+.jobs a:hover{background:var(--field);color:var(--ink)}
+.jobs .st{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--field);border:1px solid var(--line)}
+.modal{background:rgba(8,10,15,.55);backdrop-filter:blur(4px)}
+.thumbbox{border-radius:16px;background:var(--field)}
+::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+@media(max-width:820px){
+  .wrap{padding:0 12px 70px} header{margin:0 calc(50% - 50vw) 14px;padding:10px 16px} header h1{font-size:21px} header p{display:none}
+  .card{padding:18px;border-radius:16px}
 }
 </style>
 </head>
