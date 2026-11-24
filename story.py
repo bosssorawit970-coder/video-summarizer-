@@ -861,7 +861,7 @@ def rank_photos(scenes: list[dict], scene_dir: Path, topic: str = "", progress=N
                 if img:
                     parts += [{"text": f"Scene {k} - photo {m}:"}, img]
         try:
-            data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic), parts))
+            data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic), parts, lite_first=True))
         except Exception as e:
             print("AI เลือกภาพไม่ได้ (ใช้ภาพแรกตามเดิม):", e)
             break  # โควตาเต็ม/ผิดพลาด → ไม่ต้องลองกลุ่มถัดไป
@@ -893,7 +893,7 @@ def _rank_one(tmp: dict, scene_dir: Path, topic: str) -> float | None:
         if img:
             parts += [{"text": f"Scene 1 - photo {m}:"}, img]
     try:
-        data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic or tmp.get("narration", "")), parts))
+        data = P._parse_json(P._ask_gemini(PICK_PROMPT.format(topic=topic or tmp.get("narration", "")), parts, lite_first=True))
         r = (data.get("scenes") or [{}])[0]
         order = [int(x) - 1 for x in r.get("order") or []]
         best = [opts[x] for x in dict.fromkeys(order) if 0 <= x < len(opts)]

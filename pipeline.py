@@ -470,8 +470,20 @@ def gemini_models(kind: str = "text") -> list[str]:
         names.sort(key=lambda n: ("lite" in n, -_gem_version(n), "preview" in n, bool(re.search(r"-\d{2,3}$", n)), n))
         env = os.environ.get("GEMINI_MODEL")
         fallback = GEMINI_FALLBACK
-    order = ([env] if env else []) + names[:5] + ([] if names else fallback)
-    return [m for m in dict.fromkeys(order) if m not in _gemini_dead]
+    if kind == "text":  # รุ่น lite โควตาฟรีต่อวันเยอะกว่ามาก — ต้องอยู่ในรายการเสมอ ไว้ใช้ตอนรุ่นหลักหมดโควตา
+        full = [n for n in names if "lite" not in n][:4] + [n for n in names if "lite" in n][:3]
+    else:
+        full = names[:5]
+    order = ([env] if env else []) + full + ([] if names else fallback)
+    return [m for m in dict.fromkeys(order) if m not in _gemini_dead and _gemini_spent.get(m) != _pt_today()]
+
+
+_gemini_spent: dict[str, str] = {}  # รุ่นที่โควตาฟรี "ต่อวัน" หมดแล้ว {รุ่น: วันที่แปซิฟิก} — ไม่ต้องลองซ้ำจนรีเซ็ต
+
+
+def _pt_today() -> str:
+    import datetime as _dt
+    return (_dt.datetime.utcnow() - _dt.timedelta(hours=8)).date().isoformat()
 
 
 def __getattr__(name):  # โค้ดเก่าที่อ้าง P.GEMINI_MODELS
@@ -480,15 +492,42 @@ def __getattr__(name):  # โค้ดเก่าที่อ้าง P.GEMINI
     raise AttributeError(name)
 
 
-def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
+def _ask_gemini(prompt: str, extra_parts: list | None = None, lite_first: bool = False) -> str:
     """Google Gemini (มีโควตาฟรี) — ขอคีย์ได้ที่ aistudio.google.com
-    extra_parts: ส่วนเพิ่ม เช่น รูปภาพ {"inline_data": {"mime_type": "image/jpeg", "data": base64}}"""
+    extra_parts: ส่วนเพิ่ม เช่น รูปภาพ {"inline_data": {"mime_type": "image/jpeg", "data": base64}}
+    lite_first: งานเล็ก (ให้คะแนนภาพ/ตรวจภาพ) ใช้รุ่น lite ก่อน — เก็บโควตารุ่นหลักไว้เขียนบท
+    โควตาเต็มแบบ "ต่อนาที" → รอแล้วลองใหม่เอง · "ต่อวัน" → จำไว้ ไม่ลองรุ่นนั้นอีกจนรีเซ็ต (บ่าย 3 โมงเวลาไทย)"""
+    import time as _t
+    for attempt in range(3):
+        try:
+            return _ask_gemini_once(prompt, extra_parts, lite_first)
+        except _GeminiMinuteLimit as e:
+            if attempt == 2:
+                raise RuntimeError(str(e)) from None
+            wait = min(65, max(10, e.wait))
+            print(f"Gemini โควตาต่อนาทีเต็ม รอ {wait:.0f} วิแล้วลองใหม่")
+            _t.sleep(wait)
+
+
+class _GeminiMinuteLimit(RuntimeError):
+    def __init__(self, msg: str, wait: float):
+        super().__init__(msg)
+        self.wait = wait
+
+
+def _ask_gemini_once(prompt: str, extra_parts: list | None, lite_first: bool) -> str:
     import urllib.error
     key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}, *(extra_parts or [])]}],
                        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}).encode()
     last, tried = None, []
-    for model in gemini_models() or GEMINI_FALLBACK:
+    models = gemini_models() or GEMINI_FALLBACK
+    if lite_first:
+        models = [m for m in models if "lite" in m] + [m for m in models if "lite" not in m]
+    minute_wait = 0.0
+    if not models:
+        raise RuntimeError("โควตา Gemini ฟรีของวันนี้หมดทุกรุ่นแล้ว — รีเซ็ตราวบ่าย 3 โมงเวลาไทย")
+    for model in models:
         try:
             data = _gemini_post(model, body, key)
         except GeminiNetError as e:  # รุ่นนี้ตอบช้าเกิน/เน็ตหลุด → ลองรุ่นถัดไป (รุ่นเล็กมักเร็วกว่า)
@@ -508,9 +547,16 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
                 last = "ไม่พบรุ่น Gemini ที่ใช้ได้ (" + "; ".join(tried[-3:]) + ")"
                 continue
             if e.code == 429:
-                tried.append(f"{model}: โควตาเต็ม")
-                last = "โควตา Gemini ฟรีเต็มแล้ว ลองใหม่ภายหลัง (" + ", ".join(tried[-3:]) + ")"
-                continue  # รุ่นเล็กกว่าอาจยังมีโควตา
+                raw = getattr(e, "_raw", "") + msg
+                if "PerDay" in raw or "per_day" in raw.lower():
+                    _gemini_spent[model] = _pt_today()
+                    tried.append(f"{model}: โควตาวันนี้หมด")
+                else:
+                    m = re.search(r"retry in ([\d.]+)s|\"retryDelay\":\s*\"(\d+)", raw)
+                    minute_wait = max(minute_wait, float((m.group(1) or m.group(2)) if m else 30))
+                    tried.append(f"{model}: โควตาต่อนาทีเต็ม")
+                last = "โควตา Gemini ฟรีเต็มแล้ว ลองใหม่ภายหลัง (" + ", ".join(tried[-4:]) + ")"
+                continue  # รุ่นอื่นมีโควตาแยกของตัวเอง
             if e.code in (400, 401, 403) and ("API key" in msg or "API_KEY" in msg or e.code != 400):
                 raise RuntimeError("คีย์ Gemini ไม่ถูกต้อง หรือยังใช้ในพื้นที่นี้ไม่ได้") from e
             raise RuntimeError(f"Gemini ตอบกลับผิดพลาด ({e.code}): {msg}") from e
@@ -520,6 +566,11 @@ def _ask_gemini(prompt: str, extra_parts: list | None = None) -> str:
             return text
         last = "Gemini ไม่ตอบ (อาจถูกระบบกรองเนื้อหา)"
         tried.append(f"{model}: ไม่ตอบ")
+    if minute_wait:  # บางรุ่นแค่เต็ม "ต่อนาที" → รอแป๊บเดียวก็ใช้ได้
+        raise _GeminiMinuteLimit(last or "โควตา Gemini ต่อนาทีเต็ม", minute_wait)
+    if tried and all("โควตาวันนี้หมด" in t for t in tried):
+        last = ("โควตา Gemini ฟรีของวันนี้หมดทุกรุ่นแล้ว — รีเซ็ตราวบ่าย 3 โมงเวลาไทย แล้วกด 🔁 ลองใหม่ ("
+                + ", ".join(tried[-4:]) + ")")
     raise RuntimeError(last or "เรียก Gemini ไม่สำเร็จ")
 
 
@@ -545,6 +596,7 @@ def _gemini_post(model: str, body: bytes, key: str) -> dict:
                 _t.sleep(wait)
                 continue
             text = e.read().decode("utf-8", "replace")
+            e._raw = text[:3000]
             try:
                 text = json.loads(text)["error"]["message"]
             except Exception:
