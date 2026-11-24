@@ -689,6 +689,7 @@ def job_opts(form) -> dict:
         opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
+        opts["verify"] = _bool(form.get("verify"), True)  # 🧠 ตรวจภาพทุกฉาก (ใช้โควตา Gemini เพิ่มฉากละ 1-3 ครั้ง)
     opts["render"] = _render_opts(form, opts["mode"])
     if opts["mode"] == "game":
         opts["narrate"] = _bool(form.get("narrate"), True)

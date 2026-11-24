@@ -296,6 +296,7 @@ video{border-radius:14px}
       <label class="f">โมชันกราฟิก</label>
       <div class="seg"><label><input type="checkbox" id="graphics" checked> 📊 ใส่กราฟิกช่วยให้เข้าใจ (ตัวเลขนับขึ้น · แท่งเปรียบเทียบ · หัวข้อย่อย · คำสำคัญ)</label></div>
       <div class="seg" id="vidSeg" style="margin-top:6px"><label><input type="checkbox" id="videos" checked> 📹 แทรกวิดีโอฟรีบางฉาก (ราว 1 ใน 3 ฉาก)</label></div>
+      <div class="seg" style="margin-top:6px"><label><input type="checkbox" id="verify" checked> 🧠 AI ตรวจว่าภาพตรงบททุกฉาก <span class="hint">(แม่นขึ้น แต่ใช้โควตา Gemini เพิ่ม — ปิดไว้ถ้าโควตาใกล้หมด)</span></label></div>
       <div id="styleBox"><label class="f">สไตล์ภาพ</label>
       <div class="seg" id="styleSeg"></div></div>
       <div class="hint" style="margin-top:6px">💡 ใช้ Gemini (ฟรี) หรือ Claude AI จะได้ภาพตรงเนื้อหากว่า Ollama มาก เพราะเขียนคำบรรยายภาพได้แม่นกว่า · ตรวจ/เปลี่ยนภาพทีละฉากได้ในหน้าตรวจบท</div>
@@ -1108,6 +1109,7 @@ $("#go").onclick = async () => {
       fd.append("image_source", document.querySelector("input[name=image_source]:checked").value);
       fd.append("graphics", $("#graphics").checked ? "1" : "0");
       fd.append("videos", cfg.videos && $("#videos").checked ? "1" : "0");
+      fd.append("verify", $("#verify").checked ? "1" : "0");
       const refs = [...$("#refImgs").files].filter(f => f.type.startsWith("image/")).slice(0, 10);
       if (refs.length) {
         fd.append("ref_ids", (await up(refs, "รูปตัวอย่าง")).join(","));
