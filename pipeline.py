@@ -1900,9 +1900,13 @@ def add_music(video: Path, music: Path, volume: float, out: Path) -> None:
     """ใส่เพลงประกอบทั้งคลิป (วนซ้ำถ้าสั้น, เฟดเข้า-ออก) ภาพไม่ต้องแปลงใหม่"""
     dur = probe(video)["duration"]
     norm = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"
-    fc = (f"[1:a]{norm},volume={volume:.3f},atrim=0:{dur:.3f},afade=t=in:st=0:d=1,"
-          f"afade=t=out:st={max(0.0, dur - 1.5):.3f}:d=1.5[m];"
-          f"[0:a]{norm}[g];[g][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]")
+    # เพลงแต่ละไฟล์ดังไม่เท่ากัน (เพลงแอ็กชันบางเพลงดังมาก) → ปรับให้ดังมาตรฐานก่อน แล้วค่อยใช้ระดับที่ตั้ง
+    # + เบาลงอัตโนมัติตอนมีเสียงพากย์ (ducking) แล้วดังขึ้นตอนเว้นช่วง
+    fc = (f"[1:a]{norm},loudnorm=I=-20:TP=-2,{norm},volume={volume * 1.6:.3f},atrim=0:{dur:.3f},"
+          f"afade=t=in:st=0:d=1,afade=t=out:st={max(0.0, dur - 1.5):.3f}:d=1.5[m0];"
+          f"[0:a]{norm},asplit=2[g][key];"
+          f"[m0][key]sidechaincompress=threshold=0.02:ratio=6:attack=20:release=450:makeup=1[m];"
+          f"[g][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]")
     run(["ffmpeg", "-y", "-hide_banner", "-i", str(video), "-stream_loop", "-1", "-i", str(music),
          "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy",
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.3f}", str(out)])
