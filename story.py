@@ -476,6 +476,9 @@ def _long_scenes(chs: list[dict], provider: str, title: str, summary: str, chapt
             if k == 0 and chapters:
                 sc["chapter"] = name or f"บทที่ {ci + 1}"
             scenes.append(sc)
+    for k, sc in enumerate(scenes):  # จังหวะสารคดี: เว้นหายใจทุกฉาก เว้นยาวตอนจบบท
+        nxt = scenes[k + 1] if k + 1 < len(scenes) else None
+        sc["pause"] = 1.1 if nxt is None or nxt.get("chapter") else 0.35
     plan = {"title": title, "summary": summary, "scenes": scenes, "longform": True, "_auto_title": not summary}
     for a in range(0, len(scenes) if provider != "none" else 0, 18):  # คิดภาพทีละ 18 ฉาก (ทั้งเรื่องทีเดียว AI ตอบไม่ครบ)
         sub = {"title": "", "scenes": scenes[a:a + 18]}
@@ -1366,7 +1369,7 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     W, H = size_for(layout)
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
-    D = max(2.5, nd + LEAD + TAIL)
+    D = max(2.5, nd + LEAD + TAIL + float(scene.get("pause") or 0))  # คลิปยาว: เว้นจังหวะหายใจ/จบบท
     video = is_video(img.name)
     sty = scene_style(scene, i)
     anim = img.name.startswith("anim_")  # ฉากแอนิเมชันกราฟิก (ไม่มีภาพจริง): พื้นหลังเต็มจอลอยช้าๆ
@@ -1520,7 +1523,7 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
                 bed = (f, 0.5) if f.is_file() else None
             else:
                 f = G.make_amb(workdir, amb)
-                bed = (f, 0.75) if f else None
+                bed = (f, 0.5 if scene.get("pause") else 0.75) if f else None  # คลิปยาว: บรรยากาศเบาลง ฟังนานไม่ล้า
         except Exception as e:
             print("ทำเสียงบรรยากาศไม่ได้:", str(e)[-200:])
     sounds = {}

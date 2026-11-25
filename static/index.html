@@ -900,6 +900,7 @@ $("#longform").onchange = () => {
   if (on) { t.min = 180; t.max = 900; t.step = 30; t.value = 480; } else { t.min = 20; t.max = 300; t.step = 10; t.value = 40; }
   $("#tgtV").textContent = tgtText(+t.value);
   if (cfg) $("#layout0").value = on ? "original" : "vertical_crop";
+  const r = $("#rate"); if (r) { r.value = on ? 0 : 10; $("#rateV").textContent = (r.value > 0 ? "+" : "") + r.value + "%"; }  // คลิปยาว: พูดช้าลงนิด ฟังสบาย
   scriptModeChanged();
 };
 $("#rate").oninput = e => $("#rateV").textContent = (e.target.value > 0 ? "+" : "") + e.target.value + "%";
