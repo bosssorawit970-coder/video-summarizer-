@@ -240,13 +240,15 @@ def analyze_story(jid: str) -> dict:
                     f'ตอบ JSON อย่างเดียว {{"en": "..."}}\nหัวข้อ: {t}'))).get("en") or "")
             except Exception:
                 return ""
-        source = SRC.research(o["research"], en_query, deep=bool(o.get("longform")))
+        topic, _, wiki = o["research"].partition(" | ")  # หัวข้อจาก 🎲 AI คิดให้: "ไทย | ชื่อบทความอังกฤษ"
+        source = SRC.research(topic.strip(), (lambda t: wiki.strip()) if wiki.strip() else en_query,
+                              deep=bool(o.get("longform")))
         text = source["text"]
         extra = ("- ผู้ใช้พิมพ์มาแค่หัวข้อ ข้อมูลด้านบนค้นมาจาก Wikipedia: " + (
             "เล่าให้ครบทุกแง่มุมที่น่าสนใจ ใช้ข้อมูลจากทุกบทความ" if o.get("longform") else
             "เลือกมุมที่น่าทึ่ง/น่าสงสัยที่สุดของเรื่องมาเล่า ไม่ต้องเล่าทุกอย่าง")
             + " เปิดด้วยคำถามหรือข้อเท็จจริงที่คนไม่รู้ ใช้เฉพาะข้อเท็จจริงในข้อมูล")
-        save(jid, name=o["research"][:60], source={k: source[k] for k in ("site", "url", "title")},
+        save(jid, name=topic.strip()[:60], source={k: source[k] for k in ("site", "url", "title")},
              message=f"ได้ข้อมูลจาก Wikipedia {len(source['sources'])} บทความ — AI กำลังเขียนบท")
     elif o.get("source_url"):
         if o["provider"] == "none" or not provider_available(o["provider"]):
@@ -822,7 +824,7 @@ async def create_job(req: Request):
                 return JSONResponse({"batch": _topic_batch(form, topics)})
             o = job_opts(form)
             o["text"] = o["research"] = topics[0][:200]
-            return JSONResponse({"id": new_job("🔎 " + topics[0][:58], "", None, o)})
+            return JSONResponse({"id": new_job("🔎 " + topics[0].partition(" | ")[0][:58], "", None, o)})
         if len(text) < 10:
             return JSONResponse({"error": "ใส่ข้อความอย่างน้อย 1-2 ประโยค"}, status_code=400)
         name = re.sub(r"\s+", " ", text)[:40] + ("…" if len(text) > 40 else "")
@@ -881,7 +883,7 @@ def _topic_batch(form, topics: list[str]) -> str:
     for t in topics:
         o = json.loads(json.dumps(opts))
         o["text"] = o["research"] = t[:200]
-        b["jobs"].append(new_job("🔎 " + t[:58], "", None, o, batch=bid))
+        b["jobs"].append(new_job("🔎 " + t.partition(" | ")[0][:58], "", None, o, batch=bid))
     save_batch(b)
     return bid
 
@@ -1895,6 +1897,54 @@ for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
         batches[_b["id"]] = _b
     except Exception:
         pass
+IDEA_CATS = {"random": "สุ่มหลากหลายแนว", "mystery": "ปริศนา/เรื่องลึกลับที่ยังไม่มีคำตอบ",
+             "history": "ประวัติศาสตร์/เหตุการณ์จริงที่คนไม่ค่อยรู้", "science": "วิทยาศาสตร์/ร่างกายมนุษย์ที่น่าทึ่ง",
+             "space": "อวกาศ/จักรวาล", "animal": "สัตว์และธรรมชาติแปลกๆ", "tech": "สิ่งประดิษฐ์/เทคโนโลยี/ที่มาของสิ่งของ",
+             "people": "บุคคลจริงที่มีชีวิตเหลือเชื่อ", "disaster": "ภัยพิบัติ/อุบัติเหตุครั้งประวัติศาสตร์"}
+
+IDEA_PROMPT = """คุณเป็นทีมคิดคอนเทนต์ของช่อง YouTube ไทยชื่อ "Wait What!" (แนว: เรื่องจริงที่น่าทึ่ง ปริศนา ประวัติศาสตร์
+วิทยาศาสตร์ — ดูแล้วต้องร้อง "เดี๋ยวนะ อะไรนะ!") คิดหัวข้อคลิปใหม่ {n} เรื่อง หมวด: {cat}
+รูปแบบคลิป: {fmt}
+
+เงื่อนไข:
+- เป็นเรื่องจริง ตรวจสอบได้ และมีบทความใน Wikipedia ภาษาอังกฤษ (ต้องให้ชื่อบทความที่มีอยู่จริง)
+- คนไทยทั่วไปไม่ค่อยรู้ แต่ฟังชื่อแล้วอยากรู้ทันที มีจุดหักมุมหรือรายละเอียดที่น่าทึ่ง
+- หลากหลาย ไม่ซ้ำแนวกันเอง และห้ามซ้ำ/คล้ายหัวข้อที่ช่องทำไปแล้วด้านล่าง
+- หลีกเลี่ยง: การเมืองปัจจุบัน ศาสนา เรื่องเศร้าที่เพิ่งเกิด เนื้อหารุนแรงโจ่งแจ้ง ตัวละครหนัง/การ์ตูนที่มีลิขสิทธิ์
+หัวข้อที่ทำไปแล้ว (ห้ามซ้ำ): {done}
+
+ตอบ JSON อย่างเดียว: {{"ideas": [{{"topic": "หัวข้อภาษาไทยสั้นๆ น่าคลิก", "wiki": "ชื่อบทความ Wikipedia ภาษาอังกฤษ",
+ "hook": "ประโยคเปิดคลิปที่ทำให้คนหยุดดู"}}]}}"""
+
+
+async def ideas(req: Request):
+    """🎲 AI คิดหัวข้อคลิปให้ (ไม่ซ้ำกับที่เคยทำ) → ใช้กับ 🔎 พิมพ์แค่หัวข้อ ทำคลิปต่อได้ทันที"""
+    body = await req.json()
+    prov = str(body.get("provider") or "gemini")
+    if prov == "none" or not provider_available(prov):
+        return JSONResponse({"error": "ให้ AI คิดหัวข้อต้องใช้ Gemini (ฟรี) หรือ Claude — เลือกที่ \"ใช้อะไรสรุปเนื้อหา\""},
+                            status_code=400)
+    n = max(1, min(10, int(_num(body.get("count"), 3))))
+    cat = IDEA_CATS.get(str(body.get("category") or "random"), IDEA_CATS["random"])
+    fmt = "คลิปยาว 5-15 นาที (เรื่องต้องมีรายละเอียดพอเล่ายาว)" if body.get("longform") else "Shorts 30-60 วินาที"
+    done = [re.sub(r"^[🔎📺\s]+", "", str(j.get("name") or "")) for j in sorted(jobs.values(), key=lambda j: -j.get("created", 0))]
+    done = ", ".join(dict.fromkeys(d[:50] for d in done if d))[:2500] or "(ยังไม่มี)"
+    try:
+        raw = await asyncio.to_thread(P.ask_ai, prov, IDEA_PROMPT.format(n=n, cat=cat, fmt=fmt, done=done))
+        got = P._parse_json(raw).get("ideas") or []
+    except Exception as e:
+        return JSONResponse({"error": f"AI คิดหัวข้อไม่สำเร็จ: {str(e)[:200]}"}, status_code=500)
+    out = []
+    for it in got[:n]:
+        t = P.clean_text(str((it or {}).get("topic") or ""))[:80]
+        w = str((it or {}).get("wiki") or "").strip()[:80]
+        if t:
+            out.append({"topic": t, "wiki": w, "hook": P.clean_text(str(it.get("hook") or ""))[:140]})
+    if not out:
+        return JSONResponse({"error": "AI ไม่ได้ส่งหัวข้อกลับมา ลองอีกครั้ง"}, status_code=500)
+    return JSONResponse({"ideas": out})
+
+
 app = Starlette(routes=[
     Route("/login", login, methods=["GET", "POST"]),
     Route("/api/idle", idle_status),
@@ -1904,6 +1954,7 @@ app = Starlette(routes=[
     Route("/api/config", config),
     Route("/api/jobs", list_jobs, methods=["GET"]),
     Route("/api/jobs", create_job, methods=["POST"]),
+    Route("/api/ideas", ideas, methods=["POST"]),
     Route("/api/uploads", start_upload, methods=["POST"]),
     Route("/api/uploads/{uid}", put_chunk, methods=["PUT"]),
     Route("/api/jobs/{jid}", get_job, methods=["GET"]),
