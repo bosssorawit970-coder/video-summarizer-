@@ -382,12 +382,50 @@ def make_long_plan(text: str, provider: str, target: float, extra: str = "") -> 
     if not chs:
         raise RuntimeError("AI เขียนบทคลิปยาวไม่สำเร็จ" + (f" ({LAST_AI_ERROR})" if LAST_AI_ERROR else "")
                            + " — ลองใหม่อีกครั้ง (ถ้าโควตา Gemini หมด รอหลังบ่าย 3 โมง)")
+    try:  # AI มักเขียนสั้นกว่าที่สั่ง → ขยายบทที่สั้นให้ถึงความยาวที่ตั้ง (เรียก AI เพิ่ม 1 ครั้ง)
+        _expand_chapters(chs, provider, budget, text)
+    except Exception as e:
+        print("ขยายบทคลิปยาวไม่ได้:", e)
     plan = _long_scenes(chs, provider, str(data.get("title") or "")[:90], str(data.get("summary") or ""))
     got = sum(len(re.sub(r"\s", "", s["narration"])) for s in plan["scenes"])
     if got < budget * 0.6:
         plan["note"] = (f"บทที่ได้สั้นกว่าที่ตั้งไว้ (ราว {got / SPEECH_CPS / 60:.1f} นาที) เพราะข้อมูลมีไม่พอเล่ายาว — "
                         "ใส่ข้อมูลเพิ่ม/ลิงก์บทความ หรือเลือกหัวข้อที่มีเรื่องเล่าเยอะกว่า")
     return plan
+
+
+EXPAND_LONG_PROMPT = """บทคลิปยาวด้านล่าง "สั้นเกินไป" ต้องยาวรวมประมาณ {budget} ตัวอักษร (ตอนนี้ {got})
+เขียนแต่ละบท (chapter) ใหม่ให้ยาวตาม "จำนวนตัวอักษรที่ต้องการ" ของบทนั้น (ขาด/เกินไม่เกิน 10%)
+วิธีขยาย: เล่ารายละเอียดเหตุการณ์ บริบท เหตุผล ผลกระทบ และคำอธิบายให้คนไม่รู้เรื่องเข้าใจ จากข้อมูลต้นฉบับ
+ห้ามแต่งข้อเท็จจริง ตัวเลข ชื่อ วันที่ที่ไม่มีในข้อมูล ห้ามพูดวนซ้ำ คงสำนวนเล่าแบบสารคดีที่สนุก
+ตอบ JSON อย่างเดียว: {{"chapters": [{{"title": "ชื่อบทเดิม", "text": "บทที่ขยายแล้ว"}}]}} จำนวนบทเท่าเดิม ({n})
+
+บทเดิม:
+{chapters}
+
+ข้อมูลต้นฉบับ:
+{text}"""
+
+
+def _expand_chapters(chs: list[dict], provider: str, budget: int, text: str) -> None:
+    def size(t):
+        return len(re.sub(r"\s", "", t or ""))
+    got = sum(size(c.get("text")) for c in chs)
+    if got >= budget * 0.85:
+        return
+    share = [max(1, size(c.get("text"))) for c in chs]
+    want = [int(budget * w / sum(share)) for w in share]
+    lines = "\n\n".join(f"### บทที่ {k + 1}: {c.get('title', '')} (ต้องการ ~{want[k]} ตัวอักษร)\n{c.get('text', '')}"
+                          for k, c in enumerate(chs))
+    data = P._parse_json(P.ask_ai(provider, EXPAND_LONG_PROMPT.format(
+        budget=budget, got=got, n=len(chs), chapters=lines, text=text[:20000])))
+    new = data.get("chapters") or []
+    if len(new) != len(chs):
+        return
+    for c, nc in zip(chs, new):
+        t = str((nc or {}).get("text") or "")
+        if size(t) > size(c.get("text")):
+            c["text"] = t
 
 
 _HEAD = re.compile(r"^\s*(?:#{1,4}\s*|(?:บทที่|ตอนที่|ตอน|ภาค|Chapter)\s*\d+\s*[:.\-–]?\s*|\[)(.{1,60}?)\]?\s*$", re.I)
