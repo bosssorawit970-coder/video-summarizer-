@@ -1279,7 +1279,7 @@ class Ass:
         self.events: list[str] = []
         vertical = H > W
         f = thai_font()
-        u = H if vertical else H * 1.25        # หน่วยอ้างอิงขนาดตัวอักษร
+        u = H if vertical else H * 1.75        # หน่วยอ้างอิงขนาดตัวอักษร (แนวนอน: ตัวใหญ่พอให้อ่านบนมือถือ/ทีวี)
         white, black = _ass_color("FFFFFF"), _ass_color("000000")
         # Name,Font,Size,Primary,Secondary,Outline,Back,Bold,Italic,Underline,Strike,ScaleX,ScaleY,
         # Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding

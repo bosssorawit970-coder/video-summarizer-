@@ -55,7 +55,12 @@ Step 2 — for EACH scene write:
   (e.g. "the tiny hole in an airplane window"), use a macro / extreme close-up of exactly that detail and describe its
   shape and location, instead of a wide view of the whole thing (not just "airplane wing in the sky").
   No text or letters in the image. No real people's names, celebrities, brands or copyrighted characters — describe them generically.
-- "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean")
+  NEVER put in characters, logos, costumes or people from a DIFFERENT franchise/company/story than this one
+  (e.g. no Superman, Batman or Wonder Woman in a Marvel story). Do not draw a real person's face: show their work,
+  workplace, hands or a silhouette instead (and set "real": true so a real photo is searched).
+- "search": 2-4 English words to search a stock-photo site for this scene (e.g. "shark swimming deep ocean").
+  If the scene is about a specific real person/event/place/product, the search MUST contain its exact English name
+  (e.g. "Stan Lee", "Fantastic Four 1961 comic") so a real photo can be found.
 {graphic_rules}
 {mood_rules}
 {badge_rules}
@@ -118,9 +123,15 @@ MOOD_STYLE = {
 }
 
 
-def _badges(v: dict) -> dict:
-    """ป้ายวันที่/สถานที่ + คำพูดดัง จากคำตอบ AI (ตัดให้สั้น ไม่มีอีโมจิ)"""
+def _badges(v: dict, narr: str = "") -> dict:
+    """ป้ายวันที่/สถานที่ + คำพูดดัง จากคำตอบ AI (ตัดให้สั้น ไม่มีอีโมจิ)
+    ปี/ตัวเลขในป้ายต้องมีอยู่ในบทฉากนั้นจริง — AI ชอบเดาปีผิด (เช่น ป้าย "1823" ในฉากที่พูดถึงปี 1990)"""
     b = P.clean_text(str(v.get("badge") or ""))[:36]
+    narr = narr or str(v.get("narration") or "")
+    if b and narr:
+        nums = re.findall(r"\d{3,4}", b)
+        if any(n not in narr for n in nums):
+            b = ""
     q = P.clean_text(str(v.get("quote") or "")).strip('"“”')[:40]
     amb = str(v.get("amb") or "").strip().lower()
     fx = str(v.get("fx") or "").strip().lower()
@@ -506,7 +517,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
                 s["search"] = str(v.get("search", "")).strip()[:60]
                 s["graphic"] = G.clean(v.get("graphic"), s["narration"])
                 s["mood"] = str(v.get("mood") or "")
-                s.update(_badges(v))
+                s.update(_badges(v, s["narration"]))
         plan["title"] = str(data.get("title") or plan["title"])
         plan["summary"] = str(data.get("summary") or "")
         cta = P.clean_text(str(data.get("cta") or ""))[:90]
@@ -1399,7 +1410,7 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
             cw, ch, cx0, cy0 = card_geom(img, W, H, bool(gfx and not gfx.get("off")))
         else:
             cw, ch, cx0, cy0 = W - 80, int(H * (0.5 if vertical else 0.8)), 40, int(H * (0.16 if vertical else 0.08))
-        u = min(W, H) / 1080 * (1.0 if vertical else 1.25)
+        u = min(W, H) / 1080 * (1.0 if vertical else 1.7)
         if scene.get("badge"):
             ass.events.append(f"Dialogue: 2,{P._ass_time(0.45)},{P._ass_time(D)},GBox,,0,0,0,,"
                               f"{{\\an4\\pos({cx0 + int(28 * u)},{cy0 + ch - int(20 * u)})\\fs{int(34 * u)}\\bord{int(12 * u)}"

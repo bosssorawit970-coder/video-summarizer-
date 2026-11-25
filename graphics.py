@@ -164,7 +164,7 @@ class _Draw:
         self.ass, self.t0, self.t1 = ass, t0, t1
         self.W, self.H = ass.W, ass.H
         self.vertical = ass.H > ass.W
-        self.s = min(ass.W, ass.H) / 1080
+        self.s = min(ass.W, ass.H) / 1080 * (1.3 if ass.W > ass.H else 1.0)  # แนวนอน: กราฟิกใหญ่ขึ้นให้อ่านง่าย
         self.font = P.thai_font()
         self.bottom = 0.69
 

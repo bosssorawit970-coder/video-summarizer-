@@ -280,6 +280,15 @@ def analyze_story(jid: str) -> dict:
         if nr:
             plan["note"] = ((plan.get("note") or "") + f" · 🎯 ใช้รูปตัวอย่างใน {nr} ฉาก (ฉากที่มี 🎯)").strip(" ·")
             ok = max(ok, 1)
+    if o.get("longform") and not o.get("verify") and ST.vision_ready():
+        # คลิปยาว: ตรวจเฉพาะฉากเสี่ยง (ภาพจากคลังภาพฟรี มักเป็นภาพกว้างๆ ไม่ตรงเรื่อง) — ประหยัดโควตา
+        risky = [i for i, sc in enumerate(plan["scenes"]) if sc.get("auto_photo") and not sc.get("img_locked")]
+        if risky:
+            try:
+                ST.verify_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
+                                 lambda pct, msg: save(jid, step="images", progress=95, message=msg), only=risky)
+            except Exception as e:
+                print("ตรวจภาพฉากเสี่ยงไม่ได้:", e)
     if o.get("verify", True) and ST.vision_ready():  # 🧠 ตรวจว่าภาพตรงบท ไม่ตรง → หาภาพ/วาดใหม่
         nf = ST.verify_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                               lambda pct, msg: save(jid, step="images", progress=90 + pct * 0.07, message=msg))
