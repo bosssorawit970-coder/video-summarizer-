@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
 from pathlib import Path
 
 import graphics as G
@@ -439,6 +441,32 @@ def _expand_chapters(chs: list[dict], provider: str, budget: int, text: str) -> 
             c["text"] = t
 
 
+def _fill_chunk(sub: dict, provider: str, depth: int = 0) -> None:
+    """คิดภาพทีละชุดแบบทนทาน: ชุดใหญ่ได้ไม่ครบ → แบ่งครึ่งแล้วลองใหม่ (ถูกกว่าถามทีละฉาก 18 ครั้งมาก)
+    เหลือไม่กี่ฉาก → ค่อยถามทีละฉาก"""
+    sc = sub["scenes"]
+    for s in sc:
+        s.setdefault("image", "")
+    try:
+        fill_visuals(sub, provider, one_by_one=False)
+    except Exception as e:
+        print("คิดภาพชุดนี้ไม่ได้:", e)
+    miss = [s for s in sc if not s.get("image")]
+    if not miss:
+        return
+    if len(miss) > 6 and depth < 2:
+        h = len(miss) // 2
+        for part in (miss[:h], miss[h:]):
+            _fill_chunk({"title": sub.get("title", ""), "scenes": part}, provider, depth + 1)
+            if not sub.get("summary"):
+                sub["summary"] = ""
+        return
+    try:
+        fill_visuals({"title": sub.get("title", ""), "scenes": miss}, provider, one_by_one=True)
+    except Exception as e:
+        print("คิดภาพทีละฉากไม่ได้:", e)
+
+
 _HEAD = re.compile(r"^\s*(?:#{1,4}\s*|(?:บทที่|ตอนที่|ตอน|ภาค|Chapter)\s*\d+\s*[:.\-–]?\s*|\[)(.{1,60}?)\]?\s*$", re.I)
 
 
@@ -482,7 +510,7 @@ def _long_scenes(chs: list[dict], provider: str, title: str, summary: str, chapt
     plan = {"title": title, "summary": summary, "scenes": scenes, "longform": True, "_auto_title": not summary}
     for a in range(0, len(scenes) if provider != "none" else 0, 18):  # คิดภาพทีละ 18 ฉาก (ทั้งเรื่องทีเดียว AI ตอบไม่ครบ)
         sub = {"title": "", "scenes": scenes[a:a + 18]}
-        fill_visuals(sub, provider)
+        _fill_chunk(sub, provider)
         if not plan["summary"]:
             plan["summary"] = sub.get("summary", "")
         if a == 0 and sub.get("title") and (not plan["title"] or plan.get("_auto_title")):
@@ -502,7 +530,7 @@ def _ask(provider: str, prompt: str) -> dict:
     return P._parse_json(raw)
 
 
-def fill_visuals(plan: dict, provider: str) -> None:
+def fill_visuals(plan: dict, provider: str, one_by_one: bool = True) -> None:
     """คิดภาพประกอบทุกฉากจากบททั้งเรื่อง (รู้ว่าเรื่องเกี่ยวกับอะไร ตัวละครหน้าตายังไง)
     ฉากที่ได้ไม่ครบ → ถามทีละฉากซ้ำ (งานเล็กลง โมเดลเล็กทำได้แม่นขึ้น)"""
     scenes = plan["scenes"]
@@ -532,7 +560,7 @@ def fill_visuals(plan: dict, provider: str) -> None:
     if not topic:
         topic = " ".join(s["narration"] for s in scenes)[:300]
     for i, s in enumerate(scenes):
-        if s["image"]:
+        if s["image"] or not one_by_one:
             continue
         try:
             v = _ask(provider, SCENE_PROMPT.format(
@@ -1640,6 +1668,63 @@ def ai_animate(scenes: list[dict], scene_dir: Path, progress) -> dict:
     return out
 
 
+def _sha(*parts) -> str:
+    import hashlib
+    return hashlib.sha1(json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _file_sig(f) -> str:
+    """ลายเซ็นไฟล์จากเนื้อไฟล์ (ไม่ใช้เวลาแก้ไข — คัดลอกจากแคชแล้วเวลาเปลี่ยน แต่เนื้อเหมือนเดิม)"""
+    import hashlib
+    try:
+        p = Path(f)
+        if p.stat().st_size <= 30_000_000:
+            return hashlib.sha1(p.read_bytes()).hexdigest()[:16]
+        st = p.stat()
+        return f"{p.name}:{st.st_size}:{int(st.st_mtime)}"
+    except Exception:
+        return str(f)
+
+
+def _scene_key(sc, i, src, narr, *opts) -> str:
+    keep = {k: v for k, v in sc.items() if k not in ("t", "options", "fit", "img_locked")}
+    return _sha(keep, i, _file_sig(src), _file_sig(narr) if narr else "", opts, RENDER_VERSION)
+
+
+RENDER_VERSION = 3  # เปลี่ยนเมื่อแก้หน้าตาฉาก → ของในแคชเก่าใช้ไม่ได้
+
+
+def _tts_cached(texts, workdir, cache, voice, rate, tone, progress):
+    """เสียงพากย์แคชต่อท่อน: กดสร้างใหม่/แก้บางฉาก → สร้างเสียงเฉพาะท่อนที่เปลี่ยน (ประหยัดโควตาเสียง Gemini มาก)
+    เก็บแคชเฉพาะรอบที่ได้เสียงที่เลือกจริง (ถ้าถอยไปใช้เสียงสำรอง ไม่เก็บ — รอบหน้าจะได้ลองเสียงจริงอีก)"""
+    keys = [_sha(t, voice, rate, tone) if t else "" for t in texts]
+    outs: list = [None] * len(texts)
+    todo = []
+    for i, (t, k) in enumerate(zip(texts, keys)):
+        hit = cache / f"narr_{k}.mp3"
+        if t and hit.exists():
+            outs[i] = workdir / f"narr_{i:03}.mp3"
+            shutil.copy(hit, outs[i])
+        else:
+            todo.append(i)
+    if any(texts[i] for i in todo):
+        before = len(P.TTS_NOTES)
+        sub = P.tts_all([texts[i] if i in todo else "" for i in range(len(texts))], workdir, voice, rate, tone,
+                        progress, total=30)
+        for i in todo:
+            outs[i] = sub[i]
+        if len(P.TTS_NOTES) == before:  # ไม่มีการถอยไปเสียงสำรอง
+            cache.mkdir(parents=True, exist_ok=True)
+            for i in todo:
+                if outs[i] and Path(outs[i]).exists():
+                    shutil.copy(outs[i], cache / f"narr_{keys[i]}.mp3")
+    elif todo:
+        pass
+    if len(todo) < len(texts):
+        progress(30, f"ใช้เสียงพากย์เดิม {len(texts) - len(todo)} ท่อน (ไม่เปลี่ยน) · สร้างใหม่ {sum(1 for i in todo if texts[i])} ท่อน")
+    return outs
+
+
 def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice: str, rate: int,
                  layout: str, subtitles: bool, progress, brand: dict | None = None,
                  cover: Path | None = None, clean: bool = False, style: str = "cinematic",
@@ -1658,7 +1743,8 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
     finish_moods(scenes)  # ทุกฉากต้องมีอารมณ์ (กำหนดกล้อง/ทรานซิชัน/เสียงให้เข้ากับเนื้อหา)
     finish_sound(scenes)
     texts = [P.clean_text(s.get("narration", "")) for s in scenes]
-    narrs = P.tts_all(texts, workdir, voice, rate, tone, progress, total=30)
+    cache = workdir.parent / "cache"  # อยู่ข้างนอก work (work ถูกล้างทุกครั้ง) — ทำใหม่/แก้บางฉาก ไม่ต้องทำทุกฉากซ้ำ
+    narrs = _tts_cached(texts, workdir, cache, voice, rate, tone, progress)
     moving = ai_animate(scenes, scene_dir, progress) if ai_motion else {}
     for i, s in enumerate(scenes):
         text, narr = texts[i], narrs[i]
@@ -1666,14 +1752,36 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
         f = workdir / f"scene_{i:03}.mp4"
         sc = {**s, "narration": text}
         src = moving.get(i) or scene_dir / s["img"]
+        key = _scene_key(sc, i, src, narr, layout, subtitles, clean, brand, sfx, frame, less_text, ambience)
+        hit = cache / f"scene_{key}.mp4"
+        if hit.exists() and (cache / f"scene_{key}.dur").exists():  # ฉากนี้ไม่เปลี่ยน → ใช้ของเดิม
+            shutil.copy(hit, f)
+            files.append(f)
+            durs.append(float((cache / f"scene_{key}.dur").read_text()))
+            continue
         try:
             d = render_scene(src, sc, i, narr, f, workdir, layout, subtitles,
                              not clean, None if clean else brand, sfx=sfx and not clean,
                              frame=frame, less_text=less_text, ambience=ambience and not clean,
                              sound_dir=sound_dir)
-        except RuntimeError as e:  # ฟอนต์/ซับมีปัญหา → ทำแบบไม่มีตัวหนังสือ
+        except Exception as e:  # ฟอนต์/ซับ/กราฟิกมีปัญหา → ทำแบบไม่มีตัวหนังสือ
             print("ทำฉากแบบเต็มไม่สำเร็จ ลองแบบไม่มีตัวหนังสือ:", str(e)[-300:])
-            d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None, frame=frame)
+            try:
+                d = render_scene(src, sc, i, narr, f, workdir, layout, False, False, None, frame=frame)
+            except Exception as e2:  # ภาพเสีย → ใช้ภาพพื้นเรียบ ไม่ให้งานยาวทั้งงานพังเพราะฉากเดียว
+                print(f"ฉากที่ {i + 1} ทำไม่ได้เลย ใช้ภาพพื้นเรียบแทน:", str(e2)[-300:])
+                from PIL import Image
+                W, H = size_for(layout)
+                plain = workdir / f"plain_{i:03}.png"
+                Image.new("RGB", (W, H), (18, 20, 28)).save(plain)
+                d = render_scene(plain, sc, i, narr, f, workdir, layout, False, False, None, frame="full")
+                P.TTS_NOTES.append(f"ฉากที่ {i + 1} ภาพมีปัญหา ใช้พื้นเรียบแทน — เปลี่ยนภาพแล้วสร้างใหม่ได้")
+        try:
+            cache.mkdir(parents=True, exist_ok=True)
+            shutil.copy(f, hit)
+            (cache / f"scene_{key}.dur").write_text(str(d))
+        except Exception:
+            pass
         files.append(f)
         durs.append(d)
     progress(97, "ต่อฉากพร้อมทรานซิชัน")
