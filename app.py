@@ -698,7 +698,7 @@ def job_opts(form) -> dict:
         opts["text"] = opts["product_info"]["name"]
     if form.get("mode") == "story":
         opts["mode"] = "story"
-        opts["text"] = str(form.get("text") or "")[:8000]
+        opts["text"] = str(form.get("text") or "")[:50000]
         src_url = SRC.find_url(opts["text"])
         if src_url:  # วางลิงก์โพสต์/ข่าว → อ่าน แปล เรียบเรียงเป็นคลิปไทย (ข้อความอื่นที่พิมพ์มา = คำสั่งเพิ่ม)
             opts["source_url"] = src_url
@@ -711,8 +711,7 @@ def job_opts(form) -> dict:
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
         opts["verify"] = _bool(form.get("verify"), True)  # 🧠 ตรวจภาพทุกฉาก (ใช้โควตา Gemini เพิ่มฉากละ 1-3 ครั้ง)
         if _bool(form.get("longform"), False):  # 📺 คลิปยาวแนวนอน แบ่งบท
-            opts["longform"] = True
-            opts["script_mode"] = "rewrite"
+            opts["longform"] = True  # script_mode ตามที่เลือก: พากย์ตามบทของบอสทุกคำ หรือให้ AI เรียบเรียง
             opts["verify"] = False  # หลายสิบฉาก ตรวจทุกฉากโควตาไม่พอ (กด 🧠 เองเฉพาะฉากที่ไม่ตรง)
             opts["target_seconds"] = max(180, opts["target_seconds"])
         if _bool(form.get("research"), False) and not opts.get("source_url"):  # 🔎 พิมพ์แค่หัวข้อ → ค้นข้อมูลเอง

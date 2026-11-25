@@ -261,7 +261,7 @@ def _thai_boundary(p: str, n: int) -> int:
     return P._thai_cut(p, n)
 
 
-def split_script(text: str, max_len: int = 110) -> list[str]:
+def split_script(text: str, max_len: int = 110, cap: int = 40) -> list[str]:
     """แบ่งบทเป็นฉาก โดยเก็บทุกคำไว้ครบ (ฉากละ ~1-2 ประโยค / ไม่เกิน ~110 ตัวอักษร)"""
     paras = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
     scenes = []
@@ -282,7 +282,7 @@ def split_script(text: str, max_len: int = 110) -> list[str]:
             merged[-1] = f"{merged[-1]} {sc}"
         else:
             merged.append(sc)
-    return merged[:40]
+    return merged[:cap]
 
 
 def thai_ratio(text: str) -> float:
@@ -301,8 +301,10 @@ def make_story_plan(text: str, provider: str, target: float, mode: str = "verbat
     if len(text) < 10:
         raise RuntimeError("ข้อความสั้นเกินไป ใส่ข้อมูลอย่างน้อย 1-2 ประโยค")
     if longform:
+        if mode != "rewrite" and thai_ratio(text) >= 0.3:  # บทของบอสเอง → พากย์ทุกคำ แบ่งบทตามหัวข้อ ##
+            return make_long_plan_verbatim(text, provider)
         if provider == "none":
-            raise RuntimeError("คลิปยาวต้องใช้ AI เขียนบท — เลือก Gemini (ฟรี) หรือ Claude")
+            raise RuntimeError("คลิปยาวแบบให้ AI เรียบเรียงต้องใช้ AI — เลือก Gemini (ฟรี) หรือ Claude")
         return make_long_plan(text, provider, target, extra)
     foreign = thai_ratio(text) < 0.3
     if foreign and provider != "none":  # บทเป็นภาษาอื่น → ต้องแปลเป็นไทยก่อนพากย์
@@ -380,34 +382,66 @@ def make_long_plan(text: str, provider: str, target: float, extra: str = "") -> 
     if not chs:
         raise RuntimeError("AI เขียนบทคลิปยาวไม่สำเร็จ" + (f" ({LAST_AI_ERROR})" if LAST_AI_ERROR else "")
                            + " — ลองใหม่อีกครั้ง (ถ้าโควตา Gemini หมด รอหลังบ่าย 3 โมง)")
+    plan = _long_scenes(chs, provider, str(data.get("title") or "")[:90], str(data.get("summary") or ""))
+    got = sum(len(re.sub(r"\s", "", s["narration"])) for s in plan["scenes"])
+    if got < budget * 0.6:
+        plan["note"] = (f"บทที่ได้สั้นกว่าที่ตั้งไว้ (ราว {got / SPEECH_CPS / 60:.1f} นาที) เพราะข้อมูลมีไม่พอเล่ายาว — "
+                        "ใส่ข้อมูลเพิ่ม/ลิงก์บทความ หรือเลือกหัวข้อที่มีเรื่องเล่าเยอะกว่า")
+    return plan
+
+
+_HEAD = re.compile(r"^\s*(?:#{1,4}\s*|(?:บทที่|ตอนที่|ตอน|ภาค|Chapter)\s*\d+\s*[:.\-–]?\s*|\[)(.{1,60}?)\]?\s*$", re.I)
+
+
+def make_long_plan_verbatim(text: str, provider: str) -> dict:
+    """📺 คลิปยาวจากบทของบอสเอง: พากย์ทุกคำ · บรรทัด "## ชื่อบท" / "บทที่ 2 ..." = เริ่มบทใหม่ (ชื่อขึ้นจอ + ไทม์สแตมป์)"""
+    chs, cur = [], {"title": "เปิดเรื่อง", "text": ""}
+    for line in text.splitlines():
+        m = _HEAD.match(line)
+        if m and len(line.strip()) <= 64 and not re.search(r"[.!?。ๆ]\s*$", line.strip()[:-1] or ""):
+            if cur["text"].strip():
+                chs.append(cur)
+            cur = {"title": P.clean_text(m.group(1)) or line.strip("#[] "), "text": ""}
+        else:
+            cur["text"] += line + "\n"
+    if cur["text"].strip():
+        chs.append(cur)
+    if not chs:
+        raise RuntimeError("บทว่างเปล่า")
+    plan = _long_scenes(chs, provider, P.clean_text(chs[0]["text"])[:40], "", chapters=len(chs) > 1)
+    if len(chs) == 1:
+        plan["note"] = ("💡 อยากให้คลิปแบ่งเป็นบท (ชื่อบทขึ้นจอ + ไทม์สแตมป์ในคำอธิบาย) ใส่บรรทัดชื่อบทในบท "
+                        "เช่น \"## จุดเริ่มต้น\" แล้วสร้างใหม่")
+    return plan
+
+
+def _long_scenes(chs: list[dict], provider: str, title: str, summary: str, chapters: bool = True) -> dict:
+    """บทแบ่งตอน → ฉากละ ~10-14 วิ → คิดภาพทีละชุด 18 ฉาก → ชื่อบทขึ้นจอตอนเปลี่ยนบท"""
     scenes = []
     for ci, ch in enumerate(chs):
-        body = P.clean_text(str(ch.get("text") or ""))
         body = re.sub(r"\n{3,}", "\n\n", str(ch.get("text") or "")).strip()
-        parts = [P.clean_text(x) for x in split_script(body, max_len=150)]
-        title = P.clean_text(str(ch.get("title") or ""))[:24]
+        parts = [P.clean_text(x) for x in split_script(body, max_len=150, cap=10000)]
+        name = P.clean_text(str(ch.get("title") or ""))[:24]
         for k, narr in enumerate(x for x in parts if x):
             sc = {"narration": narr, "headline": "", "img": "", "image": "", "search": "", "chapter_no": ci}
-            if k == 0:
-                sc["chapter"] = title or f"บทที่ {ci + 1}"
+            if k == 0 and chapters:
+                sc["chapter"] = name or f"บทที่ {ci + 1}"
             scenes.append(sc)
-    plan = {"title": str(data.get("title") or "")[:90], "summary": str(data.get("summary") or ""),
-            "scenes": scenes, "longform": True}
-    for a in range(0, len(scenes), 18):  # คิดภาพทีละ 18 ฉาก (ทั้งเรื่องทีเดียว AI ตอบไม่ครบ)
-        sub = {"title": plan["title"], "scenes": scenes[a:a + 18]}
+    plan = {"title": title, "summary": summary, "scenes": scenes, "longform": True, "_auto_title": not summary}
+    for a in range(0, len(scenes) if provider != "none" else 0, 18):  # คิดภาพทีละ 18 ฉาก (ทั้งเรื่องทีเดียว AI ตอบไม่ครบ)
+        sub = {"title": "", "scenes": scenes[a:a + 18]}
         fill_visuals(sub, provider)
         if not plan["summary"]:
             plan["summary"] = sub.get("summary", "")
+        if a == 0 and sub.get("title") and (not plan["title"] or plan.get("_auto_title")):
+            plan["title"] = sub["title"]
+    plan.pop("_auto_title", None)
     for i, sc in enumerate(scenes):
         if not sc.get("image"):
             sc["image"], sc["generic"] = GENERIC_IMAGES[i % len(GENERIC_IMAGES)], True
         if sc.get("chapter") and sc["chapter_no"] > 0:  # ชื่อบทขึ้นจอ
             sc["graphic"] = {"type": "keyword", "text": f"{sc['chapter_no']}. {sc['chapter']}"[:30]}
     finish_graphics(scenes)
-    got = sum(len(re.sub(r"\s", "", s["narration"])) for s in scenes)
-    if got < budget * 0.6:
-        plan["note"] = (f"บทที่ได้สั้นกว่าที่ตั้งไว้ (ราว {got / SPEECH_CPS / 60:.1f} นาที) เพราะข้อมูลมีไม่พอเล่ายาว — "
-                        "ใส่ข้อมูลเพิ่ม/ลิงก์บทความ หรือเลือกหัวข้อที่มีเรื่องเล่าเยอะกว่า")
     return plan
 
 

@@ -275,8 +275,8 @@ video{border-radius:14px}
       <h2>1. ใส่ข้อความ / ข้อมูล</h2>
       <div class="seg" style="margin-bottom:8px"><label><input type="checkbox" id="longform"> 📺 คลิปยาว YouTube <span class="hint">(แนวนอน 16:9 · 3–15 นาที · แบ่งเป็นบท + ไทม์สแตมป์ในคำอธิบาย)</span></label></div>
       <div class="seg" style="margin-bottom:8px"><label><input type="checkbox" id="research"> 🔎 พิมพ์แค่หัวข้อ — AI ค้นข้อมูลจาก Wikipedia แล้วทำคลิปให้เอง <span class="hint">(หลายเรื่อง = บรรทัดละหัวข้อ ได้หลายคลิปทีเดียว)</span></label></div>
-      <textarea id="storyText" rows="7" maxlength="8000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
-      <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/8000</span></div>
+      <textarea id="storyText" rows="7" maxlength="50000" placeholder="วางเนื้อหาที่อยากทำเป็นคลิป เช่น เรื่องเล่า รีวิว ข่าว ความรู้ — หรือวางลิงก์โพสต์/ข่าว (Reddit, เว็บข่าว ฯลฯ) แล้ว AI จะอ่าน แปลเป็นไทย เรียบเรียง หาภาพ/วิดีโอ และพากย์ให้"></textarea>
+      <div class="row hint" style="margin:6px 2px 0"><span id="storyHint">AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม</span><span class="spacer"></span><span id="storyCount">0/50,000</span></div>
       <label class="f">🎯 รูปตัวอย่าง <span class="hint">(ไม่บังคับ · สูงสุด 10 รูป)</span></label>
       <input type="file" id="refImgs" accept="image/*" multiple>
       <div class="hint" id="refHint" style="margin:6px 2px 0">ส่งรูปที่ "อยากได้ประมาณนี้" มาพร้อมบท — AI จะดูว่ารูปไหนตรงกับฉากไหน แล้วใช้รูปนั้นเป็นแนวให้ฉากนั้นเอง</div>
@@ -944,7 +944,7 @@ function refreshItems() {
     $("#storyHint").textContent = link
       ? "🔗 เจอลิงก์ — ระบบจะไปอ่านโพสต์/ข่าว (รวมคอมเมนต์เด่นของ Reddit) แปลเป็นไทยและเรียบเรียงเป็นบทคลิป · พิมพ์คำสั่งเพิ่มต่อท้ายได้ เช่น \"เล่าแบบตลก\" · ต้องเลือก AI เป็น Gemini หรือ Claude"
       : "AI จะยึดตามข้อมูลที่ใส่ ไม่แต่งข้อเท็จจริงเพิ่ม";
-    $("#batchBox").classList.add("hidden"); $("#storyCount").textContent = `${len}/8000`;
+    $("#batchBox").classList.add("hidden"); $("#storyCount").textContent = `${len.toLocaleString()}/50,000`;
     return;
   }
   const n = links().length + files.length;
@@ -975,7 +975,8 @@ function scriptModeChanged() {
   const rw = document.querySelector("input[name=script_mode]:checked").value === "rewrite";
   $("#scriptHint").textContent = rw ? "AI จะเรียบเรียงใหม่ให้กระชับ ตามความยาวคลิปที่ตั้งไว้ด้านล่าง" : "ความยาวคลิปจะเท่ากับความยาวบท — AI แค่แบ่งฉาก คิดภาพประกอบ และข้อความบนจอ";
   const lf = $("#longform") && $("#longform").checked, rs = $("#research") && $("#research").checked;
-  $("#target").closest("div").classList.toggle("hidden", mode() === "story" && !rw && !lf && !rs);
+  $("#target").closest("div").classList.toggle("hidden", mode() === "story" && !rw && !rs);
+  if (lf && !rw && !rs) $("#scriptHint").textContent = "คลิปยาวพากย์ตามบทของบอสทุกคำ — ความยาวคลิปเท่ากับบท (~1 นาทีต่อ 600 ตัวอักษร) · อยากได้บทแบ่งตอน ขึ้นบรรทัดชื่อบทด้วย ## เช่น ## จุดเริ่มต้น";
 }
 $("#scriptSeg").onchange = scriptModeChanged;
 $("#paste").onclick = async () => {
@@ -1139,7 +1140,7 @@ $("#go").onclick = async () => {
         fd.append("ref_use", document.querySelector("input[name=ref_use]:checked").value);
       }
       if ($("#research").checked) fd.append("research", "1");
-      if ($("#longform").checked) { fd.set("longform", "1"); fd.set("layout", "original"); fd.set("script_mode", "rewrite"); }
+      if ($("#longform").checked) { fd.set("longform", "1"); fd.set("layout", "original"); }
       const r = await api("/api/jobs", {method: "POST", body: fd});
       if (r.batch) { location.hash = "b=" + r.batch; return openBatch(r.batch); }
       location.hash = r.id; return openJob(r.id);
