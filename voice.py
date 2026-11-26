@@ -327,6 +327,7 @@ def reset() -> None:
     global _gemini_off, _pinned
     _gemini_off = None
     _pinned = None
+    globals()["_eleven_off"] = None
 
 
 def gemini_off() -> bool:
@@ -423,3 +424,122 @@ def prepare_reference(src: Path, out_wav: Path) -> float:
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                           str(out_wav)], capture_output=True, text=True).stdout.strip()
     return float(out or 0)
+
+
+# ───────────────────────── 🎤 ElevenLabs (เสียงพากย์คุณภาพสูง จ่ายตามตัวอักษร) ─────────────────────────
+ELEVEN_API = "https://api.elevenlabs.io/v1"
+_eleven_off: str | None = None
+_eleven_cache: dict = {}
+# รุ่นที่อ่านไทยได้ เรียงจากเสียงดีสุด (โปรแกรมเช็กกับรายการรุ่นจริงของบัญชีก่อนใช้)
+ELEVEN_MODEL_ORDER = ["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5"]
+
+
+def eleven_key() -> str:
+    return "".join((os.environ.get("ELEVENLABS_API_KEY") or "").split())
+
+
+def eleven_ready() -> bool:
+    return bool(eleven_key())
+
+
+def _eleven(path: str, body: dict | None = None, timeout: int = 120) -> bytes:
+    req = urllib.request.Request(ELEVEN_API + path, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"xi-api-key": eleven_key(), "Content-Type": "application/json",
+                                          "Accept": "*/*"}, method="POST" if body is not None else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            det = json.loads(raw).get("detail") or {}
+            msg = det.get("message") if isinstance(det, dict) else str(det)
+            status = det.get("status", "") if isinstance(det, dict) else ""
+        except Exception:
+            msg, status = raw[:200], ""
+        err = RuntimeError(f"ElevenLabs {e.code}: {msg or raw[:200]}")
+        err.code, err.status = e.code, status
+        raise err from None
+
+
+def eleven_voices() -> list[dict]:
+    """เสียงในบัญชี (รวมเสียงที่กดเพิ่มจาก Voice Library เช่น เสียงคนไทย) — เก็บไว้ 10 นาที"""
+    import time as _t
+    c = _eleven_cache.get("voices")
+    if c and _t.time() - c[0] < 600:
+        return c[1]
+    out = []
+    try:
+        data = json.loads(_eleven("/voices", timeout=20))
+        for v in data.get("voices") or []:
+            lab = v.get("labels") or {}
+            desc = " · ".join(x for x in (lab.get("gender"), lab.get("accent") or lab.get("language"), lab.get("age")) if x)
+            out.append({"id": v["voice_id"], "name": v.get("name", "?"), "desc": desc})
+    except Exception as e:
+        print("ดึงรายชื่อเสียง ElevenLabs ไม่ได้:", e)
+    _eleven_cache["voices"] = (_t.time(), out)
+    return out
+
+
+def _eleven_model() -> str:
+    if "model" in _eleven_cache:
+        return _eleven_cache["model"]
+    pick = "eleven_multilingual_v2"
+    try:
+        models = json.loads(_eleven("/models", timeout=20))
+        thai = [m["model_id"] for m in models if m.get("can_do_text_to_speech")
+                and any((l.get("language_id") or "").lower().startswith("th") for l in m.get("languages") or [])]
+        ranked = [m for m in ELEVEN_MODEL_ORDER if m in thai] + [m for m in thai if m not in ELEVEN_MODEL_ORDER]
+        if ranked:
+            pick = ranked[0]
+    except Exception as e:
+        print("ดูรุ่น ElevenLabs ไม่ได้ ใช้รุ่นมาตรฐาน:", e)
+    _eleven_cache["model"] = pick
+    return pick
+
+
+def eleven_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
+    """ElevenLabs → mp3 · โควตาหมด/คีย์ผิด → จำไว้ ไม่ลองซ้ำทั้งงาน"""
+    global _eleven_off
+    import time as _t
+    if _eleven_off:
+        raise RuntimeError(_eleven_off)
+    if not eleven_ready():
+        raise RuntimeError("ยังไม่ได้ใส่คีย์ ElevenLabs")
+    model = _eleven_model()
+    body = {"text": text, "model_id": model,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True,
+                               "speed": round(max(0.7, min(1.2, 1 + rate / 100)), 2)}}
+    if "flash" in model or "turbo" in model:
+        body["language_code"] = "th"
+    last = None
+    for attempt in range(4):
+        try:
+            data = _eleven(f"/text-to-speech/{voice_id}?output_format=mp3_44100_128", body)
+            if len(data) < 500:
+                raise RuntimeError("ElevenLabs ส่งเสียงว่างกลับมา")
+            out.write_bytes(data)
+            return
+        except RuntimeError as e:
+            last = e
+            code, status = getattr(e, "code", 0), getattr(e, "status", "")
+            if status in ("quota_exceeded",) or (code == 401 and "quota" in str(e).lower()):
+                _eleven_off = "เครดิต ElevenLabs เดือนนี้หมดแล้ว"
+                raise RuntimeError(_eleven_off) from None
+            if code == 401:
+                _eleven_off = f"คีย์ ElevenLabs ใช้ไม่ได้ ({e})"
+                raise RuntimeError(_eleven_off) from None
+            if code == 400 and "language_code" in body:
+                body.pop("language_code")
+                continue
+            if code in (400, 404, 422):
+                raise
+            _t.sleep(3 * (attempt + 1))  # 429 คนใช้เยอะ / 5xx → รอแล้วลองใหม่
+        except Exception as e:
+            last = e
+            _t.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"สร้างเสียง ElevenLabs ไม่สำเร็จ ({last})")
+
+
+def eleven_off() -> bool:
+    return bool(_eleven_off)

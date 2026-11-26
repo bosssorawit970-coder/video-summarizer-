@@ -982,6 +982,9 @@ def voice_list() -> list[dict]:
     out = [{**v, "group": "edge"} for v in THAI_VOICES]
     out += [{"id": f"gemini:{n}", "name": f"✨ Gemini {n} ({d})", "group": "gemini"} for n, d in V.GEMINI_VOICES]
     out += [{"id": f"clone:{n}", "name": f"🎙️ เสียงฉัน: {n}", "group": "clone"} for n in clone_voices()]
+    if V.eleven_ready():
+        out += [{"id": f"eleven:{v['id']}", "name": f"🎤 ElevenLabs {v['name']}" + (f" ({v['desc']})" if v["desc"] else ""),
+                 "group": "eleven"} for v in V.eleven_voices()[:60]]
     return out
 
 
@@ -993,6 +996,9 @@ def valid_voice(v: str) -> bool:
         return v[7:] in {n for n, _ in V.GEMINI_VOICES}
     if v.startswith("clone:"):
         return v[6:] in clone_voices()
+    if v.startswith("eleven:"):
+        import voice as V
+        return V.eleven_ready() and len(v) > 10
     return v in {x["id"] for x in THAI_VOICES}
 
 
@@ -1193,6 +1199,14 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
             if not switch and not V.gemini_off():
                 return None  # สะดุดชั่วคราว → ให้ tts_all วนกลับมาลองเสียง Gemini เดิมอีกรอบ
             _note(f"ใช้เสียง Gemini ไม่ได้ ({e}) — ใช้เสียงเปรมวดี/นิวัฒน์แทน")
+    elif voice.startswith("eleven:"):
+        try:
+            V.eleven_tts(text, out_mp3, voice[7:], rate)
+            return voice
+        except Exception as e:
+            if not switch and not V.eleven_off():
+                return None  # สะดุดชั่วคราว → วนกลับมาลองเสียงเดิม
+            _note(f"ใช้เสียง ElevenLabs ไม่ได้ ({e}) — ใช้เสียงเปรมวดีแทนทั้งคลิป")
     elif voice.startswith("clone:"):
         fallback = "th-TH-NiwatNeural"
         name = voice[6:]

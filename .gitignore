@@ -6,3 +6,4 @@ fonts/
 *.zip
 
 settings.txt
+.keys.json

@@ -574,6 +574,7 @@ video{border-radius:14px}
                 <button type="button" id="vPlay">▶ ฟังตัวอย่าง</button>
                 <button type="button" id="vRecOpen">🎙️ โคลนเสียงฉัน</button>
                 <button type="button" id="vDel" class="hidden">🗑 ลบเสียงนี้</button>
+                <button type="button" id="elevenBtn" title="เสียงพากย์คุณภาพสูงจาก ElevenLabs (ใช้คีย์ของบอสเอง)">🎤 ElevenLabs</button>
               </div>
               <audio id="vAudio" class="hidden" controls style="width:100%;margin-top:6px"></audio>
               <p class="hint" id="vHint"></p></div>
@@ -1641,7 +1642,7 @@ $("#renderBtn").onclick = async () => {
 };
 
 // ── เสียงพากย์: Gemini / โคลนเสียง ──
-const VGROUP = {edge: "เสียงมาตรฐาน (Edge ฟรีไม่จำกัด)", gemini: "✨ Gemini — เหมือนคนจริง (ใช้คีย์ Gemini)", clone: "🎙️ เสียงของฉัน (โคลน)"};
+const VGROUP = {edge: "เสียงมาตรฐาน (Edge ฟรีไม่จำกัด)", gemini: "✨ Gemini — เหมือนคนจริง (ใช้คีย์ Gemini)", eleven: "🎤 ElevenLabs — คุณภาพสูง (ใช้เครดิต)", clone: "🎙️ เสียงของฉัน (โคลน)"};
 function fillVoices(list) {
   cfg.voices = list;
   const html = Object.keys(VGROUP).map(g => {
@@ -1652,11 +1653,26 @@ function fillVoices(list) {
   for (const id of ["voice", "voice0"]) { const el = $("#" + id), v = el.value; el.innerHTML = html; if (v && list.some(x => x.id === v)) el.value = v; }
   voiceChanged();
 }
+$("#elevenBtn").onclick = async () => {
+  let info = {};
+  try { info = await api("/api/eleven"); } catch {}
+  const cur = info.ready ? `ตอนนี้ใส่คีย์แล้ว${info.left != null ? ` (เครดิตเหลือ ${(+info.left).toLocaleString()} ตัวอักษร · แพ็ก ${info.tier || "-"})` : ""}\n\n` : "";
+  const key = prompt(cur + "วางคีย์ API ของ ElevenLabs (elevenlabs.io → Developers → API Keys)\nเว้นว่างแล้วกด OK = ลบคีย์", "");
+  if (key === null) return;
+  try {
+    const r = await api("/api/eleven", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key})});
+    fillVoices(r.voices);
+    const first = r.voices.find(v => v.group === "eleven");
+    if (first) { $("#voice").value = first.id; voiceChanged(); }
+    alert(key ? `ใส่คีย์ ElevenLabs แล้ว ✓ เครดิตเหลือ ${(+r.left || 0).toLocaleString()} ตัวอักษร (แพ็ก ${r.tier || "-"})\nเลือกเสียงในกลุ่ม 🎤 ElevenLabs ได้เลย` : "ลบคีย์ ElevenLabs แล้ว");
+  } catch (e) { alert(e.message); }
+};
 function voiceChanged() {
   const v = $("#voice").value || "";
   $("#toneBox").classList.toggle("hidden", !v.startsWith("gemini:"));
   $("#vDel").classList.toggle("hidden", !v.startsWith("clone:"));
   $("#vHint").textContent = v.startsWith("gemini:") ? "เสียง Gemini ฟรีมีโควตาต่อวัน ถ้าเต็มจะสลับเป็นเสียงมาตรฐานให้อัตโนมัติ"
+    : v.startsWith("eleven:") ? "ElevenLabs คิดเครดิตตามจำนวนตัวอักษร (คลิป 1 นาที ≈ 600-700) · สร้างใหม่โดยไม่แก้บท ไม่เสียเครดิตซ้ำ · แพ็กฟรีห้ามใช้ในช่องที่สร้างรายได้"
     : v.startsWith("clone:") ? (cfg.clone_ok ? "ครั้งแรกจะติดตั้ง+โหลดโมเดลราว 3-5 นาที · ใช้ส่วนตัวเท่านั้น" : "⚠️ เครื่องนี้ไม่มีการ์ดจอ จะใช้เสียงนิวัฒน์แทน — เปิด Colab แบบ GPU เพื่อใช้เสียงโคลน") : "";
 }
 $("#voice").onchange = voiceChanged;

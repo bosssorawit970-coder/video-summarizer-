@@ -56,6 +56,13 @@ import mascot as MS  # noqa: E402
 
 JOBS_DIR = Path(os.environ.get("JOBS_DIR", BASE / "jobs")).resolve()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
+KEYS_FILE = JOBS_DIR / ".keys.json"  # คีย์ที่ใส่ผ่านหน้าโปรแกรม (ElevenLabs) — อยู่ในโฟลเดอร์งาน (Colab = Drive) ไม่ขึ้น GitHub
+try:
+    for _k, _v in json.loads(KEYS_FILE.read_text("utf-8")).items():
+        if _v and _k.endswith("_KEY"):
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass
 
 
 APP_PIN = (os.environ.get("APP_PIN") or "").strip()
@@ -1897,6 +1904,50 @@ for _f in BATCH_DIR.glob("*.json") if BATCH_DIR.exists() else []:
         batches[_b["id"]] = _b
     except Exception:
         pass
+async def eleven_key(req: Request):
+    """🎤 ใส่/ลบคีย์ ElevenLabs จากหน้าโปรแกรม → ทดสอบคีย์ + บอกเครดิตที่เหลือ"""
+    body = await req.json()
+    key = "".join(str(body.get("key") or "").split()).strip("\"'")
+    keys = {}
+    try:
+        keys = json.loads(KEYS_FILE.read_text("utf-8"))
+    except Exception:
+        pass
+    if not key:
+        os.environ.pop("ELEVENLABS_API_KEY", None)
+        keys.pop("ELEVENLABS_API_KEY", None)
+        KEYS_FILE.write_text(json.dumps(keys), "utf-8")
+        return JSONResponse({"ok": True, "voices": P.voice_list()})
+    old = os.environ.get("ELEVENLABS_API_KEY")
+    os.environ["ELEVENLABS_API_KEY"] = key
+    V._eleven_cache.clear()
+    V.reset()
+    try:
+        sub = json.loads(await asyncio.to_thread(V._eleven, "/user/subscription", None, 20))
+    except Exception as e:
+        if old:
+            os.environ["ELEVENLABS_API_KEY"] = old
+        else:
+            os.environ.pop("ELEVENLABS_API_KEY", None)
+        return JSONResponse({"error": f"คีย์ใช้ไม่ได้: {str(e)[:200]}"}, status_code=400)
+    keys["ELEVENLABS_API_KEY"] = key
+    KEYS_FILE.write_text(json.dumps(keys), "utf-8")
+    left = int(sub.get("character_limit") or 0) - int(sub.get("character_count") or 0)
+    voices = await asyncio.to_thread(P.voice_list)
+    return JSONResponse({"ok": True, "tier": sub.get("tier", ""), "left": left, "voices": voices})
+
+
+async def eleven_info(req: Request):
+    if not V.eleven_ready():
+        return JSONResponse({"ready": False})
+    try:
+        sub = json.loads(await asyncio.to_thread(V._eleven, "/user/subscription", None, 20))
+        return JSONResponse({"ready": True, "tier": sub.get("tier", ""),
+                             "left": int(sub.get("character_limit") or 0) - int(sub.get("character_count") or 0)})
+    except Exception as e:
+        return JSONResponse({"ready": True, "error": str(e)[:200]})
+
+
 IDEA_CATS = {"random": "สุ่มหลากหลายแนว", "mystery": "ปริศนา/เรื่องลึกลับที่ยังไม่มีคำตอบ",
              "history": "ประวัติศาสตร์/เหตุการณ์จริงที่คนไม่ค่อยรู้", "science": "วิทยาศาสตร์/ร่างกายมนุษย์ที่น่าทึ่ง",
              "space": "อวกาศ/จักรวาล", "animal": "สัตว์และธรรมชาติแปลกๆ", "tech": "สิ่งประดิษฐ์/เทคโนโลยี/ที่มาของสิ่งของ",
@@ -1955,6 +2006,8 @@ app = Starlette(routes=[
     Route("/api/jobs", list_jobs, methods=["GET"]),
     Route("/api/jobs", create_job, methods=["POST"]),
     Route("/api/ideas", ideas, methods=["POST"]),
+    Route("/api/eleven", eleven_key, methods=["POST"]),
+    Route("/api/eleven", eleven_info, methods=["GET"]),
     Route("/api/uploads", start_upload, methods=["POST"]),
     Route("/api/uploads/{uid}", put_chunk, methods=["PUT"]),
     Route("/api/jobs/{jid}", get_job, methods=["GET"]),
@@ -2013,7 +2066,7 @@ def _fetch_fonts() -> None:
 if __name__ == "__main__":
     import uvicorn
     _fetch_fonts()
-    ok = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Claude", "ANTHROPIC_API_KEY"),
+    ok = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Claude", "ANTHROPIC_API_KEY"), ("ElevenLabs", "ELEVENLABS_API_KEY"),
                          ("ภาพฟรี Pixabay/Pexels", "PEXELS_API_KEY")) if os.environ.get(k)]
     print("  คีย์ที่ใส่ไว้: " + (", ".join(ok) if ok else "ยังไม่มี (แก้ได้ในไฟล์ settings.txt)"))
     print("  การ์ดจอ: " + ("มี ✓" if P.has_gpu() else "ไม่มี (AI วาดภาพ/โคลนเสียงใช้ไม่ได้ ที่เหลือใช้ได้ปกติ)"))
