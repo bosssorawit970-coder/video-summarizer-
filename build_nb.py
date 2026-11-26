@@ -35,6 +35,8 @@ AI = "ollama"  #@param ["ollama", "claude", "none"]
 ANTHROPIC_API_KEY = ""  #@param {type:"string"}
 #@markdown คีย์ Pexels สำหรับภาพถ่ายจริงในโหมดข้อความ → คลิป (ฟรี สมัครที่ pexels.com/api) — หรือเก็บใน 🔑 Secrets ชื่อ `PEXELS_API_KEY`
 PEXELS_API_KEY = ""  #@param {type:"string"}
+#@markdown 🎤 คีย์ ElevenLabs (ไม่บังคับ — เสียงพากย์คุณภาพสูง) — หรือเก็บใน 🔑 Secrets ชื่อ `ELEVENLABS_API_KEY` / กดปุ่ม 🎤 ในหน้าโปรแกรม
+ELEVENLABS_API_KEY = ""  #@param {type:"string"}
 #@markdown รหัส PIN เข้าโปรแกรม (เว้นว่าง = สุ่มให้ทุกครั้ง แสดงใต้ปุ่มเปิดโปรแกรม)
 APP_PIN = ""  #@param {type:"string"}
 #@markdown บันทึกงานและวิดีโอลง Google Drive (โฟลเดอร์ "สรุปคลิป") — ไฟล์ไม่หายเมื่อ Colab ปิด
