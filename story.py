@@ -702,6 +702,13 @@ def video_options(s: dict, i: int, scene_dir: Path, n: int = 4, query: str = "")
     else:
         query, lang = scene_query(s)
     got = imagegen.search_videos(query, next_names(scene_dir, i, n, ".mp4"), lang)
+    if not got and s.get("image"):
+        # คำค้นที่เป็นชื่อเฉพาะ (คน/เหตุการณ์) แทบไม่มีในคลังวิดีโอฟรี → ค้นภาพรวมของฉากแทน (เช่น "old steam train")
+        skip = {"a", "an", "the", "of", "in", "on", "with", "and", "close-up", "closeup", "cinematic", "shot", "photo",
+                "realistic", "view", "wide", "detailed", "dramatic", "lighting", "showing", "at", "from", "by"}
+        words = [w for w in re.findall(r"[A-Za-z-]+", s["image"]) if w.lower() not in skip and len(w) > 2][:4]
+        if words:
+            got = imagegen.search_videos(" ".join(words), next_names(scene_dir, i, n, ".mp4"), "en")
     return [p.name for p in got]
 
 
@@ -790,6 +797,8 @@ Story topic: {topic}
 For each scene you get its Thai narration and several numbered candidate photos.
 Pick the photo that best illustrates THAT scene's narration: the right subject, place and mood.
 Prefer clear, relevant, good-looking photos. Avoid photos with big text/watermarks, or that contradict the narration.
+Images with visible AI mistakes (deformed hands or faces, extra fingers/limbs, melted or merged objects, garbled
+fake text, impossible anatomy) look fake to viewers: rank them last and never give them a score above 4.
 order = photo numbers from best to worst. score 0-10 = how well your best pick matches (0 = nothing relevant).
 Reply JSON only: {{"scenes": [{{"id": 1, "order": [2, 1, 3], "score": 7}}]}} with one item per scene."""
 

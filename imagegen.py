@@ -21,6 +21,8 @@ STYLES = {
     "cinematic": ("ภาพสมจริงแบบหนัง", "cinematic film still, realistic photo"),
     "anime": ("การ์ตูนอนิเมะ", "anime illustration, vibrant colors"),
     "digital": ("ภาพวาดดิจิทัล", "digital painting, concept art"),
+    "doc": ("ภาพวาดสารคดี (ดูไม่ปลอม)", "documentary illustration, painterly digital art, muted cinematic colors, "
+                                       "soft brush strokes, atmospheric, no text"),
     "3d": ("การ์ตูน 3 มิติ", "3D animated feature film still, stylized characters with big expressive eyes, "
                          "soft global illumination, subsurface skin, cinematic depth of field, vibrant colors, highly detailed 3D render"),
     "flat": ("ภาพกราฟิกแบน", "flat vector illustration, minimal, bold colors"),
