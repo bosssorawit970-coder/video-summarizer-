@@ -983,7 +983,8 @@ def voice_list() -> list[dict]:
     out += [{"id": f"gemini:{n}", "name": f"✨ Gemini {n} ({d})", "group": "gemini"} for n, d in V.GEMINI_VOICES]
     out += [{"id": f"clone:{n}", "name": f"🎙️ เสียงฉัน: {n}", "group": "clone"} for n in clone_voices()]
     if V.eleven_ready():
-        out += [{"id": f"eleven:{v['id']}", "name": f"🎤 ElevenLabs {v['name']}" + (f" ({v['desc']})" if v["desc"] else ""),
+        out += [{"id": f"eleven:{v['id']}", "name": f"🎤 ElevenLabs {v['name']}" + (f" ({v['desc']})" if v["desc"] else "")
+                 + (" · ต้องแพ็กเสียเงิน" if v.get("library") else ""),
                  "group": "eleven"} for v in V.eleven_voices()[:60]]
     return out
 

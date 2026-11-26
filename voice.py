@@ -475,7 +475,9 @@ def eleven_voices() -> list[dict]:
         for v in data.get("voices") or []:
             lab = v.get("labels") or {}
             desc = " · ".join(x for x in (lab.get("gender"), lab.get("accent") or lab.get("language"), lab.get("age")) if x)
-            out.append({"id": v["voice_id"], "name": v.get("name", "?"), "desc": desc})
+            cat = v.get("category") or ""
+            out.append({"id": v["voice_id"], "name": v.get("name", "?"), "desc": desc,
+                        "library": cat not in ("premade", "cloned", "generated", "")})
     except Exception as e:
         print("ดึงรายชื่อเสียง ElevenLabs ไม่ได้:", e)
     _eleven_cache["voices"] = (_t.time(), out)
@@ -526,6 +528,12 @@ def eleven_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
             code, status = getattr(e, "code", 0), getattr(e, "status", "")
             if status in ("quota_exceeded",) or (code == 401 and "quota" in str(e).lower()):
                 _eleven_off = "เครดิต ElevenLabs เดือนนี้หมดแล้ว"
+                raise RuntimeError(_eleven_off) from None
+            if code == 402:  # แพ็กฟรีใช้เสียงจาก Voice Library ผ่าน API ไม่ได้ / เครดิตไม่พอ
+                why = ("แพ็กฟรีใช้เสียงจาก Voice Library ผ่านโปรแกรมไม่ได้ — เลือกเสียงมาตรฐานของ ElevenLabs "
+                       "(เช่น Rachel, Adam, Sarah) หรืออัปเกรดเป็นแพ็ก Starter" if "library" in str(e).lower()
+                       else f"เครดิตหรือแพ็กไม่พอ ({e})")
+                _eleven_off = f"ใช้ ElevenLabs ไม่ได้: {why}"
                 raise RuntimeError(_eleven_off) from None
             if code in (401, 403):
                 why = str(e)
