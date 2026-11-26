@@ -1923,7 +1923,13 @@ async def eleven_key(req: Request):
     V._eleven_cache.clear()
     V.reset()
     try:
-        sub = json.loads(await asyncio.to_thread(V._eleven, "/user/subscription", None, 20))
+        try:
+            sub = json.loads(await asyncio.to_thread(V._eleven, "/user/subscription", None, 20))
+        except Exception as e1:  # คีย์จำกัดสิทธิ์ (ไม่ได้เปิด User) → ลองดึงรายชื่อเสียงแทน
+            if getattr(e1, "code", 0) not in (401, 403):
+                raise
+            await asyncio.to_thread(V._eleven, "/voices", None, 20)
+            sub = {}
     except Exception as e:
         if old:
             os.environ["ELEVENLABS_API_KEY"] = old
@@ -1932,7 +1938,7 @@ async def eleven_key(req: Request):
         return JSONResponse({"error": f"คีย์ใช้ไม่ได้: {str(e)[:200]}"}, status_code=400)
     keys["ELEVENLABS_API_KEY"] = key
     KEYS_FILE.write_text(json.dumps(keys), "utf-8")
-    left = int(sub.get("character_limit") or 0) - int(sub.get("character_count") or 0)
+    left = int(sub.get("character_limit") or 0) - int(sub.get("character_count") or 0) if sub else None
     voices = await asyncio.to_thread(P.voice_list)
     return JSONResponse({"ok": True, "tier": sub.get("tier", ""), "left": left, "voices": voices})
 

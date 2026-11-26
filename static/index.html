@@ -1664,7 +1664,7 @@ $("#elevenBtn").onclick = async () => {
     fillVoices(r.voices);
     const first = r.voices.find(v => v.group === "eleven");
     if (first) { $("#voice").value = first.id; voiceChanged(); }
-    alert(key ? `ใส่คีย์ ElevenLabs แล้ว ✓ เครดิตเหลือ ${(+r.left || 0).toLocaleString()} ตัวอักษร (แพ็ก ${r.tier || "-"})\nเลือกเสียงในกลุ่ม 🎤 ElevenLabs ได้เลย` : "ลบคีย์ ElevenLabs แล้ว");
+    alert(key ? `ใส่คีย์ ElevenLabs แล้ว ✓${r.left != null ? ` เครดิตเหลือ ${(+r.left).toLocaleString()} ตัวอักษร (แพ็ก ${r.tier || "-"})` : ""}\nเลือกเสียงในกลุ่ม 🎤 ElevenLabs ได้เลย` : "ลบคีย์ ElevenLabs แล้ว");
   } catch (e) { alert(e.message); }
 };
 function voiceChanged() {
