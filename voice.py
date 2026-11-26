@@ -432,6 +432,7 @@ _eleven_off: str | None = None
 _eleven_cache: dict = {}
 # รุ่นที่อ่านไทยได้ เรียงจากเสียงดีสุด (โปรแกรมเช็กกับรายการรุ่นจริงของบัญชีก่อนใช้)
 ELEVEN_MODEL_ORDER = ["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5"]
+ELEVEN_GUESS = ["eleven_v3", "eleven_flash_v2_5", "eleven_multilingual_v2"]  # ดูรายการรุ่นไม่ได้ (คีย์ไม่ได้เปิด Models) → ลองตามนี้
 
 
 def eleven_key() -> str:
@@ -484,7 +485,7 @@ def eleven_voices() -> list[dict]:
 def _eleven_model() -> str:
     if "model" in _eleven_cache:
         return _eleven_cache["model"]
-    pick = "eleven_multilingual_v2"
+    pick = ""
     try:
         models = json.loads(_eleven("/models", timeout=20))
         thai = [m["model_id"] for m in models if m.get("can_do_text_to_speech")
@@ -506,7 +507,7 @@ def eleven_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
         raise RuntimeError(_eleven_off)
     if not eleven_ready():
         raise RuntimeError("ยังไม่ได้ใส่คีย์ ElevenLabs")
-    model = _eleven_model()
+    model = _eleven_model() or (_eleven_cache.get("guess") or ELEVEN_GUESS)[0]
     body = {"text": text, "model_id": model,
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True,
                                "speed": round(max(0.7, min(1.2, 1 + rate / 100)), 2)}}
@@ -526,12 +527,25 @@ def eleven_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
             if status in ("quota_exceeded",) or (code == 401 and "quota" in str(e).lower()):
                 _eleven_off = "เครดิต ElevenLabs เดือนนี้หมดแล้ว"
                 raise RuntimeError(_eleven_off) from None
-            if code == 401:
-                _eleven_off = f"คีย์ ElevenLabs ใช้ไม่ได้ ({e})"
+            if code in (401, 403):
+                why = str(e)
+                if "permission" in why.lower() or "missing" in why.lower():
+                    why += " — คีย์ไม่ได้เปิดสิทธิ์ Text to Speech: สร้างคีย์ใหม่แล้วตั้ง Text to Speech = Access"
+                elif "unusual" in why.lower() or "free tier" in why.lower():
+                    why += " — แพ็กฟรีถูกบล็อกเมื่อใช้ผ่าน Colab/VPN: ใช้ในคอม หรือแพ็กเสียเงิน"
+                _eleven_off = f"ใช้ ElevenLabs ไม่ได้ ({why})"
                 raise RuntimeError(_eleven_off) from None
             if code == 400 and "language_code" in body:
                 body.pop("language_code")
                 continue
+            if code in (400, 404, 422) and not _eleven_cache.get("model"):  # รุ่นที่เดาใช้ไม่ได้ → ลองรุ่นถัดไป
+                guess = [m for m in (_eleven_cache.get("guess") or ELEVEN_GUESS) if m != body["model_id"]]
+                _eleven_cache["guess"] = guess
+                if guess:
+                    body["model_id"] = guess[0]
+                    if "flash" in guess[0] or "turbo" in guess[0]:
+                        body["language_code"] = "th"
+                    continue
             if code in (400, 404, 422):
                 raise
             _t.sleep(3 * (attempt + 1))  # 429 คนใช้เยอะ / 5xx → รอแล้วลองใหม่
