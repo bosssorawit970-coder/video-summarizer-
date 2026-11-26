@@ -104,6 +104,17 @@ except Exception:
     pix = ""
 if pix:
     env["PIXABAY_API_KEY"] = pix
+# คีย์ ElevenLabs (ไม่บังคับ): ใส่ใน 🔑 Secrets ชื่อ ELEVENLABS_API_KEY หรือกดปุ่ม 🎤 ElevenLabs ในหน้าโปรแกรม
+el = "".join(str(globals().get("ELEVENLABS_API_KEY", "") or "").split())
+if not el:
+    try:
+        from google.colab import userdata
+        el = "".join((userdata.get("ELEVENLABS_API_KEY") or "").split())
+    except Exception:
+        el = ""
+if el:
+    env["ELEVENLABS_API_KEY"] = el
+    step(f"   ใส่คีย์ ElevenLabs แล้ว ✓ ({el[:5]}…{el[-4:]})")
 pin = APP_PIN.strip()
 if not pin:  # สุ่ม PIN 6 หลัก (ใช้ค่าเดิมถ้ารันซ้ำในรอบเดียวกัน)
     pin = open("/content/.pin").read().strip() if os.path.exists("/content/.pin") else f"{random.randint(0, 999999):06d}"
