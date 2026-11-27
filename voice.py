@@ -627,15 +627,26 @@ def paxa_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
     if not paxa_ready():
         raise RuntimeError("ยังไม่ได้ใส่คีย์ Paxa Labs")
     text = text.strip()[:4900]
+    # ให้ Paxa พูดความเร็วปกติ (เสียงตรงกับในเว็บ) แล้วค่อยเร่งเองด้วย atempo ซึ่งไม่ทำให้เสียงแหลมขึ้น
     body = {"text": text, "voice": voice_id, "model": PAXA_MODEL, "format": "mp3", "language": "th",
-            "speed": round(max(0.5, min(1.5, 1 + rate / 100)) * 20) / 20}
+            "sample_rate": 44100}
+    tempo = max(0.6, min(1.6, 1 + rate / 100))
     last = None
     for attempt in range(4):
         try:
             data, _ = _paxa(body)
             if len(data) < 500:
                 raise RuntimeError("Paxa ส่งเสียงว่างกลับมา")
-            out.write_bytes(data)
+            if abs(tempo - 1) < 0.01:
+                out.write_bytes(data)
+                return
+            tmp = out.with_suffix(".paxa.mp3")
+            tmp.write_bytes(data)
+            try:
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tmp), "-af", f"atempo={tempo:.3f}",
+                                "-c:a", "libmp3lame", "-q:a", "2", str(out)], check=True)
+            finally:
+                tmp.unlink(missing_ok=True)
             return
         except RuntimeError as e:
             last = e

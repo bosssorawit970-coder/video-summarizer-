@@ -1706,7 +1706,8 @@ RENDER_VERSION = 3  # เปลี่ยนเมื่อแก้หน้า�
 def _tts_cached(texts, workdir, cache, voice, rate, tone, progress):
     """เสียงพากย์แคชต่อท่อน: กดสร้างใหม่/แก้บางฉาก → สร้างเสียงเฉพาะท่อนที่เปลี่ยน (ประหยัดโควตาเสียง Gemini มาก)
     เก็บแคชเฉพาะรอบที่ได้เสียงที่เลือกจริง (ถ้าถอยไปใช้เสียงสำรอง ไม่เก็บ — รอบหน้าจะได้ลองเสียงจริงอีก)"""
-    keys = [_sha(t, voice, rate, tone) if t else "" for t in texts]
+    extra = ("paxa-atempo",) if str(voice).startswith("paxa:") else ()  # เสียง Paxa รุ่นเก่า (เร่งในตัว เสียงแหลม) ไม่ใช้ซ้ำ
+    keys = [_sha(t, voice, rate, tone, *extra) if t else "" for t in texts]
     outs: list = [None] * len(texts)
     todo = []
     for i, (t, k) in enumerate(zip(texts, keys)):
