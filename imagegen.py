@@ -399,6 +399,53 @@ def _pexels_video_urls(query: str, n: int, lang: str = "en") -> list[str]:
     return out
 
 
+def _download_one(url: str, out: Path) -> bool:
+    tmp = out.with_suffix(".dl")
+    try:
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=45) as r, open(tmp, "wb") as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                if f.tell() > 60 * 1024 * 1024:
+                    raise ValueError("ไฟล์ใหญ่เกิน")
+        normalize_video(tmp, out)
+        return True
+    except Exception as e:
+        print("โหลดวิดีโอไม่ได้:", str(e)[-200:])
+        out.unlink(missing_ok=True)
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _download_videos(urls: list[str], outs: list[Path]) -> list[Path]:
+    """โหลด+แปลงหลายคลิปพร้อมกัน (เดิมทีละคลิป ช้ามาก) เผื่อตัวสำรอง 2 คลิปเผื่อบางลิงก์เสีย"""
+    from concurrent.futures import ThreadPoolExecutor
+    if not outs or not urls:
+        return []
+    urls = urls[:len(outs) + 2]
+    tmp_outs = [outs[0].with_name(f"{outs[0].stem}_try{k}.mp4") for k in range(len(urls))]
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        ok = list(ex.map(_download_one, urls, tmp_outs))
+    good = [t for t, o in zip(tmp_outs, ok) if o and t.exists()]
+    got = []
+    for t in good:
+        if len(got) < len(outs):
+            dst = outs[len(got)]
+            t.replace(dst)
+            png = t.with_suffix(".png")
+            if png.exists():
+                png.replace(dst.with_suffix(".png"))
+            got.append(dst)
+        else:
+            t.unlink(missing_ok=True)
+            t.with_suffix(".png").unlink(missing_ok=True)
+    return got
+
+
 def search_videos(query: str, outs: list[Path], lang: str = "en") -> list[Path]:
     """ค้นวิดีโอฟรีแล้วแปลงเป็นคลิปสั้นมาตรฐาน (≤ 20 วิ, ไม่เกิน 1280px, ไม่มีเสียง) + ภาพตัวอย่าง .png
     outs = ชื่อไฟล์ .mp4 ปลายทาง คืนไฟล์ที่ได้จริง"""
@@ -424,29 +471,7 @@ def search_videos(query: str, outs: list[Path], lang: str = "en") -> list[Path]:
                 break
             if urls:
                 break
-        got = []
-        for url in urls:
-            if len(got) >= len(outs):
-                break
-            out = outs[len(got)]
-            tmp = out.with_suffix(".dl")
-            try:
-                req = urllib.request.Request(url, headers=UA)
-                with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
-                    while True:
-                        chunk = r.read(1 << 20)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        if f.tell() > 80 * 1024 * 1024:
-                            raise ValueError("ไฟล์ใหญ่เกิน")
-                normalize_video(tmp, out)
-                got.append(out)
-            except Exception as e:
-                print("โหลดวิดีโอไม่ได้:", str(e)[-200:])
-                out.unlink(missing_ok=True)
-            finally:
-                tmp.unlink(missing_ok=True)
+        got = _download_videos(urls, outs)
         if got:
             return got
     if errors:
