@@ -189,15 +189,28 @@ if BACKUP_LINK:
             urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
                                        "/content/cloudflared")
             os.chmod("/content/cloudflared", 0o755)
-        cf = open("/content/cloudflared.log", "w")
-        cf_proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
-                                   stdout=cf, stderr=cf)
-        for _ in range(40):
-            m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
-            if m:
-                backup = m.group(0)
+        for _try in range(3):  # Cloudflare ช้า/ไม่ตอบเป็นบางรอบ → ปิดแล้วเปิดใหม่ สูงสุด 3 รอบ
+            if cf_proc:
+                cf_proc.kill()
+            cf = open("/content/cloudflared.log", "w")
+            cf_proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000",
+                                        "--no-autoupdate", "--protocol", "http2"] if _try else
+                                       ["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
+                                       stdout=cf, stderr=cf)
+            for _ in range(30):
+                m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open("/content/cloudflared.log").read())
+                if m:
+                    backup = m.group(0)
+                    break
+                if cf_proc.poll() is not None:
+                    break
+                time.sleep(1)
+            if backup:
                 break
-            time.sleep(1)
+        if not backup:
+            _log = open("/content/cloudflared.log").read().strip().splitlines()[-3:]
+            step("   ⚠️ สร้างลิงก์สำรองไม่ได้รอบนี้ (Cloudflare ไม่ตอบ) — ใช้ปุ่มหลักไปก่อน ระบบจะลองใหม่เองระหว่างรอ"
+                 + ("\n      " + "\n      ".join(l[-150:] for l in _log) if _log else ""))
     except Exception as e:
         step(f"   ⚠️ สร้างลิงก์สำรองไม่ได้: {e}")
     if backup:
@@ -253,8 +266,10 @@ def _stop_all():
 
 def _new_tunnel():
     """ลิงก์สำรองหลุด (Cloudflare ตัดเป็นพักๆ) → เปิดลิงก์ใหม่"""
-    global cf_proc
+    global cf_proc, backup
     try:
+        if cf_proc and cf_proc.poll() is None:
+            cf_proc.kill()
         cf = open("/content/cloudflared.log", "w")
         cf_proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000", "--no-autoupdate"],
                                    stdout=cf, stderr=cf)
@@ -263,7 +278,8 @@ def _new_tunnel():
             if m:
                 display(HTML(f'<a href="{m.group(0)}" target="_blank" style="{btn};background:#d9480f;color:#fff">'
                              '▶ ลิงก์สำรองใหม่ (อันเดิมหลุด)</a>'))
-                print(f"🔗 ลิงก์สำรองหลุด — ลิงก์ใหม่: {m.group(0)}  (PIN เดิม)", flush=True)
+                print(f"🔗 ลิงก์สำรอง{'หลุด — ลิงก์ใหม่' if backup else 'พร้อมแล้ว'}: {m.group(0)}  (PIN เดิม)", flush=True)
+                backup = m.group(0)
                 return
             time.sleep(1)
     except Exception as e:
@@ -271,6 +287,7 @@ def _new_tunnel():
 
 
 restarts = 0
+tunnel_tries = 0
 try:
     while True:
         time.sleep(CHECK_EVERY)
@@ -289,6 +306,9 @@ try:
                 print(f"🔄 เปิดโปรแกรมใหม่ให้แล้ว (ครั้งที่ {restarts}) — ลิงก์และ PIN เดิม รีเฟรชหน้าโปรแกรม · งานที่ค้างกด 🔁 ลองใหม่", flush=True)
             continue
         if cf_proc is not None and cf_proc.poll() is not None:
+            _new_tunnel()
+        elif BACKUP_LINK and not backup and tunnel_tries < 5 and os.path.exists("/content/cloudflared"):
+            tunnel_tries += 1  # รอบแรกสร้างลิงก์สำรองไม่ได้ → ลองใหม่เรื่อยๆ ระหว่างรอ
             _new_tunnel()
         try:
             import json as _json
