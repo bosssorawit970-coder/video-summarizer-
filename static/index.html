@@ -434,6 +434,15 @@ video{border-radius:14px}
         <select id="voice0"></select>
       </div>
       <div>
+        <label class="f">ความเร็วการพูด</label>
+        <select id="rate0">
+          <option value="-10">ช้าลง (-10%)</option>
+          <option value="0">ปกติ — เสียงตรงกับต้นฉบับ</option>
+          <option value="10" selected>เร็วขึ้นนิด (+10%) — เหมาะกับ Shorts</option>
+          <option value="20">เร็ว (+20%)</option>
+        </select>
+      </div>
+      <div>
         <label class="f">สัดส่วนวิดีโอ</label>
         <select id="layout0"></select>
       </div>
@@ -917,6 +926,7 @@ $("#longform").onchange = () => {
   if (on) { t.min = 180; t.max = 900; t.step = 30; t.value = 480; } else { t.min = 20; t.max = 300; t.step = 10; t.value = 40; }
   $("#tgtV").textContent = tgtText(+t.value);
   if (cfg) $("#layout0").value = on ? "original" : "vertical_crop";
+  $("#rate0").value = on ? "0" : "10";
   const r = $("#rate"); if (r) { r.value = on ? 0 : 10; $("#rateV").textContent = (r.value > 0 ? "+" : "") + r.value + "%"; }  // คลิปยาว: พูดช้าลงนิด ฟังสบาย
   scriptModeChanged();
 };
@@ -1113,6 +1123,7 @@ function commonFields(fd) {
   fd.append("target_seconds", $("#target").value);
   fd.append("whisper_model", $("#whisper").value);
   fd.append("voice", $("#voice0").value);
+  fd.append("rate", $("#rate0").value);
   fd.append("auto", $("#auto").checked ? "1" : "");
   fd.append("mode", mode());
   fd.append("layout", $("#layout0").value);
