@@ -115,6 +115,15 @@ if not el:
 if el:
     env["ELEVENLABS_API_KEY"] = el
     step(f"   ใส่คีย์ ElevenLabs แล้ว ✓ ({el[:5]}…{el[-4:]})")
+# คีย์ Paxa Labs (ไม่บังคับ): 🔑 Secrets ชื่อ PAXA_API_KEY หรือกดปุ่ม 🇹🇭 Paxa ในหน้าโปรแกรม
+try:
+    from google.colab import userdata
+    px = "".join((userdata.get("PAXA_API_KEY") or "").split())
+except Exception:
+    px = ""
+if px:
+    env["PAXA_API_KEY"] = px
+    step(f"   ใส่คีย์ Paxa แล้ว ✓ ({px[:6]}…{px[-4:]})")
 pin = APP_PIN.strip()
 if not pin:  # สุ่ม PIN 6 หลัก (ใช้ค่าเดิมถ้ารันซ้ำในรอบเดียวกัน)
     pin = open("/content/.pin").read().strip() if os.path.exists("/content/.pin") else f"{random.randint(0, 999999):06d}"

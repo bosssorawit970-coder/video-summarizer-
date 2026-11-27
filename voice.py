@@ -328,6 +328,7 @@ def reset() -> None:
     _gemini_off = None
     _pinned = None
     globals()["_eleven_off"] = None
+    globals()["_paxa_off"] = None
 
 
 def gemini_off() -> bool:
@@ -565,3 +566,97 @@ def eleven_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
 
 def eleven_off() -> bool:
     return bool(_eleven_off)
+
+
+# ───────────────────────── 🇹🇭 Paxa Labs (เสียงไทยจากบริษัทไทย ราคาถูก จ่ายตามตัวอักษร) ─────────────────────────
+PAXA_API = "https://api.paxalabs.com/v1"
+PAXA_MODEL = "paxa-tts-flash-v2"
+_paxa_off: str | None = None
+# (id, เพศ, คำอธิบาย) — เสียงที่เหมาะกับคลิปเล่าเรื่องขึ้นก่อน
+PAXA_VOICES = [
+    ("khanomkrok", "m", "ชาย สุขุม · สารคดี/บรรยาย"), ("foithong", "f", "หญิง · นักเล่าเรื่องยาว/อธิบาย"),
+    ("tako", "f", "หญิง สบายๆ · สรุปเรื่อง/อธิบาย"), ("matum", "f", "หญิง ชัดเจน · สารคดี"),
+    ("massaman", "m", "ชาย หนักแน่น · ตัวอย่างหนัง/ดราม่า"), ("thongek", "m", "ชาย น่าเชื่อถือ · ข่าว"),
+    ("kaengphet", "m", "ชาย ยิ่งใหญ่ · ตัวอย่างหนัง"), ("hormok", "m", "ชาย ก้องกังวาน · แฟนตาซี/มหากาพย์"),
+    ("chuchi", "m", "ชาย ชัด · ครู/ความรู้"), ("khaoniao", "m", "ชาย ทุ้มช้า · สารคดี"),
+    ("tomyum", "f", "หญิง พูดเร็ว เป็นกันเอง · สรุปละคร/คลิปโซเชียล"), ("mooping", "m", "ชาย มั่นใจ · โฆษณา/Shorts"),
+    ("khaijiao", "m", "ชาย พลังสูง · พากย์เกม/ตัวอย่าง"), ("satay", "m", "ชาย หนุ่ม · อนิเมะ/เกม"),
+    ("thongyod", "f", "หญิง สดใส · อนิเมะ/เกม"), ("nomyen", "f", "หญิง กระตือรือร้น · โปรโมต"),
+    ("namprik", "f", "หญิง เสียงต่ำ · ดราม่า/เรื่องเล่า"), ("miangkham", "f", "หญิง ดุ · เรื่องผี"),
+    ("panang", "m", "ชาย แบบนักแสดงละครเวที"), ("kaprao", "m", "ชาย สบายๆ · อธิบาย"),
+    ("salim", "f", "หญิง เป็นกันเอง · รีวิว/vlog"), ("khanomchan", "f", "หญิง ร่าเริง · คลิปโซเชียล"),
+    ("krayasat", "m", "ชาย คุณตาใจดี · นิทาน"), ("kluaytod", "m", "ชาย ตลก · การ์ตูน"),
+    ("kaengpa", "m", "ชาย ตัวร้าย"), ("makham", "f", "หญิง ตัวร้าย เย็นชา"),
+]
+
+
+def paxa_key() -> str:
+    return "".join((os.environ.get("PAXA_API_KEY") or "").split())
+
+
+def paxa_ready() -> bool:
+    return bool(paxa_key())
+
+
+def _paxa(body: dict, timeout: int = 120) -> tuple[bytes, dict]:
+    req = urllib.request.Request(PAXA_API + "/tts", data=json.dumps(body).encode(),
+                                 headers={"Authorization": f"Bearer {paxa_key()}", "Content-Type": "application/json",
+                                          "User-Agent": "sarupclip/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            j = json.loads(raw)
+            msg = f"{j.get('title', '')} {j.get('detail', '')}".strip()
+        except Exception:
+            msg = raw[:200]
+        err = RuntimeError(f"Paxa {e.code}: {msg}")
+        err.code = e.code
+        err.status = (msg.split() or [""])[0]
+        raise err from None
+
+
+def paxa_tts(text: str, out: Path, voice_id: str, rate: int = 0) -> None:
+    """Paxa Labs → mp3 · เครดิตหมด/คีย์ผิด → จำไว้ ไม่ลองซ้ำทั้งงาน"""
+    global _paxa_off
+    import time as _t
+    if _paxa_off:
+        raise RuntimeError(_paxa_off)
+    if not paxa_ready():
+        raise RuntimeError("ยังไม่ได้ใส่คีย์ Paxa Labs")
+    text = text.strip()[:4900]
+    body = {"text": text, "voice": voice_id, "model": PAXA_MODEL, "format": "mp3", "language": "th",
+            "speed": round(max(0.5, min(1.5, 1 + rate / 100)) * 20) / 20}
+    last = None
+    for attempt in range(4):
+        try:
+            data, _ = _paxa(body)
+            if len(data) < 500:
+                raise RuntimeError("Paxa ส่งเสียงว่างกลับมา")
+            out.write_bytes(data)
+            return
+        except RuntimeError as e:
+            last = e
+            code = getattr(e, "code", 0)
+            if code == 402:
+                _paxa_off = "เครดิต Paxa Labs หมดแล้ว (เติมได้ที่ paxalabs.com → ซื้อเครดิต)"
+                raise RuntimeError(_paxa_off) from None
+            if code in (401, 403):
+                _paxa_off = "คีย์ Paxa Labs ใช้ไม่ได้" + (" หรือถึงวงเงินที่ตั้งไว้ของคีย์" if code == 403 else "")
+                raise RuntimeError(_paxa_off) from None
+            if code == 400 and "tag_invalid" in str(e):  # ข้อความมี [..] ที่ระบบนึกว่าเป็นคำสั่งอารมณ์ → เอาออก
+                body["text"] = re.sub(r"[\[\]<>]", " ", body["text"])
+                continue
+            if code in (400, 413, 422):
+                raise
+            _t.sleep(3 * (attempt + 1))  # 429 / 5xx → รอแล้วลองใหม่
+        except Exception as e:
+            last = e
+            _t.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"สร้างเสียง Paxa ไม่สำเร็จ ({last})")
+
+
+def paxa_off() -> bool:
+    return bool(_paxa_off)

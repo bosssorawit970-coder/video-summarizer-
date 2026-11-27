@@ -1954,6 +1954,42 @@ async def eleven_info(req: Request):
         return JSONResponse({"ready": True, "error": str(e)[:200]})
 
 
+async def paxa_key(req: Request):
+    """🇹🇭 ใส่/ลบคีย์ Paxa Labs จากหน้าโปรแกรม → ทดสอบด้วยเสียงสั้นๆ (ใช้เครดิตราว 0.1)"""
+    body = await req.json()
+    key = "".join(str(body.get("key") or "").split()).strip("\"'")
+    keys = {}
+    try:
+        keys = json.loads(KEYS_FILE.read_text("utf-8"))
+    except Exception:
+        pass
+    if not key:
+        os.environ.pop("PAXA_API_KEY", None)
+        keys.pop("PAXA_API_KEY", None)
+        KEYS_FILE.write_text(json.dumps(keys), "utf-8")
+        return JSONResponse({"ok": True, "voices": P.voice_list()})
+    old = os.environ.get("PAXA_API_KEY")
+    os.environ["PAXA_API_KEY"] = key
+    V.reset()
+    try:
+        await asyncio.to_thread(V._paxa, {"text": "ทดสอบ", "voice": V.PAXA_VOICES[0][0], "model": V.PAXA_MODEL}, 30)
+    except Exception as e:
+        if old:
+            os.environ["PAXA_API_KEY"] = old
+        else:
+            os.environ.pop("PAXA_API_KEY", None)
+        code = getattr(e, "code", 0)
+        why = ("เครดิตหมด" if code == 402 else "คีย์ไม่ถูกต้อง" if code == 401 else str(e)[:200])
+        return JSONResponse({"error": f"คีย์ Paxa ใช้ไม่ได้: {why}"}, status_code=400)
+    keys["PAXA_API_KEY"] = key
+    KEYS_FILE.write_text(json.dumps(keys), "utf-8")
+    return JSONResponse({"ok": True, "voices": await asyncio.to_thread(P.voice_list)})
+
+
+async def paxa_info(req: Request):
+    return JSONResponse({"ready": V.paxa_ready()})
+
+
 IDEA_CATS = {"random": "สุ่มหลากหลายแนว", "mystery": "ปริศนา/เรื่องลึกลับที่ยังไม่มีคำตอบ",
              "history": "ประวัติศาสตร์/เหตุการณ์จริงที่คนไม่ค่อยรู้", "science": "วิทยาศาสตร์/ร่างกายมนุษย์ที่น่าทึ่ง",
              "space": "อวกาศ/จักรวาล", "animal": "สัตว์และธรรมชาติแปลกๆ", "tech": "สิ่งประดิษฐ์/เทคโนโลยี/ที่มาของสิ่งของ",
@@ -2014,6 +2050,8 @@ app = Starlette(routes=[
     Route("/api/ideas", ideas, methods=["POST"]),
     Route("/api/eleven", eleven_key, methods=["POST"]),
     Route("/api/eleven", eleven_info, methods=["GET"]),
+    Route("/api/paxa", paxa_key, methods=["POST"]),
+    Route("/api/paxa", paxa_info, methods=["GET"]),
     Route("/api/uploads", start_upload, methods=["POST"]),
     Route("/api/uploads/{uid}", put_chunk, methods=["PUT"]),
     Route("/api/jobs/{jid}", get_job, methods=["GET"]),
@@ -2072,7 +2110,7 @@ def _fetch_fonts() -> None:
 if __name__ == "__main__":
     import uvicorn
     _fetch_fonts()
-    ok = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Claude", "ANTHROPIC_API_KEY"), ("ElevenLabs", "ELEVENLABS_API_KEY"),
+    ok = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Claude", "ANTHROPIC_API_KEY"), ("ElevenLabs", "ELEVENLABS_API_KEY"), ("Paxa", "PAXA_API_KEY"),
                          ("ภาพฟรี Pixabay/Pexels", "PEXELS_API_KEY")) if os.environ.get(k)]
     print("  คีย์ที่ใส่ไว้: " + (", ".join(ok) if ok else "ยังไม่มี (แก้ได้ในไฟล์ settings.txt)"))
     print("  การ์ดจอ: " + ("มี ✓" if P.has_gpu() else "ไม่มี (AI วาดภาพ/โคลนเสียงใช้ไม่ได้ ที่เหลือใช้ได้ปกติ)"))

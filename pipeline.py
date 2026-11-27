@@ -986,6 +986,8 @@ def voice_list() -> list[dict]:
         out += [{"id": f"eleven:{v['id']}", "name": f"🎤 ElevenLabs {v['name']}" + (f" ({v['desc']})" if v["desc"] else "")
                  + (" · ต้องแพ็กเสียเงิน" if v.get("library") else ""),
                  "group": "eleven"} for v in V.eleven_voices()[:60]]
+    if V.paxa_ready():
+        out += [{"id": f"paxa:{i}", "name": f"🇹🇭 Paxa {i} ({d})", "group": "paxa"} for i, _, d in V.PAXA_VOICES]
     return out
 
 
@@ -1000,6 +1002,9 @@ def valid_voice(v: str) -> bool:
     if v.startswith("eleven:"):
         import voice as V
         return V.eleven_ready() and len(v) > 10
+    if v.startswith("paxa:"):
+        import voice as V
+        return V.paxa_ready() and v[5:] in {i for i, _, _ in V.PAXA_VOICES}
     return v in {x["id"] for x in THAI_VOICES}
 
 
@@ -1208,6 +1213,16 @@ def _tts_raw(text: str, out_mp3: Path, voice: str, rate: int, tone: str = "natur
             if not switch and not V.eleven_off():
                 return None  # สะดุดชั่วคราว → วนกลับมาลองเสียงเดิม
             _note(f"ใช้เสียง ElevenLabs ไม่ได้ ({e}) — ใช้เสียงเปรมวดีแทนทั้งคลิป")
+    elif voice.startswith("paxa:"):
+        if dict((i, g) for i, g, _ in V.PAXA_VOICES).get(voice[5:]) == "m":
+            fallback = "th-TH-NiwatNeural"
+        try:
+            V.paxa_tts(text, out_mp3, voice[5:], rate)
+            return voice
+        except Exception as e:
+            if not switch and not V.paxa_off():
+                return None  # สะดุดชั่วคราว → วนกลับมาลองเสียงเดิม
+            _note(f"ใช้เสียง Paxa ไม่ได้ ({e}) — ใช้เสียงมาตรฐานแทนทั้งคลิป")
     elif voice.startswith("clone:"):
         fallback = "th-TH-NiwatNeural"
         name = voice[6:]

@@ -575,6 +575,7 @@ video{border-radius:14px}
                 <button type="button" id="vRecOpen">🎙️ โคลนเสียงฉัน</button>
                 <button type="button" id="vDel" class="hidden">🗑 ลบเสียงนี้</button>
                 <button type="button" id="elevenBtn" title="เสียงพากย์คุณภาพสูงจาก ElevenLabs (ใช้คีย์ของบอสเอง)">🎤 ElevenLabs</button>
+                <button type="button" id="paxaBtn" title="เสียงไทยจาก Paxa Labs (ใช้คีย์ของบอสเอง)">🇹🇭 Paxa</button>
               </div>
               <audio id="vAudio" class="hidden" controls style="width:100%;margin-top:6px"></audio>
               <p class="hint" id="vHint"></p></div>
@@ -1642,7 +1643,7 @@ $("#renderBtn").onclick = async () => {
 };
 
 // ── เสียงพากย์: Gemini / โคลนเสียง ──
-const VGROUP = {edge: "เสียงมาตรฐาน (Edge ฟรีไม่จำกัด)", gemini: "✨ Gemini — เหมือนคนจริง (ใช้คีย์ Gemini)", eleven: "🎤 ElevenLabs — คุณภาพสูง (ใช้เครดิต)", clone: "🎙️ เสียงของฉัน (โคลน)"};
+const VGROUP = {edge: "เสียงมาตรฐาน (Edge ฟรีไม่จำกัด)", gemini: "✨ Gemini — เหมือนคนจริง (ใช้คีย์ Gemini)", eleven: "🎤 ElevenLabs — คุณภาพสูง (ใช้เครดิต)", paxa: "🇹🇭 Paxa Labs — เสียงไทย (ใช้เครดิต)", clone: "🎙️ เสียงของฉัน (โคลน)"};
 function fillVoices(list) {
   cfg.voices = list;
   const html = Object.keys(VGROUP).map(g => {
@@ -1667,12 +1668,26 @@ $("#elevenBtn").onclick = async () => {
     alert(key ? `ใส่คีย์ ElevenLabs แล้ว ✓${r.left != null ? ` เครดิตเหลือ ${(+r.left).toLocaleString()} ตัวอักษร (แพ็ก ${r.tier || "-"})` : ""}\nเลือกเสียงในกลุ่ม 🎤 ElevenLabs ได้เลย` : "ลบคีย์ ElevenLabs แล้ว");
   } catch (e) { alert(e.message); }
 };
+$("#paxaBtn").onclick = async () => {
+  let info = {};
+  try { info = await api("/api/paxa"); } catch {}
+  const key = prompt((info.ready ? "ตอนนี้ใส่คีย์แล้ว\n\n" : "") + "วางคีย์ API ของ Paxa Labs (ขึ้นต้นด้วย pxa_)\nเว้นว่างแล้วกด OK = ลบคีย์", "");
+  if (key === null) return;
+  try {
+    const r = await api("/api/paxa", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key})});
+    fillVoices(r.voices);
+    const first = r.voices.find(v => v.group === "paxa");
+    if (first) { $("#voice").value = first.id; voiceChanged(); }
+    alert(key ? "ใส่คีย์ Paxa แล้ว ✓\nเลือกเสียงในกลุ่ม 🇹🇭 Paxa Labs ได้เลย" : "ลบคีย์ Paxa แล้ว");
+  } catch (e) { alert(e.message); }
+};
 function voiceChanged() {
   const v = $("#voice").value || "";
   $("#toneBox").classList.toggle("hidden", !v.startsWith("gemini:"));
   $("#vDel").classList.toggle("hidden", !v.startsWith("clone:"));
   $("#vHint").textContent = v.startsWith("gemini:") ? "เสียง Gemini ฟรีมีโควตาต่อวัน ถ้าเต็มจะสลับเป็นเสียงมาตรฐานให้อัตโนมัติ"
     : v.startsWith("eleven:") ? "ElevenLabs คิดเครดิตตามจำนวนตัวอักษร (คลิป 1 นาที ≈ 600-700) · สร้างใหม่โดยไม่แก้บท ไม่เสียเครดิตซ้ำ · แพ็กฟรีห้ามใช้ในช่องที่สร้างรายได้"
+    : v.startsWith("paxa:") ? "Paxa คิด 10 เครดิต/1,000 ตัวอักษร (ฟรี 100 เครดิต ≈ คลิปสั้น 10-15 คลิป) · แพ็กฟรีห้ามใช้ในช่องที่สร้างรายได้ ต้องแพ็กเสียเงิน"
     : v.startsWith("clone:") ? (cfg.clone_ok ? "ครั้งแรกจะติดตั้ง+โหลดโมเดลราว 3-5 นาที · ใช้ส่วนตัวเท่านั้น" : "⚠️ เครื่องนี้ไม่มีการ์ดจอ จะใช้เสียงนิวัฒน์แทน — เปิด Colab แบบ GPU เพื่อใช้เสียงโคลน") : "";
 }
 $("#voice").onchange = voiceChanged;

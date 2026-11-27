@@ -10,6 +10,8 @@ PEXELS_API_KEY=
 
 # คีย์ ElevenLabs (เสียงพากย์คุณภาพสูง ไม่ใส่ก็ได้) — elevenlabs.io → Developers → API Keys
 ELEVENLABS_API_KEY=
+# คีย์ Paxa Labs (เสียงไทยราคาถูก ไม่ใส่ก็ได้) — paxalabs.com → เข้าสู่ระบบ → API keys
+PAXA_API_KEY=
 
 # คีย์ Claude (เสียเงิน ไม่ใส่ก็ได้) — ขึ้นต้น sk-ant-
 ANTHROPIC_API_KEY=
