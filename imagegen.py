@@ -25,6 +25,9 @@ STYLES = {
                                        "soft brush strokes, atmospheric, no text"),
     "3d": ("การ์ตูน 3 มิติ", "3D animated feature film still, stylized characters with big expressive eyes, "
                          "soft global illumination, subsurface skin, cinematic depth of field, vibrant colors, highly detailed 3D render"),
+    "2d": ("การ์ตูน 2 มิติ (แบบนิทาน/การ์ตูนทีวี)", "2D cartoon animation still, hand-drawn cel animation style, "
+                                              "clean bold outlines, flat cel shading, expressive characters, "
+                                              "vibrant colors, painted storybook background, no text"),
     "flat": ("ภาพกราฟิกแบน", "flat vector illustration, minimal, bold colors"),
 }
 
