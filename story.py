@@ -116,9 +116,9 @@ MOOD_STYLE = {
     "hook": {"cam": ["punch"], "tr": "circleopen", "flash": True, "sfx": "whoosh"},
     "calm": {"cam": ["zoom_in", "pan_right", "pan_left"], "tr": "fade"},
     "info": {"cam": ["zoom_in", "pan_up", "pan_right"], "tr": "slideup"},
-    "exciting": {"cam": ["pan_shake"], "tr": "slideleft", "sfx": "whoosh",
+    "exciting": {"cam": ["pan_right", "pan_left"], "tr": "slideleft", "sfx": "whoosh",
                  "color": "eq=contrast=1.08:saturation=1.15"},
-    "shock": {"cam": ["punch_shake"], "tr": "fadewhite", "flash": True, "sfx": "hit",
+    "shock": {"cam": ["punch"], "tr": "fadewhite", "flash": True, "sfx": "hit",
               "color": "eq=contrast=1.12"},
     "sad": {"cam": ["zoom_out"], "tr": "fadeblack", "color": "eq=saturation=0.65:brightness=-0.03"},
     "happy": {"cam": ["pan_up", "zoom_in"], "tr": "smoothleft", "color": "eq=saturation=1.18:brightness=0.02"},
@@ -1280,13 +1280,10 @@ def _motion(kind: str, W: int, H: int, D: float, color: str = "", full: bool = F
     elif kind in ("pan_up", "pan_down"):
         z, cx = "1.14", "0.5"
         cy = f"(1-{u})" if kind == "pan_up" else u
-    elif kind in ("punch", "punch_shake"):
+    elif kind in ("punch", "punch_shake"):  # ไม่สั่นจอแล้ว (บอสไม่ชอบ) — ซูมกระชากอย่างเดียว
         z, cx, cy = f"(1.06+0.12*min(t/0.3,1)+0.04*{u})", "0.5", "0.5"
-        if kind == "punch_shake":
-            sx, sy = "22*sin(t*47)*max(0,1-t/0.8)", "22*cos(t*41)*max(0,1-t/0.8)"
-    elif kind == "pan_shake":
+    elif kind == "pan_shake":  # เดิม เลื่อน+สั่น → เลื่อนเร็วนุ่มๆ ไม่สั่น
         z, cx, cy = "1.18", f"(0.15+0.7*{u})", "0.5"
-        sx, sy = "5*sin(t*23)", "5*sin(t*17)"
     else:  # zoom_in
         z, cx, cy = f"(1+0.10*{u})", "0.5", "0.5"
     if D > SECOND_SHOT:  # มุมที่ 2: ตัดไปภาพใกล้ช่วงครึ่งหลัง แล้วซูมช้าๆ ต่อ
@@ -1451,15 +1448,15 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
         else:
             cw, ch, cx0, cy0 = W - 80, int(H * (0.5 if vertical else 0.8)), 40, int(H * (0.16 if vertical else 0.08))
         u = min(W, H) / 1080 * (1.0 if vertical else 1.7)
-        if scene.get("badge"):
-            ass.events.append(f"Dialogue: 2,{P._ass_time(0.45)},{P._ass_time(D)},GBox,,0,0,0,,"
-                              f"{{\\an4\\pos({cx0 + int(28 * u)},{cy0 + ch - int(20 * u)})\\fs{int(34 * u)}\\bord{int(12 * u)}"
-                              f"\\fscx60\\fscy60\\t(0,160,\\fscx100\\fscy100)\\fad(150,200)}}{P.ass_text(scene['badge'])}")
+        top = (cy0 + int(28 * u)) if frame == "card" else int(H * (0.185 if vertical else 0.09))
+        if scene.get("badge"):  # มุมบนซ้ายของภาพ (ไม่ทับการ์ดกราฟิกด้านล่าง)
+            G.badge(ass, scene["badge"], cx0 + int(28 * u), top, 0.45, D, u)
         if scene.get("quote"):
-            ass.events.append(f"Dialogue: 2,{P._ass_time(0.8)},{P._ass_time(D)},Head,,0,0,0,,"
-                              f"{{\\an5\\pos({W // 2},{cy0 + int(20 * u)})\\fs{int(44 * u)}\\frz2"
-                              f"\\fscx50\\fscy50\\t(0,180,\\fscx108\\fscy108)\\t(180,300,\\fscx100\\fscy100)\\fad(150,200)}}"
-                              f"“{P.ass_text(scene['quote'])}”")
+            qy = top + int((150 if scene.get("badge") else 60) * u) + int(70 * u)
+            if vertical or frame == "card":
+                G.quote(ass, scene["quote"], cx0 + cw // 2, qy, 0.8, D, u, cw - 80 * u)
+            else:  # แนวนอน: ฝั่งซ้าย (ฝั่งขวาเป็นที่ของการ์ดกราฟิก)
+                G.quote(ass, scene["quote"], int(W * 0.3), qy, 0.8, D, u, W * 0.5)
     if studio and not has_g:  # ประกายวิ้งๆ รอบสินค้า
         G.sparkles(ass, 0.6, D, W / 2, H * 0.47, W * 0.3, i)
     if has_g:  # โมชันกราฟิกช่วยให้เข้าใจ
@@ -1700,7 +1697,7 @@ def _scene_key(sc, i, src, narr, *opts) -> str:
     return _sha(keep, i, _file_sig(src), _file_sig(narr) if narr else "", opts, RENDER_VERSION)
 
 
-RENDER_VERSION = 3  # เปลี่ยนเมื่อแก้หน้าตาฉาก → ของในแคชเก่าใช้ไม่ได้
+RENDER_VERSION = 4  # เปลี่ยนเมื่อแก้หน้าตาฉาก → ของในแคชเก่าใช้ไม่ได้
 
 
 def _tts_cached(texts, workdir, cache, voice, rate, tone, progress):

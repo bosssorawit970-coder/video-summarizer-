@@ -1315,7 +1315,7 @@ class Ass:
         # Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
         self.style("Sub", f, u * 0.034, white, black, _ass_color("000000", 0x60), 1, 1, 4.5, 1, 2,
                    40, 40, int(H * (0.14 if vertical else 0.06)))
-        self.style("Head", f, u * 0.040, white, _ass_color("D9480F"), _ass_color("D9480F"), 1, 3, 18, 0, 8,
+        self.style("Head", f, u * 0.040, white, _ass_color("0B1020", 0x30), _ass_color("0B1020", 0x30), 1, 3, 20, 0, 8,
                    60, 60, 0)
         self.style("Brand", f, u * 0.024, _ass_color("FFFFFF", 0x14), black, black, 1, 1, 3, 0, 7,
                    40, 40, int(H * (0.065 if vertical else 0.035)))

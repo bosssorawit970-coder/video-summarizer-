@@ -15,7 +15,29 @@ import pipeline as P
 TYPES = {"stat": "ตัวเลขเด่น", "compare": "แท่งเปรียบเทียบ", "list": "หัวข้อย่อย", "keyword": "คำสำคัญ",
          "score": "ป้ายสกอร์"}
 ACCENTS = ["FFD43B", "4DD4FF", "FF7AB6", "7CF29A"]
-CARD, WHITE, DARK = "101828", "FFFFFF", "1A1A1A"
+CARD, WHITE, DARK = "0B1020", "FFFFFF", "111318"
+MUTED, TRACK = "C9D1E0", "2A3247"  # ตัวหนังสือรอง · รางแท่งกราฟ
+
+
+def text_w(text: str, px: float) -> float:
+    """กว้างของข้อความ (พิกเซล) ไว้วาดกล่องมุมมนพอดีตัวหนังสือ — วัดจากฟอนต์จริงถ้ามี ไม่งั้นประมาณ"""
+    try:
+        from PIL import ImageFont
+        f = None
+        for c in (P.FONT_DIR / "Kanit-Bold.ttf", P.FONT_DIR / "Kanit-SemiBold.ttf"):
+            if c.exists():
+                f = str(c)
+                break
+        f = f or P.thai_font_file(True)
+        if f:
+            import re as _re
+            base = _re.sub("[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]", "", text)  # สระบน/ล่าง วรรณยุกต์ ไม่กินที่
+            ft = ImageFont.truetype(f, 100)
+            asc, desc = ft.getmetrics()  # libass ย่อฟอนต์ให้ (ascent+descent) = ขนาด \\fs
+            return ft.getlength(base) * px / (asc + desc) * 1.03
+    except Exception:
+        pass
+    return len(text) * px * 0.52
 
 GRAPHIC_RULES = """- "graphic": an optional small motion graphic that helps viewers UNDERSTAND this scene, or null.
   Use it only when the narration has a number, a comparison, a list of points, or one key idea — roughly 1 in 3 scenes, never two "keyword" in a row.
@@ -174,7 +196,8 @@ class _Draw:
             self.ass.events.append(f"Dialogue: {layer},{P._ass_time(a)},{P._ass_time(b)},{style},,0,0,0,,{{{tags}}}{body}")
 
     def shape(self, layer, a, b, x, y, draw, color, alpha=0, extra="") -> None:
-        self.ev(layer, a, b, f"\\an7\\pos({int(x)},{int(y)})\\bord0\\shad0\\1c{_c(color)}\\1a&H{alpha:02X}&{extra}\\p1",
+        pos = "" if "\\move(" in extra else f"\\pos({int(x)},{int(y)})"
+        self.ev(layer, a, b, f"\\an7{pos}\\bord0\\shad0\\1c{_c(color)}\\1a&H{alpha:02X}&{extra}\\p1",
                 draw + "{\\p0}")
 
     def text(self, layer, a, b, x, y, text, size, color=WHITE, align=7, extra="", bold=True, raw=False) -> None:
@@ -183,11 +206,22 @@ class _Draw:
         self.ev(layer, a, b, f"\\an{align}{pos}\\fn{self.font}\\fs{int(size * self.s)}\\b{1 if bold else 0}"
                              f"\\bord{max(2, int(3 * self.s))}\\3c{_c('000000')}\\shad0\\1c{_c(color)}{extra}", body)
 
+    def clean(self, layer, a, b, x, y, text, size, color=WHITE, align=7, extra="", raw=False) -> None:
+        """ตัวหนังสือแบบใหม่: ไม่มีขอบดำหนา (อยู่บนการ์ดเข้มแล้ว) มีเงานุ่มๆ นิดเดียว"""
+        body = text if raw else P.ass_text(text)
+        pos = "" if "\\move(" in extra else f"\\pos({int(x)},{int(y)})"
+        self.ev(layer, a, b, f"\\an{align}{pos}\\fn{self.font}\\fs{int(size * self.s)}\\b1\\bord0"
+                             f"\\shad{max(1, int(2 * self.s))}\\4c{_c('000000')}\\4a&H90&\\1c{_c(color)}{extra}", body)
+
+    def pill(self, layer, a, b, x, y, w, h, color, alpha=0, extra="") -> None:
+        self.shape(layer, a, b, x, y, _rect(w, h, h / 2), color, alpha, extra)
+
     def card(self, h: float) -> tuple[float, float, float, float]:
-        """กรอบพื้นหลังกราฟิก: แนวตั้ง = ส่วนล่างของภาพ (เหนือซับ) · แนวนอน = มุมขวา"""
+        """การ์ดแบบกระจกเข้ม: เงานุ่มใต้การ์ด + ขอบบางสว่าง + แถบสีเล็กมุมบน · เลื่อนขึ้นเบาๆ ตอนโผล่
+        แนวตั้ง = ส่วนล่างของภาพ (เหนือซับ) · แนวนอน = มุมขวา"""
         s = self.s
         if self.vertical:
-            w = 900 * s
+            w = 920 * s
             x0 = (self.W - w) / 2
             y0 = self.H * self.bottom - h * s
         else:
@@ -195,9 +229,17 @@ class _Draw:
             x0 = self.W - w - 60 * s
             y0 = self.H * 0.74 - h * s
         hh = h * s
-        a = self.t0
-        self.shape(0, a, self.t1, x0, y0, _rect(w, hh, 28 * s), CARD, 0x38, "\\fad(220,250)")
-        self.shape(1, a, self.t1, x0, y0 + 22 * s, _rect(12 * s, hh - 44 * s, 6 * s), ACCENTS[0], 0, "\\fad(220,250)")
+        a, r = self.t0, 40 * s
+        rise = int(26 * s)
+        def mv(x, y):
+            return f"\\move({int(x)},{int(y + rise)},{int(x)},{int(y)},0,320)\\fad(200,250)"
+        self.shape(0, a, self.t1, 0, 0, _rect(w, hh, r), "000000", 0x70,
+                   mv(x0, y0 + 18 * s) + f"\\blur{int(22 * s)}")                       # เงานุ่ม
+        self.shape(0, a, self.t1, 0, 0, _rect(w + 3 * s, hh + 3 * s, r + 2 * s), "FFFFFF", 0xD8,
+                   mv(x0 - 1.5 * s, y0 - 1.5 * s))                                    # ขอบบางสว่าง
+        self.shape(1, a, self.t1, 0, 0, _rect(w, hh, r), CARD, 0x30, mv(x0, y0))       # ตัวการ์ด
+        self.shape(2, a + 0.15, self.t1, 0, 0, _rect(64 * s, 8 * s, 4 * s), ACCENTS[0], 0,
+                   mv(x0 + 44 * s, y0 + 24 * s) + "\\fscx0\\t(0,350,\\fscx100)")    # แถบสีเล็กมุมบน
         return x0, y0, w, hh
 
 
@@ -298,92 +340,143 @@ def render(ass: "P.Ass", g: dict | None, t0: float, t1: float, bottom: float = 0
     d.bottom = bottom
     s, fade = d.s, "\\fad(200,250)"
     t = g["type"]
+    pop_in = "\\fscx70\\fscy70\\t(0,220,0.5,\\fscx100\\fscy100)"
     if t == "stat":
-        x0, y0, w, h = d.card(330)
+        has_label = bool(g.get("label"))
+        x0, y0, w, h = d.card(330 if has_label else 250)
         cues.append((t0, "whoosh"))
         cx = x0 + w / 2
         unit = g.get("unit") or ""
         val = _num(g["value"])
         steps, dur = 16, 0.9
-        unit_tag = f"{{\\fs{int(62 * s)}\\1c{_c(WHITE)}}} {P.ass_text(unit)}" if unit else ""
+        unit_tag = f"{{\\fs{int(58 * s)}\\1c{_c(WHITE)}}} {P.ass_text(unit)}" if unit else ""
+        ny = y0 + 52 * s
+        glow = f"\\blur{int(14 * s)}\\1a&H90&"
         if val is not None and abs(val) > 0:
             for k in range(steps):  # นับเลขขึ้น (ค่อยๆ ช้าลงตอนใกล้ถึง)
                 p = 1 - (1 - (k + 1) / steps) ** 3
                 a = t0 + 0.25 + dur * k / steps
                 b = t0 + 0.25 + dur * (k + 1) / steps if k < steps - 1 else t1
-                d.text(2, a, b, cx, y0 + 40 * s, P.ass_text(_fmt(val * p, g["value"])) + unit_tag, 150,
-                       ACCENTS[0], 8, "\\fad(0,250)" if k == steps - 1 else "", raw=True)
+                num = P.ass_text(_fmt(val * p, g["value"]))
+                end = "\\fad(0,250)" if k == steps - 1 else ""
+                d.clean(3, a, b, cx, ny, num, 160, ACCENTS[0], 8, glow + end, raw=True)   # เรืองแสงหลังตัวเลข
+                d.clean(4, a, b, cx, ny, num + unit_tag, 160, ACCENTS[0], 8, end, raw=True)
                 if k % 3 == 0 and k < steps - 1:
                     cues.append((a, "tick"))
             cues.append((t0 + 0.25 + dur, "ding"))
         else:
-            d.text(2, t0 + 0.25, t1, cx, y0 + 40 * s, P.ass_text(g["value"]) + unit_tag, 130, ACCENTS[0], 8,
-                   "\\fscx70\\fscy70\\t(0,250,\\fscx100\\fscy100)" + fade, raw=True)
+            d.clean(4, t0 + 0.25, t1, cx, ny, P.ass_text(g["value"]) + unit_tag, 130, ACCENTS[0], 8,
+                    pop_in + fade, raw=True)
             cues.append((t0 + 0.25, "pop"))
-        if g.get("label"):
-            d.text(2, t0 + 0.6, t1, cx, y0 + h - 40 * s, g["label"], 58, WHITE, 2,
-                   f"\\move({int(cx)},{int(y0 + h - 10 * s)},{int(cx)},{int(y0 + h - 40 * s)},0,300){fade}")
+        if has_label:
+            ly = y0 + h - 44 * s
+            d.clean(4, t0 + 0.6, t1, cx, ly, g["label"], 52, MUTED, 2,
+                    f"\\move({int(cx)},{int(ly + 24 * s)},{int(cx)},{int(ly)},0,300){fade}")
     elif t == "compare":
         items = g["items"][:4]
-        row = 128
-        x0, y0, w, h = d.card(60 + row * len(items))
+        row = 132
+        x0, y0, w, h = d.card(78 + row * len(items))
         cues.append((t0, "whoosh"))
         top = max(i["value"] for i in items) or 1
-        maxw = w - 120 * s
+        pad = 56 * s
+        maxw = w - 2 * pad
         unit = g.get("unit") or ""
         for k, it in enumerate(items):
             a = t0 + 0.3 + 0.35 * k
-            y = y0 + (34 + row * k) * s
+            y = y0 + (56 + row * k) * s
             color = ACCENTS[k % len(ACCENTS)]
             cues.append((a, "rise"))
-            d.text(2, a, t1, x0 + 50 * s, y - 4 * s, it["label"], 50, WHITE, 7, fade)
-            bw = max(14 * s, maxw * it["value"] / top)
-            d.shape(2, a, t1, x0 + 50 * s, y + 58 * s, _rect(bw, 38 * s, 10 * s), color, 0,
-                    f"\\fscx0\\t(0,700,0.6,\\fscx100){fade}")
             label = f"{_fmt(it['value'], str(it['value']) if it['value'] % 1 else '0')} {unit}".strip()
-            if bw > maxw * 0.7:  # แท่งยาว → ใส่ตัวเลขไว้ในแท่ง (ไม่ล้นกรอบ)
-                d.text(3, a + 0.7, t1, x0 + 50 * s + bw - 14 * s, y + 56 * s, label, 40, DARK, 9,
-                       "\\bord0" + fade)
-            else:
-                d.text(3, a + 0.7, t1, x0 + 50 * s + bw + 16 * s, y + 56 * s, label, 42, color, 7, fade)
+            d.clean(4, a, t1, x0 + pad, y, it["label"], 46, WHITE, 7, fade)
+            d.clean(4, a + 0.5, t1, x0 + w - pad, y, label, 46, color, 9, fade)
+            by = y + 66 * s
+            d.pill(3, a, t1, x0 + pad, by, maxw, 22 * s, TRACK, 0x20, fade)          # ราง
+            bw = max(22 * s, maxw * it["value"] / top)
+            d.pill(4, a, t1, x0 + pad, by, bw, 22 * s, color, 0, f"\\fscx0\\t(0,750,0.5,\\fscx100){fade}")
     elif t == "list":
         items = g["items"][:4]
-        row = 96
-        x0, y0, w, h = d.card(50 + row * len(items))
+        row = 100
+        x0, y0, w, h = d.card(70 + row * len(items))
         cues.append((t0, "whoosh"))
         for k, item in enumerate(items):
             a = t0 + 0.3 + 0.45 * k
             cues.append((a, "pop"))
-            y = y0 + (30 + row * k) * s
-            x = x0 + 60 * s
-            tx = x + 50 * s
-            d.shape(2, a, t1, x, y + 20 * s, _rect(26 * s, 26 * s, 7 * s), ACCENTS[k % len(ACCENTS)], 0,
-                    "\\fscx0\\fscy0\\t(0,200,\\fscx100\\fscy100)" + fade)
-            d.text(2, a, t1, tx, y - 6 * s, item, 60, WHITE, 7,
-                   f"\\move({int(tx - 40 * s)},{int(y)},{int(tx)},{int(y)},0,260)" + fade)
+            y = y0 + (48 + row * k) * s
+            x = x0 + 56 * s
+            color = ACCENTS[k % len(ACCENTS)]
+            dot = 58 * s
+            d.shape(3, a, t1, x, y, _rect(dot, dot, dot / 2), color, 0,
+                    "\\org(0,0)\\fscx0\\fscy0\\t(0,220,0.5,\\fscx100\\fscy100)" + fade)       # วงกลมเลขข้อ
+            d.clean(4, a + 0.08, t1, x + dot / 2, y + dot / 2, str(k + 1), 36, DARK, 5, "\\shad0" + fade)
+            tx = x + dot + 28 * s
+            d.clean(4, a, t1, tx, y + dot / 2, item, 54, WHITE, 4,
+                    f"\\move({int(tx - 36 * s)},{int(y + dot / 2)},{int(tx)},{int(y + dot / 2)},0,280)" + fade)
     elif t == "keyword":
         cx = d.W / 2 if d.vertical else d.W - 440 * s
         cy = d.H * ((bottom - 0.07) if d.vertical else 0.66)
-        size = 92 if len(g["text"]) <= 12 else 80 if len(g["text"]) <= 18 else 66
-        # กล่องสีพอดีข้อความ (BorderStyle 3 = libass วาดกล่องรอบตัวหนังสือให้เอง)
-        d.ev(2, t0 + 0.25, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\fs{int(size * s)}\\bord{int(18 * s)}"
-                               f"\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)"
-                               f"\\frz-3{fade}", P.ass_text(g["text"]), style="GBox")
-        cues.append((t0 + 0.25, "pop"))
+        size = 84 if len(g["text"]) <= 12 else 72 if len(g["text"]) <= 18 else 60
+        tw = text_w(g["text"], size * s)
+        pw, ph = tw + 96 * s, size * s * 1.55
+        a = t0 + 0.25
+        zoom = "\\fscx60\\fscy60\\t(0,200,0.5,\\fscx104\\fscy104)\\t(200,320,\\fscx100\\fscy100)"
+        d.shape(1, a, t1, cx - pw / 2, cy - ph / 2 + 14 * s, _rect(pw, ph, ph / 2), "000000", 0x60,
+                f"\\blur{int(18 * s)}" + fade)
+        d.ev(2, a, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\bord0\\shad0\\1c{_c(ACCENTS[0])}\\p1" + zoom + fade,
+             _rect(pw, ph, ph / 2).replace("m 0 0", "m 0 0", 1) + "{\\p0}")
+        d.clean(3, a, t1, cx, cy, g["text"], size, DARK, 5, "\\shad0" + zoom + fade)
+        cues.append((a, "pop"))
     elif t == "score":
-        x0, y0, w, h = d.card(230)
+        x0, y0, w, h = d.card(250)
         cues.append((t0, "whoosh"))
-        cx, cy = x0 + w / 2, y0 + 70 * s
-        d.text(2, t0 + 0.2, t1, x0 + w * 0.17, cy, g["left"], 46, WHITE, 8, fade)
-        d.text(2, t0 + 0.2, t1, x0 + w * 0.83, cy, g["right"], 46, WHITE, 8, fade)
-        for k, (v, x) in enumerate(((g["a"], cx - 95 * s), (g["b"], cx + 95 * s))):
+        cx, cy = x0 + w / 2, y0 + 76 * s
+        d.clean(4, t0 + 0.2, t1, x0 + w * 0.2, cy, g["left"], 44, MUTED, 8, fade)
+        d.clean(4, t0 + 0.2, t1, x0 + w * 0.8, cy, g["right"], 44, MUTED, 8, fade)
+        for k, (v, x) in enumerate(((g["a"], x0 + w * 0.2), (g["b"], x0 + w * 0.8))):
             a = t0 + 0.45 + 0.35 * k
-            d.text(3, a, t1, x, cy + 90 * s, str(v), 140, ACCENTS[0], 5,
-                   "\\fscx40\\fscy40\\t(0,180,\\fscx115\\fscy115)\\t(180,300,\\fscx100\\fscy100)" + fade)
+            d.clean(4, a, t1, x, cy + 100 * s, str(v), 130, ACCENTS[0], 5,
+                    "\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)" + fade)
             cues.append((a, "pop"))
-        d.text(3, t0 + 0.45, t1, cx, cy + 90 * s, "-", 110, WHITE, 5, fade)
+        d.pill(3, t0 + 0.45, t1, cx - 30 * s, cy + 92 * s, 60 * s, 14 * s, TRACK, 0, fade)
         cues.append((t0 + 1.2, "ding"))
     return [(round(max(0.0, c), 3), n) for c, n in cues if c < t1 - 0.1]
+
+
+def badge(ass: "P.Ass", text: str, x: float, y: float, t0: float, t1: float, u: float) -> None:
+    """ป้ายวันที่·สถานที่ แบบเม็ดยาเข้ม + จุดสีเหลือง เลื่อนเข้าจากซ้าย (มุมบนซ้ายของภาพ)"""
+    d = _Draw(ass, 0, t1)
+    size = 38 * u
+    tw = text_w(text, size)
+    h = size * 1.75
+    w = tw + h * 0.9 + 44 * u
+    mv = f"\\move({int(x - 40 * u)},{int(y)},{int(x)},{int(y)},0,300)\\fad(180,220)"
+    d.ev(1, t0, t1, f"\\an7{mv}\\bord0\\shad0\\1c{_c('000000')}\\1a&H70&\\blur{int(10 * u)}\\p1",
+         _rect(w, h, h / 2) + "{\\p0}")
+    d.ev(2, t0, t1, f"\\an7{mv}\\bord0\\shad0\\1c{_c(CARD)}\\1a&H38&\\p1", _rect(w, h, h / 2) + "{\\p0}")
+    dot = h * 0.34
+    d.ev(3, t0, t1, f"\\an7\\move({int(x - 40 * u + h * 0.42)},{int(y + (h - dot) / 2)},{int(x + h * 0.42)},"
+                    f"{int(y + (h - dot) / 2)},0,300)\\fad(180,220)\\bord0\\shad0\\1c{_c(ACCENTS[0])}\\p1",
+         _rect(dot, dot, dot / 2) + "{\\p0}")
+    tx = x + h * 0.42 + dot + 18 * u
+    d.ev(3, t0, t1, f"\\an4\\move({int(tx - 40 * u)},{int(y + h / 2)},{int(tx)},{int(y + h / 2)},0,300)\\fad(180,220)"
+                    f"\\fn{d.font}\\fs{int(size)}\\b1\\bord0\\shad0\\1c{_c(WHITE)}", P.ass_text(text))
+
+
+def quote(ass: "P.Ass", text: str, cx: float, cy: float, t0: float, t1: float, u: float, maxw: float) -> None:
+    """คำพูดดัง: ตัวหนังสือขาวตัวใหญ่ บนแถบเงาเข้มนุ่มๆ + เครื่องหมายคำพูดสีเหลืองตัวโต"""
+    d = _Draw(ass, 0, t1)
+    size = 58 * u
+    while size > 32 * u and text_w(text, size) > maxw * 0.86:
+        size -= 2 * u
+    tw = min(maxw, text_w(text, size))
+    bw, bh = tw + 120 * u, size * 2.1
+    fade = "\\fad(220,250)"
+    d.ev(1, t0, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\bord0\\shad0\\1c{_c('000000')}\\1a&H68&"
+                    f"\\blur{int(26 * u)}{fade}\\p1", _rect(bw, bh, bh / 2) + "{\\p0}")
+    d.ev(2, t0 + 0.05, t1, f"\\an5\\pos({int(cx)},{int(cy - bh * 0.5)})\\fn{d.font}\\fs{int(size * 3)}\\b1"
+                           f"\\bord0\\shad0\\1c{_c(ACCENTS[0])}\\fscx50\\fscy50\\t(0,220,0.5,\\fscx100\\fscy100){fade}", "“")
+    d.ev(3, t0 + 0.12, t1, f"\\an5\\pos({int(cx)},{int(cy)})\\fn{d.font}\\fs{int(size)}\\b1\\bord0"
+                           f"\\shad{max(1, int(2 * u))}\\4c{_c('000000')}\\4a&H80&\\1c{_c(WHITE)}"
+                           f"\\fscx92\\fscy92\\t(0,260,0.5,\\fscx100\\fscy100){fade}", P.ass_text(text))
 
 
 # ───────────────────────── แอนิเมชันตัวหนังสือ (โหมดไม่มีภาพจริง) ─────────────────────────
