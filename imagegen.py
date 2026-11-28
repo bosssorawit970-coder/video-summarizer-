@@ -245,6 +245,9 @@ def _openverse_urls(query: str, n: int, lang: str = "en") -> list[str]:
     return [r["url"] for r in res if r.get("url")]
 
 
+_commons_last = [0.0]
+
+
 def commons_photos(query: str, outs: list[Path]) -> list[Path]:
     """ภาพจริงจาก Wikimedia Commons (สนาม นักกีฬา สถานที่ เหตุการณ์ บุคคลสำคัญ) — สัญญาอนุญาตเสรี ต้องให้เครดิต
     บันทึกเป็น PNG + ไฟล์ .credit (ผู้ถ่าย · สัญญาอนุญาต · ลิงก์) ไว้ใส่ในคำอธิบายคลิป"""
@@ -255,12 +258,24 @@ def commons_photos(query: str, outs: list[Path]) -> list[Path]:
     params = {"action": "query", "format": "json", "generator": "search", "gsrnamespace": 6,
               "gsrsearch": f"{q} filetype:bitmap", "gsrlimit": max(6, len(outs) * 3), "prop": "imageinfo",
               "iiprop": "url|extmetadata|mime|size", "iiurlwidth": 1600}
-    try:
-        pages = (_get_json("https://commons.wikimedia.org/w/api.php?" + urllib.parse.urlencode(params))
-                 .get("query") or {}).get("pages") or {}
-    except Exception as e:
-        print("ค้น Wikimedia Commons ไม่ได้:", e)
-        return []
+    import time as _t
+    pages = {}
+    for attempt in range(4):  # Wikimedia จำกัดความถี่ (429) → รอแล้วลองใหม่ ช้าลงเรื่อยๆ
+        try:
+            _t.sleep(max(0.0, _commons_last[0] + 1.2 - _t.time()))  # เว้นระยะระหว่างคำขอ
+            _commons_last[0] = _t.time()
+            pages = (_get_json("https://commons.wikimedia.org/w/api.php?" + urllib.parse.urlencode(params))
+                     .get("query") or {}).get("pages") or {}
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < 3:
+                _t.sleep(4 * (attempt + 1))
+                continue
+            print("ค้น Wikimedia Commons ไม่ได้:", e)
+            return []
+        except Exception as e:
+            print("ค้น Wikimedia Commons ไม่ได้:", e)
+            return []
     got = []
     for pg in sorted(pages.values(), key=lambda x: x.get("index", 99)):
         if len(got) >= len(outs):

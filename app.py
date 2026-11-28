@@ -275,7 +275,10 @@ def analyze_story(jid: str) -> dict:
                               strict=bool(source), longform=bool(o.get("longform")))
     if source:
         plan["source"] = {k: source[k] for k in ("site", "url", "title")}
-    save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มวาดภาพ")
+    if o.get("editorial"):  # 📰 สารคดีนิตยสาร: ทุกฉากใช้ภาพจริง (Wikimedia Commons ก่อน) ไม่ให้ AI วาดหน้าคนจริง
+        for s_ in plan["scenes"]:
+            s_["real"] = True
+    save(jid, plan=plan, step="images", progress=20, message=f"ได้บท {len(plan['scenes'])} ฉาก — เริ่มหาภาพ")
     ok = ST.draw_images(plan, d / "scenes", o["render"].get("layout", "vertical_crop"), o.get("style", "cinematic"),
                         lambda pct, msg: save(jid, step="images", progress=20 + pct * 0.7, message=msg),
                         source=o.get("image_source", "ai"))
@@ -724,7 +727,9 @@ def job_opts(form) -> dict:
         opts["style"] = str(form.get("style") or "") if form.get("style") in imagegen.STYLES else "cinematic"
         opts["script_mode"] = "rewrite" if form.get("script_mode") == "rewrite" or opts.get("source_url") \
             else "verbatim"
-        opts["image_source"] = "photo" if form.get("image_source") == "photo" else "ai"
+        opts["image_source"] = "photo" if form.get("image_source") in ("photo", "editorial") else "ai"
+        if form.get("image_source") == "editorial":
+            opts["editorial"] = True
         opts["graphics"] = _bool(form.get("graphics"), True)
         opts["videos"] = _bool(form.get("videos"), False) and imagegen.videos_available()
         opts["verify"] = _bool(form.get("verify"), True)  # 🧠 ตรวจภาพทุกฉาก (ใช้โควตา Gemini เพิ่มฉากละ 1-3 ครั้ง)
@@ -736,6 +741,8 @@ def job_opts(form) -> dict:
             opts["research"] = opts["text"].strip()[:200]
             opts["script_mode"] = "rewrite"
     opts["render"] = _render_opts(form, opts["mode"])
+    if opts.get("editorial"):
+        opts["render"]["frame"] = "editorial"
     if opts.get("longform"):
         opts["render"]["layout"] = "original"  # 16:9
     if opts["mode"] == "game":
@@ -1020,7 +1027,7 @@ def _render_opts(body, mode: str = "talk") -> dict:
         "gfx_sfx": _bool(body.get("gfx_sfx"), True),
         "ambience": _bool(body.get("ambience"), True),
         "ai_motion": _bool(body.get("ai_motion"), False),
-        "frame": body.get("frame") if body.get("frame") in ("square", "card") else "full",
+        "frame": body.get("frame") if body.get("frame") in ("square", "card", "editorial") else "full",
         "less_text": _bool(body.get("less_text"), True),
         "cover": _bool(body.get("cover"), True),
         "music": str(body.get("music") or "") if asset_path("music", str(body.get("music") or "")) else "",

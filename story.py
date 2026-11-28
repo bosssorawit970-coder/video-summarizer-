@@ -1404,6 +1404,15 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     vertical = H > W
     nd = P.probe(narr)["duration"] if narr else 0.0
     D = max(2.5, nd + LEAD + TAIL + float(scene.get("pause") or 0))  # คลิปยาว: เว้นจังหวะหายใจ/จบบท
+    ed = False
+    if frame == "editorial" and not img.name.startswith("anim_"):  # 📰 สารคดีนิตยสาร → ทำภาพเคลื่อนไหวของฉากก่อน
+        try:
+            import editorial as ED
+            img = ED.build(img, scene, i, W, H, D, workdir, img.parent, scene.get("_ed", ""), scene.get("_title", ""))
+            ed = True
+        except Exception as e:
+            print("ทำฉากสารคดีนิตยสารไม่ได้ ใช้แบบเต็มจอแทน:", str(e)[-300:])
+        frame = "full"
     video = is_video(img.name)
     sty = scene_style(scene, i)
     anim = img.name.startswith("anim_")  # ฉากแอนิเมชันกราฟิก (ไม่มีภาพจริง): พื้นหลังเต็มจอลอยช้าๆ
@@ -1425,14 +1434,14 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
     head = (scene.get("headline") or "").strip() if extras else ""
     # ตัวหนังสือน้อย: มีซับแล้ว → ไม่ใส่ป้ายหัวข้อ/ป้ายคำเด่นซ้ำ (เหลือซับ + กราฟิกตัวเลข/รายการที่ให้ข้อมูลเพิ่ม)
     sub_on = bool(subtitles and narr and scene.get("narration"))
-    if less_text and sub_on and not anim:
+    if (less_text and sub_on and not anim) or ed:  # ฉากนิตยสารมีตัวหนังสือใหญ่ในภาพแล้ว
         head = ""
     kin_cues = []
     pcard = img.parent / scene["product_img"] if anim and extras and scene.get("product_img") else None
     if pcard is not None and not pcard.exists():
         pcard = None
     gfx = scene.get("graphic")
-    if less_text and sub_on and gfx and gfx.get("type") == "keyword":
+    if (less_text and sub_on or ed) and gfx and gfx.get("type") == "keyword":
         gfx = None
     has_g = bool(extras and gfx and not gfx.get("off"))
     studio = bool(pcard is not None and scene.get("studio"))
@@ -1441,7 +1450,7 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
                              shapes=not studio)
     elif head:
         ass.headline(P._wrap(head, 16 if vertical else 30), 0, D, int(H * (0.105 if vertical else 0.07)))
-    if extras and not anim and (scene.get("badge") or scene.get("quote")):
+    if extras and not anim and (scene.get("badge") and not ed or scene.get("quote")):
         # ป้ายวันที่·สถานที่ (เหลือง มุมล่างซ้ายของภาพ) + คำพูดดัง (ส้ม บนภาพ) — แบบคลิปสารคดี
         if frame == "card":
             cw, ch, cx0, cy0 = card_geom(img, W, H, bool(gfx and not gfx.get("off")))
@@ -1449,10 +1458,12 @@ def render_scene(img: Path, scene: dict, i: int, narr: Path | None, out: Path, w
             cw, ch, cx0, cy0 = W - 80, int(H * (0.5 if vertical else 0.8)), 40, int(H * (0.16 if vertical else 0.08))
         u = min(W, H) / 1080 * (1.0 if vertical else 1.7)
         top = (cy0 + int(28 * u)) if frame == "card" else int(H * (0.185 if vertical else 0.09))
-        if scene.get("badge"):  # มุมบนซ้ายของภาพ (ไม่ทับการ์ดกราฟิกด้านล่าง)
+        if scene.get("badge") and not ed:  # มุมบนซ้ายของภาพ (ไม่ทับการ์ดกราฟิกด้านล่าง)
             G.badge(ass, scene["badge"], cx0 + int(28 * u), top, 0.45, D, u)
         if scene.get("quote"):
-            qy = top + int((150 if scene.get("badge") else 60) * u) + int(70 * u)
+            qy = top + int((150 if scene.get("badge") and not ed else 60) * u) + int(70 * u)
+            if ed:  # ฉากนิตยสาร: คำพูดอยู่ส่วนล่างของภาพ (ด้านบนเป็นที่ของชื่อตัวใหญ่)
+                qy = int(H * (0.62 if vertical else 0.7))
             if vertical or frame == "card":
                 G.quote(ass, scene["quote"], cx0 + cw // 2, qy, 0.8, D, u, cw - 80 * u)
             else:  # แนวนอน: ฝั่งซ้าย (ฝั่งขวาเป็นที่ของการ์ดกราฟิก)
@@ -1753,6 +1764,12 @@ def render_story(plan: dict, scene_dir: Path, workdir: Path, out: Path, *, voice
     cache = workdir.parent / "cache"  # อยู่ข้างนอก work (work ถูกล้างทุกครั้ง) — ทำใหม่/แก้บางฉาก ไม่ต้องทำทุกฉากซ้ำ
     narrs = _tts_cached(texts, workdir, cache, voice, rate, tone, progress)
     moving = ai_animate(scenes, scene_dir, progress) if ai_motion else {}
+    if frame == "editorial":  # เลือกเลย์เอาต์นิตยสารล่วงหน้า ไม่ให้ซ้ำฉากติดกัน
+        import editorial as ED
+        prev = ""
+        for i, s in enumerate(scenes):
+            s["_ed"] = prev = ED.pick_layout(s, i, prev)
+            s["_title"] = plan.get("title") or ""
     for i, s in enumerate(scenes):
         text, narr = texts[i], narrs[i]
         progress(30 + (i + 0.5) / n * 65, f"ทำแอนิเมชันฉากที่ {i + 1}/{n} ({MOODS.get(s.get('mood'), '')})")
